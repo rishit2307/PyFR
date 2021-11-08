@@ -106,7 +106,7 @@ class StdPIController(BaseStdController):
 
         # PI control values
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
-        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
+        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.2)
 
         # Estimate of previous error
         self._errprev = 1.0
@@ -171,6 +171,10 @@ class StdPIController(BaseStdController):
         while self.tcurr < t:
             # Decide on the time step
             dt = max(min(t - self.tcurr, self._dt, self.dtmax, self.cfl[-1]), self.dtmin)
+   
+
+
+                
                        
             # Take the step
             idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
@@ -192,10 +196,12 @@ class StdPIController(BaseStdController):
             if err < 1.0:
                 self._errprev = err
                 self._accept_step(dt, idxcurr, err=err)
+                
                 if self.nsteps >= nrej+10 and mean(self.err_1[nrej-1:self.nsteps]) < 0.8:
                     self.cfl.append(1.05*self.cfl[-1])
 
             else:
                 self._reject_step(dt, idxprev, err=err)
                 self.cfl.append(dt)
+                print(self.cfl)
                 nrej = self.nsteps
