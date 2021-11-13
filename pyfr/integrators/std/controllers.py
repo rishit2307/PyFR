@@ -6,6 +6,7 @@ from statistics import mean
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.mpiutil import get_comm_rank_root, get_mpi
 
+
 class BaseStdController(BaseStdIntegrator):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -15,6 +16,7 @@ class BaseStdController(BaseStdIntegrator):
 
         # Stats on the most recent step
         self.stepinfo = []
+
 
         # Fire off any event handlers if not restarting
         if not self.isrestart:
@@ -47,6 +49,7 @@ class BaseStdController(BaseStdIntegrator):
         # Clear the step info
         self.stepinfo = []
 
+
     def _reject_step(self, dt, idxold, err=None):
         if dt <= self.dtmin:
             raise RuntimeError('Minimum sized time step rejected')
@@ -57,8 +60,10 @@ class BaseStdController(BaseStdIntegrator):
 
         self._idxcurr = idxold
 
+
 class StdNoneController(BaseStdController):
     controller_name = 'none'
+
 
     @property
     def controller_needs_errest(self):
@@ -79,9 +84,11 @@ class StdNoneController(BaseStdController):
             self._accept_step(dt, idxcurr)
 
 
+
 class StdPIController(BaseStdController):
     controller_name = 'pi'
     err_1 = []
+
 
 
     def __init__(self, *args, **kwargs):
@@ -95,6 +102,7 @@ class StdPIController(BaseStdController):
         self.cfl = [self.dtmax]
         
 
+
         # Error tolerances
         self._atol = self.cfg.getfloat(sect, 'atol')
         self._rtol = self.cfg.getfloat(sect, 'rtol')
@@ -105,9 +113,11 @@ class StdPIController(BaseStdController):
             raise ValueError('Invalid error norm')
 
         # PI control values
-        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
-        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.2)
+        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
+        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
+        self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
 
+        print(self._alpha)
         # Estimate of previous error
         self._errprev = 1.0
 
@@ -167,14 +177,11 @@ class StdPIController(BaseStdController):
         nrej = 0
         expa = self._alpha / sord
         expb = self._beta / sord
+        expc = self._gamma / sord
         
         while self.tcurr < t:
             # Decide on the time step
-            dt = max(min(t - self.tcurr, self._dt, self.dtmax, self.cfl[-1]), self.dtmin)
-   
-
-
-                
+            dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
                        
             # Take the step
             idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
@@ -186,7 +193,12 @@ class StdPIController(BaseStdController):
             self.err_1.append(err)
 
             # Determine time step adjustment factor
-            fac = err**-expa * self._errprev**expb
+            if self.nsteps > 1:
+                fac = err**-expa * self._errprev**expb * (self.err_1[-2])**expc
+                
+            else:
+                fac = err**-expa * self._errprev**expb
+
             fac = min(maxf, max(minf, saff*fac))
 
             # Compute the size of the next step
@@ -196,12 +208,12 @@ class StdPIController(BaseStdController):
             if err < 1.0:
                 self._errprev = err
                 self._accept_step(dt, idxcurr, err=err)
-                
-                if self.nsteps >= nrej+10 and mean(self.err_1[nrej-1:self.nsteps]) < 0.8:
-                    self.cfl.append(1.05*self.cfl[-1])
+               # if self.nsteps >= nrej+10 and mean(self.err_1[nrej-1:self.nsteps]) < 0.8:
+                #    self.cfl.append(1.1*self.cfl[-1])
 
             else:
                 self._reject_step(dt, idxprev, err=err)
-                self.cfl.append(dt)
-                print(self.cfl)
-                nrej = self.nsteps
+                #self.cfl.append(dt)
+                #nrej = self.nsteps
+          
+
