@@ -1,0 +1,83 @@
+From 925c755d649aa02ee27f17e1cd4d5093cb0fd432 Mon Sep 17 00:00:00 2001
+From: Freddie Witherden <freddie@witherden.org>
+Date: Wed, 8 Apr 2015 18:28:28 +0100
+Subject: [PATCH] Rough GiMMiK support for the CUDA backend.
+
+Currently PyFR will always attempt to use GiMMiK even when it is
+not available or unlikely to be profitable.
+---
+ pyfr/backends/cuda/base.py   |  5 +++--
+ pyfr/backends/cuda/gimmik.py | 38 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 41 insertions(+), 2 deletions(-)
+ create mode 100644 pyfr/backends/cuda/gimmik.py
+
+diff --git a/pyfr/backends/cuda/base.py b/pyfr/backends/cuda/base.py
+index 7788a7b..b379810 100644
+--- a/pyfr/backends/cuda/base.py
++++ b/pyfr/backends/cuda/base.py
+@@ -44,8 +44,8 @@ class CUDABackend(BaseBackend):
+         # PREFER_SHARED.
+         context.set_cache_config(cuda.func_cache.PREFER_SHARED)
+ 
+-        from pyfr.backends.cuda import (blasext, cublas, packing, provider,
+-                                        types)
++        from pyfr.backends.cuda import (blasext, cublas, gimmik, packing,
++                                        provider, types)
+ 
+         # Register our data types
+         self.base_matrix_cls = types.CUDAMatrixBase
+@@ -68,6 +68,7 @@ class CUDABackend(BaseBackend):
+         kprovs = [provider.CUDAPointwiseKernelProvider,
+                   blasext.CUDABlasExtKernels,
+                   packing.CUDAPackingKernels,
++                  gimmik.CUDAGiMMiKKernels,
+                   cublas.CUDACUBLASKernels]
+         self._providers = [k(self) for k in kprovs]
+ 
+diff --git a/pyfr/backends/cuda/gimmik.py b/pyfr/backends/cuda/gimmik.py
+new file mode 100644
+index 0000000..ede45bf
+--- /dev/null
++++ b/pyfr/backends/cuda/gimmik.py
+@@ -0,0 +1,38 @@
++# -*- coding: utf-8 -*-
++
++import gimmik.generator
++import numpy as np
++
++from pyfr.backends.base import ComputeKernel, traits
++from pyfr.backends.cuda.provider import (CUDAKernelProvider,
++                                         get_grid_for_block)
++
++
++class CUDAGiMMiKKernels(CUDAKernelProvider):
++    @traits(a={'dense'})
++    def mul(self, a, b, out, alpha=1.0, beta=0.0):
++        # Ensure the matrices are compatible
++        if a.nrow != out.nrow or a.ncol != b.nrow or b.ncol != out.ncol:
++            raise ValueError('Incompatible matrices for out = a*b')
++
++        # Generate
++        mat = a.get()
++        src = gimmik.generator.generateKernel(
++            mat, 'cuda', alpha=alpha, beta=beta,
++            double=a.dtype == np.float64, reduced=True,
++        )
++
++        # Build
++        fun = self._build_kernel('gimmik_mm', src, 'PPiii')
++
++        # Determine the grid/block
++        block = (128, 1, 1)
++        grid = get_grid_for_block(block, b.ncol)
++
++        class MulKernel(ComputeKernel):
++            def run(self, queue):
++                fun.prepared_async_call(grid, block, queue.cuda_stream_comp,
++                                        b, out, b.ncol, b.leaddim,
++                                        out.leaddim)
++
++        return MulKernel()
+-- 
+1.9.1
+

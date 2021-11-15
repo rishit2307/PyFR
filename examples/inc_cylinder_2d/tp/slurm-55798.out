@@ -1,0 +1,18 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55798
+======
+Time: Mon Oct  4 16:04:04 CDT 2021
+Running on master node: spitfire-ng14.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 /home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_bibw
+
+/home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_bibw: error while loading shared libraries: libmpi.so.40: cannot open shared object file: No such file or directory
+/home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_bibw: error while loading shared libraries: libmpi.so.40: cannot open shared object file: No such file or directory
+srun: error: spitfire-ng15: task 1: Exited with exit code 127
+srun: error: spitfire-ng14: task 0: Exited with exit code 127

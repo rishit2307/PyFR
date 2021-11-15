@@ -1,0 +1,59 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55825
+======
+Time: Mon Oct  4 16:57:02 CDT 2021
+Running on master node: spitfire-ng18.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 /home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_bibw
+
+--------------------------------------------------------------------------
+By default, for Open MPI 4.0 and later, infiniband ports on a device
+are not used by default.  The intent is to use UCX for these devices.
+You can override this policy by setting the btl_openib_allow_ib MCA parameter
+to true.
+
+  Local host:              spitfire-ng19
+  Local adapter:           mlx5_0
+  Local port:              1
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+WARNING: There was an error initializing an OpenFabrics device.
+
+  Local host:   spitfire-ng19
+  Local device: mlx5_0
+--------------------------------------------------------------------------
+# OSU MPI Bi-Directional Bandwidth Test v5.8
+# Size      Bandwidth (MB/s)
+1                       0.16
+2                       0.37
+4                       0.75
+8                       1.50
+16                      3.06
+32                      6.09
+64                     12.30
+128                    24.04
+256                    45.74
+512                    84.93
+1024                  150.90
+2048                  198.25
+4096                  206.01
+8192                  221.13
+16384                 229.61
+32768                 231.66
+65536                1316.42
+131072               1521.48
+262144               1908.49
+524288               2228.29
+1048576              2661.02
+[spitfire-ng18.spitfire.engr.tamu.edu:154973] 1 more process has sent help message help-mpi-btl-openib.txt / ib port not selected
+[spitfire-ng18.spitfire.engr.tamu.edu:154973] Set MCA parameter "orte_base_help_aggregate" to 0 to see all help / error messages
+[spitfire-ng18.spitfire.engr.tamu.edu:154973] 1 more process has sent help message help-mpi-btl-openib.txt / error in device init
+2097152              3378.24
+4194304              3444.79

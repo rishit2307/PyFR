@@ -1,0 +1,18 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/SD7003_sol_controller.
+
+JobID: 58427
+======
+Time: Thu Nov  4 09:09:07 CDT 2021
+Running on master node: spitfire-ng09.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/SD7003_sol_controller
+
+numtasks=32, numnodes=8, mpi_tasks_per_node=4 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec --mca btl_openib_allow_ib 1 -n 32  /home/grads/r/rishit/code/Pyfr_venv/PyFR/pyfr/pyfr run -b cuda sd7003.pyfrm sd7003.ini
+
+Accepted steps = 0
+Rejected steps = 0
+Accepted steps = 84272
+Rejected steps = 3598

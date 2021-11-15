@@ -1,0 +1,40 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55763
+======
+Time: Mon Oct  4 14:39:41 CDT 2021
+Running on master node: spitfire-ng10.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 /home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency
+
+# OSU MPI Latency Test v5.8
+# Size          Latency (us)
+0                      49.31
+1                      48.99
+2                      49.00
+4                      49.00
+8                      48.99
+16                     48.99
+32                     49.00
+64                     49.04
+128                    49.06
+256                    49.52
+512                    54.58
+1024                   93.98
+2048                  103.48
+4096                  191.19
+8192                  235.88
+16384                 238.20
+32768                 413.30
+65536                 119.55
+131072                217.64
+262144                257.43
+524288                357.14
+1048576               517.33
+2097152              1066.75
+4194304              1502.49

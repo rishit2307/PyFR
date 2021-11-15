@@ -1,0 +1,29 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/SD7003_sol_controller_mod/k1_0.78_k2_0.1_k3_0.2.
+
+JobID: 59455
+======
+Time: Thu Nov 11 14:36:47 CST 2021
+Running on master node: spitfire-ng21.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/SD7003_sol_controller_mod/k1_0.78_k2_0.1_k3_0.2
+
+numtasks=12, numnodes=4, mpi_tasks_per_node=3 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec --mca btl_openib_allow_ib 1 -n 12  /home/grads/r/rishit/code/Pyfr_venv/PyFR/pyfr/pyfr run -b hip sd7003.pyfrm sd7003.ini
+
+--------------------------------------------------------------------------
+The library attempted to open the following supporting CUDA libraries,
+but each of them failed.  CUDA-aware support is disabled.
+libcuda.so.1: cannot open shared object file: No such file or directory
+libcuda.dylib: cannot open shared object file: No such file or directory
+/usr/lib64/libcuda.so.1: cannot open shared object file: No such file or directory
+/usr/lib64/libcuda.dylib: cannot open shared object file: No such file or directory
+If you are not interested in CUDA-aware support, then run with
+--mca opal_warn_on_missing_libcuda 0 to suppress this message.  If you are interested
+in CUDA-aware support, then try setting LD_LIBRARY_PATH to the location
+of libcuda.so.1 to get passed this issue.
+--------------------------------------------------------------------------
+[spitfire-ng21.spitfire.engr.tamu.edu:11399] 11 more processes have sent help message help-mpi-common-cuda.txt / dlopen failed
+[spitfire-ng21.spitfire.engr.tamu.edu:11399] Set MCA parameter "orte_base_help_aggregate" to 0 to see all help / error messages
+slurmstepd: error: *** JOB 59455 ON spitfire-ng21 CANCELLED AT 2021-11-11T15:41:06 ***

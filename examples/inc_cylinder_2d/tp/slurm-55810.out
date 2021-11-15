@@ -1,0 +1,38 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55810
+======
+Time: Mon Oct  4 16:22:24 CDT 2021
+Running on master node: spitfire-ng18.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 -mca btl tcp,self /home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_bibw
+
+Unknown option: mca
+Usage:
+    mpiexec.slurm args executable pgmargs
+
+    where args are comannd line arguments for mpiexec (see below),
+    executable is the name of the eecutable and pgmargs are command line
+    arguments for the executable. For example the following command will run
+    the MPI program a.out on 4 processes:
+
+            mpiexec.slurm -n 4 a.out
+
+    mpiexec.slurm supports the following options:
+
+             [-n nprocs]
+             [-host hostname]
+             [-verbose]
+             [-nostdin]
+             [-allstdin]
+             [-nostdout]
+             [-pernode]
+             [-config config_file]
+             [-help|-?]
+             [-man]
+

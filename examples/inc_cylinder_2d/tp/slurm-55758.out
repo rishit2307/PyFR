@@ -1,0 +1,24 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55758
+======
+Time: Mon Oct  4 14:27:06 CDT 2021
+Running on master node: spitfire-ng01.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=1, mpi_tasks_per_node=2 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 /home/grads/r/rishit/install/osu/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency
+
+--------------------------------------------------------------------------
+mpiexec was unable to launch the specified application as it could not access
+or execute an executable:
+
+Executable: /home/grads/r/rishit/install/osu/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency
+Node: spitfire-ng01
+
+while attempting to start process rank 0.
+--------------------------------------------------------------------------
+2 total processes failed to start

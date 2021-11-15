@@ -1,0 +1,45 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55741
+======
+Time: Mon Oct  4 13:42:15 CDT 2021
+Running on master node: spitfire-ng01.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 //home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency
+
+# OSU MPI Latency Test v5.8
+# Size          Latency (us)
+0                      46.08
+1                      44.31
+2                      44.32
+4                      44.33
+8                      44.95
+16                     45.40
+32                     45.38
+64                     46.49
+128                    46.95
+256                    49.19
+512                    54.59
+1024                   63.12
+2048                   79.26
+4096                  206.02
+8192                  240.67
+16384                 242.85
+32768                 419.19
+--------------------------------------------------------------------------
+WARNING: Open MPI failed to TCP connect to a peer MPI process.  This
+should not happen.
+
+Your Open MPI job may now hang or fail.
+
+  Local host: spitfire-ng01
+  PID:        41964
+  Message:    connect() to 172.16.1.12:1024 failed
+  Error:      Operation now in progress (115)
+--------------------------------------------------------------------------
+slurmstepd: error: *** JOB 55741 ON spitfire-ng01 CANCELLED AT 2021-10-04T13:53:29 ***

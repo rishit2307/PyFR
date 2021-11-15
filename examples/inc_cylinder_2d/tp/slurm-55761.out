@@ -1,0 +1,26 @@
+ Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55761
+======
+Time: Mon Oct  4 14:30:23 CDT 2021
+Running on master node: spitfire-ng01.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=1, numnodes=1, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 1 /home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency
+
+This test requires exactly two processes
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpiexec detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[4868,1],0]
+  Exit code:    1
+--------------------------------------------------------------------------

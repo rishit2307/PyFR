@@ -1,0 +1,39 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55780
+======
+Time: Mon Oct  4 14:57:42 CDT 2021
+Running on master node: spitfire-ng18.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 /home/grads/r/rishit/install/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_bibw
+
+# OSU MPI Bi-Directional Bandwidth Test v5.8
+# Size      Bandwidth (MB/s)
+1                       0.11
+2                       0.35
+4                       0.78
+8                       1.57
+16                      3.14
+32                      6.28
+64                     12.80
+128                    24.96
+256                    47.11
+512                    84.09
+1024                  147.72
+2048                  200.49
+4096                  205.22
+8192                  221.81
+16384                 230.03
+32768                 232.02
+65536                1792.28
+131072               1885.30
+262144               2599.17
+524288               2801.96
+1048576              2942.68
+2097152              3040.87
+4194304              2864.54

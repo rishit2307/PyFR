@@ -1,0 +1,15 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d.
+
+JobID: 55151
+======
+Time: Fri Oct  1 11:53:29 CDT 2021
+Running on master node: spitfire-ng18.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d
+
+numtasks=1, numnodes=1, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 1 /home/grads/r/rishit/code/Pyfr_venv/bin/python /home/grads/r/rishit/code/Pyfr_venv/PyFR/pyfr/pyfr run -b cuda inc_cylinder_2d.pyfrm inc_cylinder_2d.ini
+
+slurmstepd: error: *** JOB 55151 ON spitfire-ng18 CANCELLED AT 2021-10-01T11:58:49 ***

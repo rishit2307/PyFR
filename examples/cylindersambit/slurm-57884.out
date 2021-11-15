@@ -1,0 +1,31 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/cylindersambit.
+
+JobID: 57884
+======
+Time: Fri Oct 29 16:05:49 CDT 2021
+Running on master node: spitfire-ng01.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/cylindersambit
+
+numtasks=1, numnodes=1, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec --mca btl_openib_allow_ib 1 -n 1  /home/grads/r/rishit/code/Pyfr_venv/PyFR/pyfr/pyfr run -b cuda cylinder.pyfrm cylinder.ini .
+
+usage: pyfr
+       [-h]
+       [--verbose]
+       {import,partition,export,run,restart}
+       ...
+pyfr: error: unrecognized arguments: .
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpiexec detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[5549,1],0]
+  Exit code:    2
+--------------------------------------------------------------------------

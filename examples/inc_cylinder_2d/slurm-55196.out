@@ -1,0 +1,14 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d.
+
+JobID: 55196
+======
+Time: Fri Oct  1 17:14:11 CDT 2021
+Running on master node: spitfire-ng20.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d
+
+numtasks=1, numnodes=1, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 1 /home/grads/r/rishit/code/Pyfr_venv/bin/python /home/grads/r/rishit/code/Pyfr_venv/PyFR/pyfr/pyfr run -b cuda inc_cylinder_2d.pyfrm inc_cylinder_2d.ini
+

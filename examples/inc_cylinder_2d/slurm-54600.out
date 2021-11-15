@@ -1,0 +1,17 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d.
+
+JobID: 54600
+======
+Time: Thu Sep 30 17:50:21 CDT 2021
+Running on master node: spitfire-ng01.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d
+
+numtasks=1, numnodes=1, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 1 /home/grads/r/rishit/code/Pyfr_venv/bin/python /home/grads/r/rishit/code/Pyfr_venv/PyFR/pyfr/pyfr run -b cuda inc_cylinder_2d.pyfrm inc_cylinder_2d.ini
+
+/home/grads/r/rishit/code/Pyfr_venv/lib/python3.9/site-packages/pytools-2021.2.8-py3.9.egg/pytools/prefork.py:94: UserWarning: Prefork server exiting upon apparent death of parent
+  warn(f"{who} exiting upon apparent death of {partner}")
+srun: error: spitfire-ng01: task 0: Segmentation fault (core dumped)

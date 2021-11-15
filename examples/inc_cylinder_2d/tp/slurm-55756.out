@@ -1,0 +1,27 @@
+Changed directory to /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp.
+
+JobID: 55756
+======
+Time: Mon Oct  4 14:24:11 CDT 2021
+Running on master node: spitfire-ng10.spitfire.engr.tamu.edu
+Current directory: /home/grads/r/rishit/code/Pyfr_venv/PyFR/examples/inc_cylinder_2d/tp
+
+numtasks=2, numnodes=2, mpi_tasks_per_node=1 (OMP_NUM_THREADS=)
+
+Executing command:
+==================
+mpiexec -n 2 /home/grads/r/rishit/code/Pyfr_venv/bin/python /home/grads/r/rishit/install/osu/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency
+
+/home/grads/r/rishit/code/Pyfr_venv/bin/python: can't open file '/home/grads/r/rishit/install/osu/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency': [Errno 2] No such file or directory
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+/home/grads/r/rishit/code/Pyfr_venv/bin/python: can't open file '/home/grads/r/rishit/install/osu/osu-micro-benchmarks-5.8/mpi/pt2pt/osu_latency': [Errno 2] No such file or directory
+--------------------------------------------------------------------------
+mpiexec detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[61273,1],1]
+  Exit code:    2
+--------------------------------------------------------------------------
