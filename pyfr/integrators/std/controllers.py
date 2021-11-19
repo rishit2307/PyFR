@@ -110,10 +110,12 @@ class StdPIController(BaseStdController):
         self._errprev = 1.0
 
         # Step size adjustment factors
-        self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
+        self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.82)
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
 
+        print(self._saffac)
+        
         if not self._minfac < 1 <= self._maxfac:
             raise ValueError('Invalid max-fact, min-fact')
 
