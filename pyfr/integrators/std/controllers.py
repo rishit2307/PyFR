@@ -116,8 +116,8 @@ class StdPIController(BaseStdController):
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
         self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
-
         print(self._alpha)
+
         # Estimate of previous error
         self._errprev = 1.0
 
@@ -125,6 +125,8 @@ class StdPIController(BaseStdController):
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
+
+
 
         if not self._minfac < 1 <= self._maxfac:
             raise ValueError('Invalid max-fact, min-fact')
@@ -194,10 +196,16 @@ class StdPIController(BaseStdController):
 
             # Determine time step adjustment factor
             if self.nsteps > 1:
-                fac = err**-expa * self._errprev**expb * (self.err_1[-2])**expc
+                fac = err**-expa * self._errprev**(expb + expc)
+               
+                #print('PID err = {}'.format(err))
+                #print('PID errprev = {}'.format(self._errprev))
+                #print('PID err_1[-2] = {}'.format(self.err_1[-2]))
+ 
                 
             else:
                 fac = err**-expa * self._errprev**expb
+
 
             fac = min(maxf, max(minf, saff*fac))
 

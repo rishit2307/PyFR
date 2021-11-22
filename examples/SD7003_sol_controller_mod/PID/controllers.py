@@ -193,7 +193,7 @@ class StdPIController(BaseStdController):
 
             # Determine time step adjustment factor
             if self.nsteps > 1:
-                fac = err**-expa * self._errprev**expb * (self.err_1[-2])**expc
+                fac = err**-expa * self._errprev**(expb + expc)
                 
             else:
                 fac = err**-expa * self._errprev**expb

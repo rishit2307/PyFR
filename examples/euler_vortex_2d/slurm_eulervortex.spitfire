@@ -9,15 +9,15 @@
 #SBATCH -J "Eul_Vortex"
 
 #! How many whole nodes should be allocated?
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 
 #! How many (MPI) tasks will there be in total?
 #! Note probably this should not exceed the total number of GPUs in use.
-#SBATCH --ntasks=4
+#SBATCH --ntasks=1
 
 #! Specify the number of GPUs per node (between 1 and 4; must be 4 if nodes>1).
 #! Note that the job submission script will enforce no more than 3 cpus per GPU.
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 
 #SBATCH --cpus-per-gpu=1
 #SBATCH --gpu-bind=closest
@@ -35,7 +35,7 @@
 #SBATCH --no-requeue
 
 #! Do not change:
-#SBATCH -p amd
+#SBATCH -p all
 
 #! sbatch directives end here (put any additional directives above this line)
 
@@ -93,7 +93,7 @@ export LIBRARY_PATH=$HOME/.local/$local_subdir/lib/:$LIBRARY_PATH
 #!application="$HOME/code/Pyfr_venv/bin/python"
 
 #! Run options for the application:
-options="$HOME/code/Pyfr_venv/PyFR/pyfr/pyfr run -b hip -p euler_vortex_2d.pyfrm euler_vortex_2d.ini"
+options="$HOME/code/Pyfr_venv/PyFR/pyfr/pyfr run -b cuda euler_vortex_2d.pyfrm euler_vortex_2d.ini"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
