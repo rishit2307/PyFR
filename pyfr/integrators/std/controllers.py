@@ -87,7 +87,6 @@ class StdNoneController(BaseStdController):
 
 class StdPIController(BaseStdController):
     controller_name = 'pi'
-    err_1 = []
 
 
 
@@ -99,7 +98,7 @@ class StdPIController(BaseStdController):
         # Maximum time step
         self.dtmax = self.cfg.getfloat(sect, 'dt-max', 1e2)
 
-        self.cfl = [self.dtmax]
+        #self.cfl = [self.dtmax]
         
 
 
@@ -112,11 +111,12 @@ class StdPIController(BaseStdController):
         if self._norm not in {'l2', 'uniform'}:
             raise ValueError('Invalid error norm')
 
+
         # PI control values
-        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
-        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
-        self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
-        print(self._alpha)
+        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
+        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
+        print(1)
+
 
         # Estimate of previous error
         self._errprev = 1.0
@@ -125,6 +125,7 @@ class StdPIController(BaseStdController):
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
+
 
 
 
@@ -175,36 +176,46 @@ class StdPIController(BaseStdController):
         maxf = self._maxfac
         minf = self._minfac
         saff = self._saffac
-        sord = self.stepper_order
+        sord = self.stepper_order 
         nrej = 0
-        expa = self._alpha / sord
+        
         expb = self._beta / sord
-        expc = self._gamma / sord
+        expa = self._alpha / sord
+     
         
         while self.tcurr < t:
             # Decide on the time step
             dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
                        
             # Take the step
-            idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
 
+            idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
+            
             # Estimate the error
             
             err = self._errest(idxcurr, idxprev, idxerr)
 
-            self.err_1.append(err)
+            if err < 0.01:
+                expa = 0.7/4
+            #     expb = 0.1/4
+            # elif err > 0.01 and err < 0.1:
+            #     expa = 0.5 / sord
+            #     expb = 0.2/4
+            # elif err > 0.1 and err < 1:
+            #     expa = 0.01 / sord
+            #     expb = 0.99 / sord
+            else:
+                expa = 0.58 / 4
+
+        
 
             # Determine time step adjustment factor
-            if self.nsteps > 1:
-                fac = err**-expa * self._errprev**(expb + expc)
+            fac = err**-expa * self._errprev**(expb)
                
                 #print('PID err = {}'.format(err))
                 #print('PID errprev = {}'.format(self._errprev))
                 #print('PID err_1[-2] = {}'.format(self.err_1[-2]))
  
-                
-            else:
-                fac = err**-expa * self._errprev**expb
 
 
             fac = min(maxf, max(minf, saff*fac))
@@ -216,12 +227,9 @@ class StdPIController(BaseStdController):
             if err < 1.0:
                 self._errprev = err
                 self._accept_step(dt, idxcurr, err=err)
-               # if self.nsteps >= nrej+10 and mean(self.err_1[nrej-1:self.nsteps]) < 0.8:
-                #    self.cfl.append(1.1*self.cfl[-1])
+
 
             else:
                 self._reject_step(dt, idxprev, err=err)
-                #self.cfl.append(dt)
-                #nrej = self.nsteps
-          
+
 
