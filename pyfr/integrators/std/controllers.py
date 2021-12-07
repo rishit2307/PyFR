@@ -115,7 +115,7 @@ class StdPIController(BaseStdController):
         # PI control values
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
-        print(1)
+        print('hello')
 
 
         # Estimate of previous error
@@ -205,7 +205,7 @@ class StdPIController(BaseStdController):
             #     expa = 0.01 / sord
             #     expb = 0.99 / sord
             else:
-                expa = 0.58 / 4
+                expa = 0.5 / 4
 
         
 
