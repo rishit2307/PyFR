@@ -115,8 +115,7 @@ class StdPIController(BaseStdController):
         # PI control values
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
-        print('hello')
-
+        print(self._beta)
 
         # Estimate of previous error
         self._errprev = 1.0
@@ -197,24 +196,21 @@ class StdPIController(BaseStdController):
 
             if err < 0.01:
                 expa = 0.7/4
-            #     expb = 0.1/4
-            # elif err > 0.01 and err < 0.1:
-            #     expa = 0.5 / sord
-            #     expb = 0.2/4
-            # elif err > 0.1 and err < 1:
-            #     expa = 0.01 / sord
-            #     expb = 0.99 / sord
-            else:
-                expa = 0.5 / 4
 
-        
+            else:
+                expa = 0.58 / 4
+            
+
+       
+
+
+                
+
 
             # Determine time step adjustment factor
             fac = err**-expa * self._errprev**(expb)
-               
-                #print('PID err = {}'.format(err))
-                #print('PID errprev = {}'.format(self._errprev))
-                #print('PID err_1[-2] = {}'.format(self.err_1[-2]))
+
+
  
 
 
@@ -227,9 +223,11 @@ class StdPIController(BaseStdController):
             if err < 1.0:
                 self._errprev = err
                 self._accept_step(dt, idxcurr, err=err)
+                expb = 0.4 / sord
 
 
             else:
                 self._reject_step(dt, idxprev, err=err)
+                expb = 0.5 / sord
 
 
