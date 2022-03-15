@@ -113,9 +113,12 @@ class StdPIController(BaseStdController):
 
 
         # PI control values
-        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
-        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
-        print("Hi")
+        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
+        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
+        self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
+    
+        print("Hello, gamma is {}".format(self._gamma))
+
 
         # Estimate of previous error
         self._errprev = 1.0
@@ -180,6 +183,7 @@ class StdPIController(BaseStdController):
         
         expb = self._beta / sord
         expa = self._alpha / sord
+        expc = self._gamma / sord
      
         
         while self.tcurr < t:
@@ -187,40 +191,18 @@ class StdPIController(BaseStdController):
             dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
                        
             # Take the step
-
             idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
-            
+
             # Estimate the error
             
             err = self._errest(idxcurr, idxprev, idxerr)
 
-            if err < 0.01:
-                expa = 0.7/4
-
-            else:
-                expa = 0.58 / 4
-            
-
-            if self.nsteps == 0:
-                self._errprev = 1
-                
-
-
-            if self._errprev < 0.01:
-                expb = 0.4 / 4
-            else:
-                expb = 0.3 / 4
-               
-
-        
+            # self.err_1.append(err)
 
             # Determine time step adjustment factor
-            fac = err**-expa * self._errprev**(expb)
-
-
- 
-
-
+        
+            fac = err**-expa * self._errprev**(expb + expc)
+            
             fac = min(maxf, max(minf, saff*fac))
 
             # Compute the size of the next step
@@ -230,9 +212,13 @@ class StdPIController(BaseStdController):
             if err < 1.0:
                 self._errprev = err
                 self._accept_step(dt, idxcurr, err=err)
-
+                # if self.nsteps >= nrej+10 and mean(self.err_1[nrej-1:self.nsteps]) < 0.8:
+                #     self.cfl.append(1.1*self.cfl[-1])
 
             else:
                 self._reject_step(dt, idxprev, err=err)
+                # self.cfl.append(dt)
+                # nrej = self.nsteps
+          
 
 
