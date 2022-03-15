@@ -5,7 +5,6 @@ import re
 from pyfr.backends.base import BaseBackend
 from pyfr.mpiutil import get_local_rank
 
-
 class CUDABackend(BaseBackend):
     name = 'cuda'
     blocks = False

@@ -40,7 +40,7 @@ class BaseFluidElements(object):
     def con_to_pri(cons, cfg):
         rho, E = cons[0], cons[-1]
 
-        # Divide momentum components by rho
+        # Divide momentum components by rho9
         vs = [rhov/rho for rhov in cons[1:-1]]
 
         # Compute the pressure
