@@ -98,7 +98,7 @@ class StdPIController(BaseStdController):
         # Maximum time step
         self.dtmax = self.cfg.getfloat(sect, 'dt-max', 1e2)
 
-        #self.cfl = [self.dtmax]
+        self.cfl = [self.dtmax]
         
 
 
@@ -117,7 +117,7 @@ class StdPIController(BaseStdController):
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
         self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
     
-        print("Hello, gamma is {}".format(self._gamma))
+        print("Hello, sd7003 with cfl-1.3")
 
 
         # Estimate of previous error
@@ -127,7 +127,8 @@ class StdPIController(BaseStdController):
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
-
+        
+        self.errhist = []
 
 
 
@@ -188,7 +189,7 @@ class StdPIController(BaseStdController):
         
         while self.tcurr < t:
             # Decide on the time step
-            dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
+            dt = max(min(t - self.tcurr, self._dt, self.dtmax, self.cfl[-1]), self.dtmin)
                        
             # Take the step
             idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
@@ -197,7 +198,7 @@ class StdPIController(BaseStdController):
             
             err = self._errest(idxcurr, idxprev, idxerr)
 
-            # self.err_1.append(err)
+            self.errhist.append(err)
 
             # Determine time step adjustment factor
         
@@ -212,13 +213,13 @@ class StdPIController(BaseStdController):
             if err < 1.0:
                 self._errprev = err
                 self._accept_step(dt, idxcurr, err=err)
-                # if self.nsteps >= nrej+10 and mean(self.err_1[nrej-1:self.nsteps]) < 0.8:
-                #     self.cfl.append(1.1*self.cfl[-1])
+                if self.nsteps >= nrej+10 and mean(self.errhist[nrej:self.nsteps]) < 0.8 and nrej != 0:
+                    self.cfl.append(1.3*self.cfl[-1])
 
             else:
                 self._reject_step(dt, idxprev, err=err)
-                # self.cfl.append(dt)
-                # nrej = self.nsteps
+                self.cfl.append(dt)
+                nrej = self.nsteps
           
 
 
