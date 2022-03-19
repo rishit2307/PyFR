@@ -22,11 +22,12 @@ class BaseStdController(BaseStdIntegrator):
         if not self.isrestart:
             self.completed_step_handlers(self)
 
-    def _accept_step(self, dt, idxcurr, err=None):
+    def _accept_step(self, dt, idxcurr, cfl, nsteps,nrej, err=None):
         self.tcurr += dt
         self.nacptsteps += 1
         self.nacptchain += 1
-        self.stepinfo.append((dt, 'accept', err))
+        self.stepinfo.append((dt, 'accept', err,cfl, nsteps, nrej))
+
 
         self._idxcurr = idxcurr
 
@@ -50,13 +51,13 @@ class BaseStdController(BaseStdIntegrator):
         self.stepinfo = []
 
 
-    def _reject_step(self, dt, idxold, err=None):
+    def _reject_step(self, dt, idxold, cfl,nsteps,nrej,  err=None):
         if dt <= self.dtmin:
             raise RuntimeError('Minimum sized time step rejected')
 
         self.nacptchain = 0
         self.nrjctsteps += 1
-        self.stepinfo.append((dt, 'reject', err))
+        self.stepinfo.append((dt, 'reject', err, cfl , nsteps, nrej))
 
         self._idxcurr = idxold
 
@@ -116,12 +117,15 @@ class StdPIController(BaseStdController):
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
         self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
+        print("Hi,1")
     
-        print("Hello, sd7003 with cfl-1.3")
+       
 
 
         # Estimate of previous error
         self._errprev = 1.0
+
+        self.nrej = 0
 
         # Step size adjustment factors
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
@@ -180,7 +184,6 @@ class StdPIController(BaseStdController):
         minf = self._minfac
         saff = self._saffac
         sord = self.stepper_order 
-        nrej = 0
         
         expb = self._beta / sord
         expa = self._alpha / sord
@@ -190,6 +193,10 @@ class StdPIController(BaseStdController):
         while self.tcurr < t:
             # Decide on the time step
             dt = max(min(t - self.tcurr, self._dt, self.dtmax, self.cfl[-1]), self.dtmin)
+            
+            print("dt is {}".format(dt))
+            print("cfl is {}".format(self.cfl[-1]))
+
                        
             # Take the step
             idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
@@ -212,14 +219,21 @@ class StdPIController(BaseStdController):
             # Decide if to accept or reject the step
             if err < 1.0:
                 self._errprev = err
-                self._accept_step(dt, idxcurr, err=err)
-                if self.nsteps >= nrej+10 and mean(self.errhist[nrej:self.nsteps]) < 0.8 and nrej != 0:
+                if self.nsteps >= self.nrej+10 and mean(self.errhist[self.nrej:self.nsteps]) < 0.8 and self.nrej != 0:
                     self.cfl.append(1.3*self.cfl[-1])
+                    
 
+                self._accept_step(dt, idxcurr, self.cfl[-1], self.nsteps,self.nrej, err=err)
+                
             else:
-                self._reject_step(dt, idxprev, err=err)
                 self.cfl.append(dt)
-                nrej = self.nsteps
-          
+                self._reject_step(dt, idxprev, self.cfl[-1],self.nsteps,self.nrej,  err=err)
+                
+                self.nrej = self.nsteps
+
+
+
+
+
 
 
