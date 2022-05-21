@@ -22,7 +22,7 @@ class BaseStdController(BaseStdIntegrator):
         if not self.isrestart:
             self.completed_step_handlers(self)
 
-    def _accept_step(self, dt, idxcurr, cfl, nsteps,nrej, err=None):
+    def _accept_step(self, dt, idxcurr, cfl=None, nsteps=None,nrej=None, err=None):
         self.tcurr += dt
         self.nacptsteps += 1
         self.nacptchain += 1
@@ -75,6 +75,8 @@ class StdNoneController(BaseStdController):
             raise ValueError('Advance time is in the past')
 
         while self.tcurr < t:
+           
+
             # Decide on the time step
             dt = max(min(t - self.tcurr, self._dt), self.dtmin)
 
@@ -117,7 +119,7 @@ class StdPIController(BaseStdController):
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
         self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
-        print("Hi,1")
+        
     
        
 
@@ -126,6 +128,7 @@ class StdPIController(BaseStdController):
         self._errprev = 1.0
 
         self.nrej = 0
+        self.ctr = 0
 
         # Step size adjustment factors
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
@@ -194,8 +197,7 @@ class StdPIController(BaseStdController):
             # Decide on the time step
             dt = max(min(t - self.tcurr, self._dt, self.dtmax, self.cfl[-1]), self.dtmin)
             
-            print("dt is {}".format(dt))
-            print("cfl is {}".format(self.cfl[-1]))
+            # print(self._dt)
 
                        
             # Take the step
@@ -217,19 +219,27 @@ class StdPIController(BaseStdController):
             self._dt = fac*dt
 
             # Decide if to accept or reject the step
-            if err < 1.0:
+            if (self.ctr % 10 == 0 or self.ctr %10 == 1 or self.ctr % 10 ==2 or self.ctr == 3) and self.ctr > 10 and err > 1.0:
+                self._accept_step(self._dtdef,idxcurr, self.cfl[-1], self.nsteps,self.nrej, err=err )
+                self.ctr = 0
+            
+            elif err < 1.0:
                 self._errprev = err
-                if self.nsteps >= self.nrej+10 and mean(self.errhist[self.nrej:self.nsteps]) < 0.8 and self.nrej != 0:
-                    self.cfl.append(1.3*self.cfl[-1])
+                # if self.nsteps >= self.nrej+10 and mean(self.errhist[self.nrej:self.nsteps]) < 0.8 and self.nrej != 0:
+                #     self.cfl.append(1.3*self.cfl[-1])
                     
 
                 self._accept_step(dt, idxcurr, self.cfl[-1], self.nsteps,self.nrej, err=err)
+                self.ctr += 1
                 
             else:
-                self.cfl.append(dt)
+                # self.cfl.append(dt)
+                print("counter is {}, err is {}".format(self.ctr, err))
+                print(err)
                 self._reject_step(dt, idxprev, self.cfl[-1],self.nsteps,self.nrej,  err=err)
+                self.ctr = 0
                 
-                self.nrej = self.nsteps
+                # self.nrej = self.nsteps
 
 
 

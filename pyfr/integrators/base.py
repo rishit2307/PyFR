@@ -44,6 +44,7 @@ class BaseIntegrator(object):
 
         # Current and minimum time steps
         self._dt = cfg.getfloat('solver-time-integrator', 'dt')
+        self._dtdef = np.copy(self._dt)
         self.dtmin = cfg.getfloat('solver-time-integrator', 'dt-min', 1e-12)
 
         # Extract the UUID of the mesh (to be saved with solutions)

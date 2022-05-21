@@ -33,6 +33,7 @@ def jacobi(n, a, b, z):
 
 def jacobi_diff(n, a, b, z):
     dj = [0]
+   
 
     if n >= 1:
         dj.extend(jp*(i + a + b + 2)/2
@@ -55,14 +56,21 @@ class BasePolyBasis(object):
     @clean
     def ortho_basis_at(self, pts):
         if len(pts) and not isinstance(pts[0], Iterable):
+            
             pts = [(p,) for p in pts]
+        
+        
 
-        return np.array([self.ortho_basis_at_py(*p) for p in pts]).T
+        f =  np.array([self.ortho_basis_at_py(*p) for p in pts]).T
+       
+        return f
 
     @clean
     def jac_ortho_basis_at(self, pts):
         if len(pts) and not isinstance(pts[0], Iterable):
             pts = [(p,) for p in pts]
+        
+         
 
         J = [self.jac_ortho_basis_at_py(*p) for p in pts]
 
@@ -70,14 +78,24 @@ class BasePolyBasis(object):
 
     @clean
     def nodal_basis_at(self, epts):
+        
+   
+        
+        
+
         return np.linalg.solve(self.vdm, self.ortho_basis_at(epts)).T
 
     @clean
     def jac_nodal_basis_at(self, epts):
+
+        
+       
+
         return np.linalg.solve(self.vdm, self.jac_ortho_basis_at(epts))
 
     @lazyprop
     def vdm(self):
+        
         return self.ortho_basis_at(self.pts)
 
     def proj_to(self, tobasis):
@@ -101,12 +119,21 @@ class LinePolyBasis(BasePolyBasis):
     name = 'line'
 
     def ortho_basis_at_py(self, p):
+        
         jp = jacobi(self.order - 1, 0, 0, p)
         return [sqrt(i + 0.5)*p for i, p in enumerate(jp)]
 
     def jac_ortho_basis_at_py(self, p):
+        
+     
         djp = jacobi_diff(self.order - 1, 0, 0, p)
-        return [(sqrt(i + 0.5)*p,) for i, p in enumerate(djp)]
+        
+         
+        
+        c = [(sqrt(i + 0.5)*p,) for i, p in enumerate(djp)]
+        
+        return c
+
 
     @lazyprop
     def degrees(self):
