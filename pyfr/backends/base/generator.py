@@ -7,7 +7,7 @@ import numpy as np
 from pyfr.util import match_paired_paren
 
 
-class Arg(object):
+class Arg:
     def __init__(self, name, spec, body):
         self.name = name
 
@@ -18,7 +18,7 @@ class Arg(object):
             ((?:\[\d+\]){0,2})$                              # Dimensions
         '''
         dimsptn = r'(?<=\[)\d+(?=\])'
-        usedptn = fr'(?:[^A-Za-z]|^){name}[^A-Za-z0-9]'
+        usedptn = fr'(?:[^A-Za-z_]|^){name}[^A-Za-z0-9]'
 
         # Parse our specification
         m = re.match(specptn, spec, re.X)
@@ -47,7 +47,7 @@ class Arg(object):
 
         # Validation
         if self.attrs.startswith('broadcast') and self.intent != 'in':
-             raise ValueError('Broadcast arguments must be of intent in')
+            raise ValueError('Broadcast arguments must be of intent in')
         if self.isbroadcastr and self.ncdim != 1:
             raise ValueError('Row broadcasts must have one dimension')
         if self.isbroadcastc and self.ncdim == 1:
@@ -56,7 +56,7 @@ class Arg(object):
             raise ValueError('Scalar arguments must be of type fpdtype_t')
 
 
-class BaseKernelGenerator(object):
+class BaseKernelGenerator:
     def __init__(self, name, ndim, args, body, fpdtype):
         self.name = name
         self.ndim = ndim

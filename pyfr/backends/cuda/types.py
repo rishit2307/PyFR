@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 
+from functools import cached_property
+
 import numpy as np
 
 import pyfr.backends.base as base
-from pyfr.util import make_pybuf
 
 
-class _CUDAMatrixCommon(object):
-    @property
+class _CUDAMatrixCommon:
+    @cached_property
     def _as_parameter_(self):
         return self.data
 
@@ -42,26 +43,16 @@ class CUDAMatrixBase(_CUDAMatrixCommon, base.MatrixBase):
         self.backend.cuda.memcpy(self.data, buf, self.nbytes)
 
 
-class CUDAMatrix(CUDAMatrixBase, base.Matrix):
-    pass
-
-
 class CUDAMatrixSlice(_CUDAMatrixCommon, base.MatrixSlice):
-    def _init_data(self, mat):
-        return (int(mat.basedata) + mat.offset +
-                (self.ra*self.leaddim + self.ca)*self.itemsize)
+    @cached_property
+    def data(self):
+        return int(self.basedata) + self.offset
 
 
-class CUDAMatrixBank(base.MatrixBank):
-    pass
-
-
-class CUDAConstMatrix(CUDAMatrixBase, base.ConstMatrix):
-    pass
-
-
-class CUDAView(base.View):
-    pass
+class CUDAMatrix(CUDAMatrixBase, base.Matrix): pass
+class CUDAConstMatrix(CUDAMatrixBase, base.ConstMatrix): pass
+class CUDAView(base.View): pass
+class CUDAXchgView(base.XchgView): pass
 
 
 class CUDAXchgMatrix(CUDAMatrix, base.XchgMatrix):
@@ -69,56 +60,62 @@ class CUDAXchgMatrix(CUDAMatrix, base.XchgMatrix):
         # Call the standard matrix constructor
         super().__init__(backend, ioshape, initval, extent, aliases, tags)
 
-        # If MPI is CUDA-aware then construct a buffer out of our CUDA
-        # device allocation and pass this directly to MPI
+        # If MPI is CUDA-aware then simply annotate our device buffer
         if backend.mpitype == 'cuda-aware':
-            self.hdata = make_pybuf(self.data, self.nbytes, 0x200)
+            class HostData:
+                __array_interface__ = {
+                    'version': 3,
+                    'typestr': np.dtype(self.dtype).str,
+                    'data': (self.data, False),
+                    'shape': (self.nrow, self.ncol)
+                }
+
+            self.hdata = np.array(HostData(), copy=False)
         # Otherwise, allocate a buffer on the host for MPI to send/recv from
         else:
             shape, dtype = (self.nrow, self.ncol), self.dtype
             self.hdata = backend.cuda.pagelocked_empty(shape, dtype)
 
 
-class CUDAXchgView(base.XchgView):
-    pass
-
-
-class CUDAQueue(base.Queue):
+class CUDAGraph(base.Graph):
     def __init__(self, backend):
         super().__init__(backend)
 
-        # CUDA streams
-        self.stream_comp = backend.cuda.create_stream()
-        self.stream_copy = backend.cuda.create_stream()
+        self.graph = backend.cuda.create_graph()
+        self.stale_kparams = {}
+        self.mpi_events = []
 
-    def _wait(self):
-        if self._last_ktype == 'compute':
-            self.stream_comp.synchronize()
-            self.stream_copy.synchronize()
-        elif self._last_ktype == 'mpi':
-            from mpi4py import MPI
+    def add_mpi_req(self, req, deps=[]):
+        super().add_mpi_req(req, deps)
 
-            MPI.Prequest.Waitall(self.mpi_reqs)
-            self.mpi_reqs = []
+        if deps:
+            event = self.backend.cuda.create_event()
+            self.graph.add_event_record(event, [self.knodes[d] for d in deps])
 
-        self._last_ktype = None
+            self.mpi_events.append((event, req))
 
-    def _at_sequence_point(self, item):
-        return self._last_ktype != item.ktype
+    def commit(self):
+        super().commit()
 
-    @staticmethod
-    def runall(queues):
-        # First run any items which will not result in an implicit wait
-        for q in queues:
-            q._exec_nowait()
+        self.exc_graph = self.graph.instantiate()
 
-        # So long as there are items remaining in the queues
-        while any(queues):
-            # Execute a (potentially) blocking item from each queue
-            for q in filter(None, queues):
-                q._exec_next()
-                q._exec_nowait()
+    def run(self, stream):
+        from mpi4py import MPI
 
-        # Wait for all tasks to complete
-        for q in queues:
-            q._wait()
+        # Ensure our kernel parameters are up to date
+        for node, params in self.stale_kparams.items():
+            self.exc_graph.set_kernel_node_params(node, params)
+
+        self.exc_graph.launch(stream)
+        self.stale_kparams.clear()
+
+        # Start all dependency-free MPI requests
+        MPI.Prequest.Startall(self.mpi_root_reqs)
+
+        # Start any remaining requests once their dependencies are satisfied
+        for event, req in self.mpi_events:
+            event.synchronize()
+            req.Start()
+
+        # Wait for all of the MPI requests to finish
+        MPI.Prequest.Waitall(self.mpi_reqs)

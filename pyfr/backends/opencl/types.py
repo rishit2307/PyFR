@@ -1,22 +1,28 @@
 # -*- coding: utf-8 -*-
 
+from functools import cached_property
+
 import numpy as np
-import pyopencl as cl
 
 import pyfr.backends.base as base
 
 
-class _OpenCLMatrixCommon(object):
-    @property
+class _OpenCLMatrixCommon:
+    @cached_property
     def _as_parameter_(self):
-        return self.data.int_ptr
+        return int(self.data)
 
 
 class OpenCLMatrixBase(_OpenCLMatrixCommon, base.MatrixBase):
     def onalloc(self, basedata, offset):
         self.basedata = basedata
-        self.data = basedata.get_sub_region(offset, self.nbytes)
         self.offset = offset
+
+        # If necessary, slice the buffer
+        if offset:
+            self.data = basedata.slice(offset, self.nbytes)
+        else:
+            self.data = basedata
 
         # Process any initial value
         if self._initval is not None:
@@ -30,7 +36,9 @@ class OpenCLMatrixBase(_OpenCLMatrixCommon, base.MatrixBase):
         buf = np.empty((self.nrow, self.leaddim), dtype=self.dtype)
 
         # Copy
-        cl.enqueue_copy(self.backend.qdflt, buf, self.data)
+        self.backend.queue.barrier()
+        self.backend.cl.memcpy(self.backend.queue, buf, self.data, self.nbytes,
+                               blocking=True)
 
         # Unpack
         return self._unpack(buf[None, :, :])
@@ -39,31 +47,25 @@ class OpenCLMatrixBase(_OpenCLMatrixCommon, base.MatrixBase):
         buf = self._pack(ary)
 
         # Copy
-        cl.enqueue_copy(self.backend.qdflt, self.data, buf)
-
-
-class OpenCLMatrix(OpenCLMatrixBase, base.Matrix):
-    pass
+        self.backend.queue.barrier()
+        self.backend.cl.memcpy(self.backend.queue, self.data, buf, self.nbytes,
+                               blocking=True)
 
 
 class OpenCLMatrixSlice(_OpenCLMatrixCommon, base.MatrixSlice):
-    def _init_data(self, mat):
-        start = (self.ra*self.leaddim + self.ca)*self.itemsize
-        nbytes = ((self.nrow - 1)*self.leaddim + self.ncol)*self.itemsize
-
-        return mat.basedata.get_sub_region(mat.offset + start, nbytes)
-
-
-class OpenCLMatrixBank(base.MatrixBank):
-    pass
+    @cached_property
+    def data(self):
+        if self.offset:
+            nbytes = ((self.nrow - 1)*self.leaddim + self.ncol)*self.itemsize
+            return self.basedata.slice(self.offset, nbytes)
+        else:
+            return self.basedata
 
 
-class OpenCLConstMatrix(OpenCLMatrixBase, base.ConstMatrix):
-    pass
-
-
-class OpenCLView(base.View):
-    pass
+class OpenCLMatrix(OpenCLMatrixBase, base.Matrix): pass
+class OpenCLConstMatrix(OpenCLMatrixBase, base.ConstMatrix): pass
+class OpenCLView(base.View): pass
+class OpenCLXchgView(base.XchgView): pass
 
 
 class OpenCLXchgMatrix(OpenCLMatrix, base.XchgMatrix):
@@ -71,53 +73,58 @@ class OpenCLXchgMatrix(OpenCLMatrix, base.XchgMatrix):
         super().__init__(backend, ioshape, initval, extent, aliases, tags)
 
         # Allocate an empty buffer on the host for MPI to send/recv from
-        self.hdata = np.empty((self.nrow, self.ncol), self.dtype)
+        shape, dtype = (self.nrow, self.ncol), self.dtype
+        self.hdata = backend.cl.pagelocked_empty(shape, dtype)
 
 
-class OpenCLXchgView(base.XchgView):
-    pass
+class OpenCLGraph(base.Graph):
+    def commit(self):
+        super().commit()
 
+        # Map from kernels to event table locations
+        evtidxs = {}
 
-class OpenCLQueue(base.Queue):
-    def __init__(self, backend):
-        super().__init__(backend)
+        # Kernel list complete with dependency information
+        self.klist = klist = []
 
-        # OpenCL command queues
-        self.cmd_q_comp = cl.CommandQueue(backend.ctx)
-        self.cmd_q_copy = cl.CommandQueue(backend.ctx)
+        for i, k in enumerate(self.knodes):
+            evtidxs[k] = i
 
-        # Active copy event list
-        self.copy_events = []
+            # Resolve the event indices of kernels we depend on
+            wait_evts = [evtidxs[dep] for dep in self.kdeps[k]] or None
 
-    def _wait(self):
-        if self._last_ktype == 'compute':
-            self.cmd_q_comp.finish()
-            self.cmd_q_copy.finish()
-            self.copy_events.clear()
-        elif self._last_ktype == 'mpi':
-            from mpi4py import MPI
+            klist.append((k, wait_evts, k in self.depk))
 
-            MPI.Prequest.Waitall(self.mpi_reqs)
-            self.mpi_reqs = []
+        # Dependent MPI request list
+        self.mreqlist = mreqlist = []
 
-        self._last_ktype = None
+        for req, deps in zip(self.mpi_reqs, self.mpi_req_deps):
+            if deps:
+                mreqlist.append((req, [evtidxs[dep] for dep in deps]))
 
-    def _at_sequence_point(self, item):
-        return self._last_ktype != item.ktype
+    def run(self, queue):
+        from mpi4py import MPI
 
-    @staticmethod
-    def runall(queues):
-        # First run any items which will not result in an implicit wait
-        for q in queues:
-            q._exec_nowait()
+        events = [None]*len(self.klist)
+        wait_for_events = self.backend.cl.wait_for_events
 
-        # So long as there are items remaining in the queues
-        while any(queues):
-            # Execute a (potentially) blocking item from each queue
-            for q in filter(None, queues):
-                q._exec_next()
-                q._exec_nowait()
+        # Submit the kernels to the queue
+        for i, (k, wait_for, ret_evt) in enumerate(self.klist):
+            if wait_for is not None:
+                wait_for = [events[j] for j in wait_for]
 
-        # Wait for all tasks to complete
-        for q in queues:
-            q._wait()
+            events[i] = k.run(queue, wait_for, ret_evt)
+
+        # Flush the queue to ensure the kernels have started
+        queue.flush()
+
+        # Start all dependency-free MPI requests
+        MPI.Prequest.Startall(self.mpi_root_reqs)
+
+        # Start any remaining requests once their dependencies are satisfied
+        for req, wait_for in self.mreqlist:
+            wait_for_events([events[j] for j in wait_for])
+            req.Start()
+
+        # Wait for all of the MPI requests to finish
+        MPI.Prequest.Waitall(self.mpi_reqs)

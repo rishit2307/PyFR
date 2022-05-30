@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 
+from ctypes import c_int, c_void_p
+from functools import cached_property
+
 import numpy as np
 
 from pyfr.backends.base import BaseBackend
+from pyfr.backends.openmp.compiler import OpenMPCompiler
 
 
 class OpenMPBackend(BaseBackend):
@@ -22,36 +26,46 @@ class OpenMPBackend(BaseBackend):
         self.soasz = self.alignb // np.dtype(self.fpdtype).itemsize
         self.csubsz = self.soasz*cfg.getint('backend-openmp', 'n-soa', 1)
 
-        from pyfr.backends.openmp import (blasext, gimmik, packing,
-                                          provider, types, xsmm)
+        # C source compiler
+        self.compiler = OpenMPCompiler(cfg)
 
-        # Register our data types
+        from pyfr.backends.openmp import (blasext, packing, provider, types,
+                                          xsmm)
+
+        # Register our data types and meta kernels
         self.base_matrix_cls = types.OpenMPMatrixBase
         self.const_matrix_cls = types.OpenMPConstMatrix
+        self.graph_cls = types.OpenMPGraph
         self.matrix_cls = types.OpenMPMatrix
-        self.matrix_bank_cls = types.OpenMPMatrixBank
         self.matrix_slice_cls = types.OpenMPMatrixSlice
-        self.queue_cls = types.OpenMPQueue
         self.view_cls = types.OpenMPView
         self.xchg_matrix_cls = types.OpenMPXchgMatrix
         self.xchg_view_cls = types.OpenMPXchgView
+        self.ordered_meta_kernel_cls = provider.OpenMPOrderedMetaKernel
+        self.unordered_meta_kernel_cls = provider.OpenMPUnorderedMetaKernel
 
         # Instantiate mandatory kernel provider classes
         kprovcls = [provider.OpenMPPointwiseKernelProvider,
                     blasext.OpenMPBlasExtKernels,
-                    packing.OpenMPPackingKernels]
+                    packing.OpenMPPackingKernels,
+                    xsmm.OpenMPXSMMKernels]
         self._providers = [k(self) for k in kprovcls]
-
-        # Instantiate optional kernel provider classes
-        try:
-            self._providers.append(xsmm.OpenMPXSMMKernels(self))
-        except OSError:
-            pass
-
-        self._providers.append(gimmik.OpenMPGiMMiKKernels(self))
 
         # Pointwise kernels
         self.pointwise = self._providers[0]
+
+    def run_kernels(self, kernels, wait=False):
+        for k in kernels:
+            k.run()
+
+    def run_graph(self, graph, wait=False):
+        graph.run()
+
+    @cached_property
+    def krunner(self):
+        ksrc = self.lookup.get_template('run-kernels').render()
+        klib = self.compiler.build(ksrc)
+        return klib.function('run_kernels', None, [c_int, c_int, c_void_p])
 
     def _malloc_impl(self, nbytes):
         data = np.zeros(nbytes + self.alignb, dtype=np.uint8)

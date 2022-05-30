@@ -1,42 +1,63 @@
 # -*- coding: utf-8 -*-
 
 from pyfr.solvers.base import BaseSystem
+from pyfr.util import memoize
 
 
 class BaseAdvectionSystem(BaseSystem):
-    _nqueues = 2
+    @memoize
+    def _rhs_graphs(self, uinbank, foutbank):
+        m = self._mpireqs
+        k, _ = self._get_kernels(uinbank, foutbank)
 
-    def rhs(self, t, uinbank, foutbank):
-        runall = self.backend.runall
-        q1, q2 = self._queues
-        kernels = self._kernels
+        def deps(dk, *names): return self._kdeps(k, dk, *names)
 
-        self._bc_inters.prepare(t)
+        g1 = self.backend.graph()
+        g1.add_mpi_reqs(m['scal_fpts_recv'])
 
-        self.eles_scal_upts_inb.active = uinbank
-        self.eles_scal_upts_outb.active = foutbank
+        # Interpolate the solution to the flux points
+        g1.add_all(k['eles/disu'])
 
-        q1.enqueue(kernels['eles', 'disu'])
-        q1.enqueue(kernels['mpiint', 'scal_fpts_pack'])
-        runall([q1])
+        # Pack and send these interpolated solutions to our neighbours
+        g1.add_all(k['mpiint/scal_fpts_pack'], deps=k['eles/disu'])
+        for send, pack in zip(m['scal_fpts_send'], k['mpiint/scal_fpts_pack']):
+            g1.add_mpi_req(send, deps=[pack])
 
-        if ('eles', 'copy_soln') in kernels:
-            q1.enqueue(kernels['eles', 'copy_soln'])
-        if ('eles', 'qptsu') in kernels:
-            q1.enqueue(kernels['eles', 'qptsu'])
-        q1.enqueue(kernels['eles', 'tdisf_curved'])
-        q1.enqueue(kernels['eles', 'tdisf_linear'])
-        q1.enqueue(kernels['eles', 'tdivtpcorf'])
-        q1.enqueue(kernels['iint', 'comm_flux'])
-        q1.enqueue(kernels['bcint', 'comm_flux'], t=t)
+        # Compute the common normal flux at our internal/boundary interfaces
+        g1.add_all(k['iint/comm_flux'],
+                   deps=k['eles/disu'] + k['mpiint/scal_fpts_pack'])
+        g1.add_all(k['bcint/comm_flux'], deps=k['eles/disu'])
 
-        q2.enqueue(kernels['mpiint', 'scal_fpts_send'])
-        q2.enqueue(kernels['mpiint', 'scal_fpts_recv'])
-        q2.enqueue(kernels['mpiint', 'scal_fpts_unpack'])
+        # Make a copy of the solution (if used by source terms)
+        g1.add_all(k['eles/copy_soln'])
 
-        runall([q1, q2])
+        # Interpolate the solution to the quadrature points
+        g1.add_all(k['eles/qptsu'])
 
-        q1.enqueue(kernels['mpiint', 'comm_flux'])
-        q1.enqueue(kernels['eles', 'tdivtconf'])
-        q1.enqueue(kernels['eles', 'negdivconf'], t=t)
-        runall([q1])
+        # Compute the transformed flux
+        for l in k['eles/tdisf_curved'] + k['eles/tdisf_linear']:
+            g1.add(l, deps=deps(l, 'eles/qptsu'))
+
+        # Compute the transformed divergence of the partially corrected flux
+        for l in k['eles/tdivtpcorf']:
+            ldeps = deps(l, 'eles/tdisf_curved', 'eles/tdisf_linear',
+                         'eles/copy_soln', 'eles/disu')
+            g1.add(l, deps=ldeps + k['mpiint/scal_fpts_pack'])
+        g1.commit()
+
+        g2 = self.backend.graph()
+
+        # Compute the common normal flux at our MPI interfaces
+        g2.add_all(k['mpiint/scal_fpts_unpack'])
+        for l in k['mpiint/comm_flux']:
+            g2.add(l, deps=deps(l, 'mpiint/scal_fpts_unpack'))
+
+        # Compute the transformed divergence of the corrected flux
+        g2.add_all(k['eles/tdivtconf'], deps=k['mpiint/comm_flux'])
+
+        # Obtain the physical divergence of the corrected flux
+        for l in k['eles/negdivconf']:
+            g2.add(l, deps=deps(l, 'eles/tdivtconf'))
+        g2.commit()
+
+        return g1, g2
