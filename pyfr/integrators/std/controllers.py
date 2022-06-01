@@ -20,7 +20,8 @@ class BaseStdController(BaseStdIntegrator):
 
         # Fire off any event handlers if not restarting
         if not self.isrestart:
-            self.completed_step_handlers(self)
+            for csh in self.completed_step_handlers:
+                csh(self)
 
     def _accept_step(self, dt, idxcurr, err=None):
         self.tcurr += dt
@@ -41,7 +42,8 @@ class BaseStdController(BaseStdIntegrator):
         self._curr_grad_soln = None
 
         # Fire off any event handlers
-        self.completed_step_handlers(self)
+        for csh in self.completed_step_handlers:
+            csh(self)
 
         # Abort if plugins request it
         self._check_abort()
@@ -105,7 +107,7 @@ class StdPIController(BaseStdController):
         # PI control values
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
-        print('hi, sambit _original')
+
         # Estimate of previous error
         self._errprev = 1.0
 
