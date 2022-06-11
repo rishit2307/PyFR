@@ -61,12 +61,14 @@ def get_local_rank():
         'OMPI_COMM_WORLD_LOCAL_RANK',
         'SLURM_LOCALID'
     ]
-
+ 
     for ev in envs:
         if ev in os.environ:
             return int(os.environ[ev])
     else:
         from mpi4py import MPI
+       
+        
 
         return MPI.COMM_WORLD.Split_type(MPI.COMM_TYPE_SHARED).rank
 
