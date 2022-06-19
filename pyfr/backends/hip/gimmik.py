@@ -3,8 +3,9 @@
 from gimmik import generate_mm
 import numpy as np
 
-from pyfr.backends.base import ComputeKernel, NotSuitableError
-from pyfr.backends.hip.provider import HIPKernelProvider, get_grid_for_block
+from pyfr.backends.base import NotSuitableError
+from pyfr.backends.hip.provider import (HIPKernel, HIPKernelProvider,
+                                        get_grid_for_block)
 
 
 class HIPGiMMiKKernels(HIPKernelProvider):
@@ -33,17 +34,21 @@ class HIPGiMMiKKernels(HIPKernelProvider):
         grid = get_grid_for_block(block, b.ncol)
 
         # Generate
-        src = generate_mm(a.get(), dtype=a.dtype, platform='cuda',
-                          alpha=alpha, beta=beta)
-        src = src.replace('void', f'__launch_bounds__({block[0]}) void')
+        src = generate_mm(arr, a.dtype, 'hip', alpha=alpha, beta=beta,
+                          n=b.ncol, ldb=b.leaddim, ldc=out.leaddim)
 
         # Build
-        fun = self._build_kernel('gimmik_mm', src,
-                                 [np.int32, np.intp]*2 + [np.int32])
+        fun = self._build_kernel('gimmik_mm', src, 'PP')
 
-        class MulKernel(ComputeKernel):
-            def run(self, queue):
-                fun.exec_async(grid, block, queue.stream_comp, b.ncol, b,
-                               b.leaddim, out, out.leaddim)
+        # Set the parameters
+        params = fun.make_params(grid, block)
+        params.set_args(b, out)
 
-        return MulKernel()
+        class MulKernel(HIPKernel):
+            def add_to_graph(self, graph, deps):
+                pass
+
+            def run(self, stream):
+                fun.exec_async(stream, params)
+
+        return MulKernel(mats=[b, out])

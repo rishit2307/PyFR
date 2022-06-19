@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
-from functools import wraps
+from functools import cached_property, wraps
 from itertools import count
 import math
 from weakref import WeakKeyDictionary, WeakValueDictionary
@@ -10,7 +10,6 @@ import numpy as np
 
 from pyfr.backends.base.kernels import NotSuitableError
 from pyfr.template import DottedTemplateLookup
-from pyfr.util import lazyprop
 
 
 def recordmat(fn):
@@ -24,7 +23,7 @@ def recordmat(fn):
     return newfn
 
 
-class BaseBackend(object):
+class BaseBackend:
     name = None
 
     def __init__(self, cfg):
@@ -51,7 +50,7 @@ class BaseBackend(object):
         # Mapping from backend objects to memory extents
         self._obj_extents = WeakKeyDictionary()
 
-    @lazyprop
+    @cached_property
     def lookup(self):
         pkg = f'pyfr.backends.{self.name}.kernels'
         dfltargs = dict(fpdtype=self.fpdtype, soasz=self.soasz,
@@ -133,9 +132,6 @@ class BaseBackend(object):
     def matrix_slice(self, mat, ra, rb, ca, cb):
         return self.matrix_slice_cls(self, mat, ra, rb, ca, cb)
 
-    def matrix_bank(self, mats, initbank=0, tags=set()):
-        return self.matrix_bank_cls(self, mats, initbank, tags)
-
     @recordmat
     def xchg_matrix(self, ioshape, initval=None, extent=None, aliases=None,
                     tags=set()):
@@ -145,12 +141,11 @@ class BaseBackend(object):
     def xchg_matrix_for_view(self, view, tags=set()):
         return self.xchg_matrix((view.nvrow, view.nvcol*view.n), tags=tags)
 
-    def view(self, matmap, rmap, cmap, rstridemap=None, vshape=tuple(),
-             tags=set()):
+    def view(self, matmap, rmap, cmap, rstridemap=None, vshape=(), tags=set()):
         return self.view_cls(self, matmap, rmap, cmap, rstridemap, vshape,
                              tags)
 
-    def xchg_view(self, matmap, rmap, cmap, rstridemap=None, vshape=tuple(),
+    def xchg_view(self, matmap, rmap, cmap, rstridemap=None, vshape=(),
                   tags=set()):
         return self.xchg_view_cls(self, matmap, rmap, cmap, rstridemap,
                                   vshape, tags)
@@ -166,8 +161,11 @@ class BaseBackend(object):
         else:
             raise KeyError(f'Kernel "{name}" has no providers')
 
-    def queue(self):
-        return self.queue_cls(self)
+    def ordered_meta_kernel(self, kerns):
+        return self.ordered_meta_kernel_cls(kerns)
 
-    def runall(self, sequence):
-        self.queue_cls.runall(sequence)
+    def unordered_meta_kernel(self, kerns):
+        return self.unordered_meta_kernel_cls(kerns)
+
+    def graph(self):
+        return self.graph_cls(self)

@@ -9,12 +9,12 @@ import time
 import numpy as np
 
 from pyfr.inifile import Inifile
-from pyfr.mpiutil import get_comm_rank_root, get_mpi
+from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.plugins import get_plugin
 from pyfr.util import memoize
 
 
-class BaseIntegrator(object):
+class BaseIntegrator:
     def __init__(self, backend, rallocs, mesh, initsoln, cfg):
         self.backend = backend
         self.rallocs = rallocs
@@ -49,9 +49,6 @@ class BaseIntegrator(object):
         # Extract the UUID of the mesh (to be saved with solutions)
         self.mesh_uuid = mesh['mesh_uuid']
 
-        # Get a queue for subclasses to use
-        self._queue = backend.queue()
-
         # Solution cache
         self._curr_soln = None
 
@@ -69,7 +66,7 @@ class BaseIntegrator(object):
 
         for s in self.cfg.sections():
             if (m := re.match('soln-plugin-(.+?)(?:-(.+))?$', s)):
-                cfgsect, name, suffix = m.group(0), m.group(1), m.group(2)
+                cfgsect, name, suffix = m[0], m[1], m[2]
 
                 data = {}
                 if initsoln is not None:
@@ -153,13 +150,13 @@ class BaseIntegrator(object):
 
     def _check_abort(self):
         comm, rank, root = get_comm_rank_root()
-        if comm.allreduce(self.abort, op=get_mpi('lor')):
+        if comm.allreduce(self.abort, op=mpi.LOR):
             # Ensure that the callbacks registered in atexit
             # are called only once if stopping the computation
             sys.exit(1)
 
 
-class BaseCommon(object):
+class BaseCommon:
     def _get_gndofs(self):
         comm, rank, root = get_comm_rank_root()
 
@@ -167,7 +164,7 @@ class BaseCommon(object):
         ndofs = sum(self.system.ele_ndofs)
 
         # Sum to get the global number over all partitions
-        return comm.allreduce(ndofs, op=get_mpi('sum'))
+        return comm.allreduce(ndofs, op=mpi.SUM)
 
     @memoize
     def _get_axnpby_kerns(self, *rs, subdims=None):
@@ -188,9 +185,15 @@ class BaseCommon(object):
 
         return kerns
 
-    def _add(self, *args, subdims=None):
+    def _addv(self, consts, regidxs, subdims=None):
         # Get a suitable set of axnpby kernels
-        axnpby = self._get_axnpby_kerns(*args[1::2], subdims=subdims)
+        axnpby = self._get_axnpby_kerns(*regidxs, subdims=subdims)
 
-        # Bind and run the axnpby kernels
-        self._queue.enqueue_and_run(axnpby, *args[::2])
+        # Bind the arguments
+        for k in axnpby:
+            k.bind(*consts)
+
+        self.backend.run_kernels(axnpby)
+
+    def _add(self, *args, subdims=None):
+        self._addv(args[::2], args[1::2], subdims=subdims)
