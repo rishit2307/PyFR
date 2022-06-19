@@ -195,7 +195,6 @@ class BaseSystem(object):
 
     def filt(self, uinoutbank):
         self.eles_scal_upts_inb.active = uinoutbank
-
         self._queues[0].enqueue_and_run(self._kernels['eles', 'filter_soln'])
 
     def ele_scal_upts(self, idx):

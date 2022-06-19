@@ -241,7 +241,8 @@ def _process_common(args, mesh, soln, cfg):
         solver.completed_step_handlers.append(callb)
 
     # Execute!
-    print(2)
+    
+   
     solver.run()
 
     # Finalise MPI
