@@ -31,12 +31,7 @@ def jacobi(n, a, b, z):
 
 
 def jacobi_diff(n, a, b, z):
-<<<<<<< HEAD
-    dj = [0]
-   
-=======
     dj = [np.zeros_like(z)]
->>>>>>> develop
 
     if n >= 1:
         dj.extend(jp*(i + a + b + 2)/2
@@ -58,24 +53,6 @@ class BasePolyBasis:
 
     @clean
     def ortho_basis_at(self, pts):
-<<<<<<< HEAD
-        if len(pts) and not isinstance(pts[0], Iterable):
-            
-            pts = [(p,) for p in pts]
-        
-        
-
-        f =  np.array([self.ortho_basis_at_py(*p) for p in pts]).T
-       
-        return f
-
-    @clean
-    def jac_ortho_basis_at(self, pts):
-        if len(pts) and not isinstance(pts[0], Iterable):
-            pts = [(p,) for p in pts]
-        
-         
-=======
         pts = np.atleast_2d(np.atleast_1d(pts).T)
 
         return np.array(self._ortho_basis_at(*pts))
@@ -83,34 +60,16 @@ class BasePolyBasis:
     @clean
     def jac_ortho_basis_at(self, pts):
         pts = np.atleast_2d(np.atleast_1d(pts).T)
->>>>>>> develop
 
         return np.array(self._jac_ortho_basis_at(*pts)).swapaxes(0, 1)
 
     @clean
     def nodal_basis_at(self, epts):
-<<<<<<< HEAD
-        
-   
-        
-        
-
-        return np.linalg.solve(self.vdm, self.ortho_basis_at(epts)).T
-
-    @clean
-    def jac_nodal_basis_at(self, epts):
-
-        
-       
-
-        return np.linalg.solve(self.vdm, self.jac_ortho_basis_at(epts))
-=======
         return (self.invvdm @ self.ortho_basis_at(epts)).T
 
     @clean
     def jac_nodal_basis_at(self, epts):
         return self.invvdm @ self.jac_ortho_basis_at(epts)
->>>>>>> develop
 
     @cached_property
     def vdm(self):
@@ -137,32 +96,13 @@ class BasePolyBasis:
 class LinePolyBasis(BasePolyBasis):
     name = 'line'
 
-<<<<<<< HEAD
-    def ortho_basis_at_py(self, p):
-        
-=======
     def _ortho_basis_at(self, p):
->>>>>>> develop
         jp = jacobi(self.order - 1, 0, 0, p)
         return [(i + 0.5)**0.5*p for i, p in enumerate(jp)]
 
-<<<<<<< HEAD
-    def jac_ortho_basis_at_py(self, p):
-        
-     
-        djp = jacobi_diff(self.order - 1, 0, 0, p)
-        
-         
-        
-        c = [(sqrt(i + 0.5)*p,) for i, p in enumerate(djp)]
-        
-        return c
-
-=======
     def _jac_ortho_basis_at(self, p):
         djp = jacobi_diff(self.order - 1, 0, 0, p)
         return [((i + 0.5)**0.5*p,) for i, p in enumerate(djp)]
->>>>>>> develop
 
     @cached_property
     def degrees(self):
