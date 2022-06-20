@@ -131,6 +131,7 @@ class StdPIController(BaseStdController):
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
+        print("Branch controller")
         
         self.errhist = []
 
