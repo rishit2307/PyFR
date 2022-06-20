@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 
-import numpy as np
-
-from pyfr.backends.base import ComputeKernel, NullComputeKernel
-from pyfr.backends.base.packing import BasePackingKernels
-from pyfr.backends.hip.provider import HIPKernelProvider, get_grid_for_block
+from pyfr.backends.base import NullKernel
+from pyfr.backends.hip.provider import (HIPKernel, HIPKernelProvider,
+                                        get_grid_for_block)
 
 
-class HIPPackingKernels(HIPKernelProvider, BasePackingKernels):
+class HIPPackingKernels(HIPKernelProvider):
     def pack(self, mv):
         hip = self.backend.hip
 
@@ -22,47 +20,44 @@ class HIPPackingKernels(HIPKernelProvider, BasePackingKernels):
         src = self.backend.lookup.get_template('pack').render(blocksz=block[0])
 
         # Build
-        kern = self._build_kernel('pack_view', src, [np.int32]*3 + [np.intp]*4)
+        kern = self._build_kernel('pack_view', src, 'iiiPPPP')
+
+        # Set the arguments
+        params = kern.make_params(grid, block)
+        params.set_args(v.n, v.nvrow, v.nvcol, v.basedata, v.mapping,
+                        v.rstrides or 0, m)
 
         # If MPI is HIP aware then we just need to pack the buffer
         if self.backend.mpitype == 'hip-aware':
-            class PackXchgViewKernel(ComputeKernel):
-                def run(self, queue):
-                    # Pack
-                    kern.exec_async(
-                        grid, block, queue.stream_comp, v.n, v.nvrow, v.nvcol,
-                        v.basedata, v.mapping, v.rstrides or 0, m
-                    )
+            class PackXchgViewKernel(HIPKernel):
+                def add_to_graph(self, graph, deps):
+                    pass
+
+                def run(self, stream):
+                    kern.exec_async(stream, params)
         # Otherwise, we need to both pack the buffer and copy it back
         else:
-            # Create a HIP event
-            event = hip.create_event()
+            class PackXchgViewKernel(HIPKernel):
+                def add_to_graph(self, graph, deps):
+                    pass
 
-            class PackXchgViewKernel(ComputeKernel):
-                def run(self, queue):
-                    # Pack
-                    kern.exec_async(
-                        grid, block, queue.stream_comp, v.n, v.nvrow, v.nvcol,
-                        v.basedata, v.mapping, v.rstrides or 0, m
-                    )
+                def run(self, stream):
+                    kern.exec_async(stream, params)
+                    hip.memcpy(m.hdata, m.data, m.nbytes, stream)
 
-                    # Copy the packed buffer to the host
-                    event.record(queue.stream_comp)
-                    queue.stream_copy.wait_for_event(event)
-                    hip.memcpy_async(m.hdata, m.data, m.nbytes,
-                                     queue.stream_copy)
-
-        return PackXchgViewKernel()
+        return PackXchgViewKernel(mats=[mv])
 
     def unpack(self, mv):
         hip = self.backend.hip
 
         if self.backend.mpitype == 'hip-aware':
-            return NullComputeKernel()
+            return NullKernel()
         else:
-            class UnpackXchgMatrixKernel(ComputeKernel):
-                def run(self, queue):
-                    hip.memcpy_async(mv.data, mv.hdata, mv.nbytes,
-                                     queue.stream_comp)
+            class UnpackXchgMatrixKernel(HIPKernel):
+                def add_to_graph(self, graph, deps):
+                    pass
 
-            return UnpackXchgMatrixKernel()
+                def run(self, stream):
+                    hip.memcpy(mv.data, mv.hdata, mv.nbytes, stream)
+
+            return UnpackXchgMatrixKernel(mats=[mv])

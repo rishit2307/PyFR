@@ -16,7 +16,7 @@ class METISErrorInput(METISError): pass
 class METISErrorMemory(METISError): pass
 
 
-class METISWrappers(object):
+class METISWrappers:
     # Possible return codes
     _statuses = {
         -2: METISErrorInput,
@@ -181,7 +181,8 @@ class METISPartitioner(BasePartitioner):
                 parts.ctypes
             )
 
+        # Check for invalid partition numbers
         if np.max(parts) >= len(partwts):
-            raise RuntimeError('Metis Partitioner Error: partition index > npart-1 ')
-            
+            raise RuntimeError('Invalid partition number from METIS')
+
         return parts

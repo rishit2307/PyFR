@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 
+from collections import defaultdict
+
+from ctypes import addressof, c_void_p, cast
+from functools import cached_property
+
 import pyfr.backends.base as base
-from pyfr.util import lazyprop
 
 
 class OpenMPMatrixBase(base.MatrixBase):
@@ -32,90 +36,70 @@ class OpenMPMatrixBase(base.MatrixBase):
 
 
 class OpenMPMatrix(OpenMPMatrixBase, base.Matrix):
-    @lazyprop
+    @cached_property
     def hdata(self):
         return self.data
 
 
 class OpenMPMatrixSlice(base.MatrixSlice):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    @cached_property
+    def data(self):
+        return self.parent.data[self.ba:self.bb, self.ra:self.rb, :]
 
-        self._as_parameter_map = {}
-
-    def _init_data(self, mat):
-        return mat.data[self.ba:self.bb, self.ra:self.rb, :]
-
-    @property
+    @cached_property
     def _as_parameter_(self):
-        try:
-            return self._as_parameter_map[self.parent.mid]
-        except KeyError:
-            param = self.data.ctypes.data
-            self._as_parameter_map[self.parent.mid] = param
-
-            return param
+        return self.data.ctypes.data
 
 
-class OpenMPMatrixBank(base.MatrixBank):
-    pass
+class OpenMPConstMatrix(OpenMPMatrixBase, base.ConstMatrix): pass
+class OpenMPXchgMatrix(OpenMPMatrix, base.XchgMatrix): pass
+class OpenMPXchgView(base.XchgView): pass
+class OpenMPView(base.View): pass
 
 
-class OpenMPConstMatrix(OpenMPMatrixBase, base.ConstMatrix):
-    pass
+class OpenMPGraph(base.Graph):
+    def __init__(self, backend):
+        super().__init__(backend)
 
+        self.klist = []
+        self.mpi_idxs = defaultdict(list)
 
-class OpenMPXchgMatrix(OpenMPMatrix, base.XchgMatrix):
-    pass
+    def add_mpi_req(self, req, deps=[]):
+        super().add_mpi_req(req, deps)
 
+        if deps:
+            ix = max(self.knodes[d] for d in deps)
 
-class OpenMPXchgView(base.XchgView):
-    pass
+            self.mpi_idxs[ix].append(req)
 
+    def commit(self):
+        super().commit()
 
-class OpenMPView(base.View):
-    pass
+        n = len(self.klist)
 
+        # Obtain pointers to our kernel functions and their arguments
+        self._kfunargs = (c_void_p * (2*n))()
+        self._kfunargs[0::2] = [cast(k.fun, c_void_p) for k in self.klist]
+        self._kfunargs[1::2] = [addressof(k.kargs) for k in self.klist]
 
-class OpenMPQueue(base.Queue):
-    def _exec_nonblock(self):
-        while self._items:
-            kern = self._items[0][0]
+        # Group kernels in runs separated by MPI requests
+        self._runlist, i = [], 0
 
-            # See if kern will block
-            if self._at_sequence_point(kern) or kern.ktype == 'compute':
-                break
+        for j in sorted(self.mpi_idxs):
+            self._runlist.append((i, j - i, self.mpi_idxs[j]))
+            i = j
 
-            self._exec_item(*self._items.popleft())
+        if i != n - 1:
+            self._runlist.append((i, n - i, []))
 
-    def _wait(self):
-        if self._last_ktype == 'mpi':
-            from mpi4py import MPI
+    def run(self):
+        # Start all dependency-free MPI requests
+        self._startall(self.mpi_root_reqs)
 
-            MPI.Prequest.Waitall(self.mpi_reqs)
-            self.mpi_reqs = []
+        for i, n, reqs in self._runlist:
+            self.backend.krunner(i, n, self._kfunargs)
 
-        self._last_ktype = None
+            self._startall(reqs)
 
-    def _at_sequence_point(self, item):
-        return self._last_ktype == 'mpi' and item.ktype != 'mpi'
-
-    @staticmethod
-    def runall(queues):
-        # Fire off any non-blocking kernels
-        for q in queues:
-            q._exec_nonblock()
-
-        while any(queues):
-            # Execute a (potentially) blocking item from each queue
-            for q in filter(None, queues):
-                q._exec_nowait()
-
-            # Now consider kernels which will wait
-            for q in filter(None, queues):
-                q._exec_next()
-                q._exec_nonblock()
-
-        # Wait for all tasks to complete
-        for q in queues:
-            q._wait()
+        # Wait for all of the MPI requests to finish
+        self._waitall(self.mpi_reqs)

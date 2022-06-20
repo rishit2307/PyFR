@@ -4,8 +4,8 @@ from ctypes import cast, c_int, c_double, c_float, c_void_p
 
 import numpy as np
 
-from pyfr.backends.base import ComputeKernel, NotSuitableError
-from pyfr.backends.openmp.provider import OpenMPKernelProvider
+from pyfr.backends.base import NotSuitableError
+from pyfr.backends.openmp.provider import OpenMPKernel, OpenMPKernelProvider
 from pyfr.ctypesutil import LibWrapper
 
 
@@ -105,17 +105,11 @@ class OpenMPXSMMKernels(OpenMPKernelProvider):
         execptr = cast(self._execfn, c_void_p).value
 
         # Render our parallel wrapper kernel
-        src = self.backend.lookup.get_template('batch-gemm').render(lib='xsmm')
-
-        # Argument types for batch_gemm
-        argt = [np.intp] + [np.intp, np.int32]*3
+        src = self.backend.lookup.get_template('batch-gemm').render()
 
         # Build
-        batch_gemm = self._build_kernel('batch_gemm', src, argt)
+        batch_gemm = self._build_kernel('batch_gemm', src, 'PPiPiPi')
+        batch_gemm.set_args(execptr, blkptr, b.nblocks, b, b.blocksz, out,
+                            out.blocksz)
 
-        class MulKernel(ComputeKernel):
-            def run(iself, queue):
-                batch_gemm(execptr, blkptr, b.nblocks, b, b.blocksz, out,
-                           out.blocksz)
-
-        return MulKernel()
+        return OpenMPKernel(mats=[b, out], misc=[self], kernel=batch_gemm)
