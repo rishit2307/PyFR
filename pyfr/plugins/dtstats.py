@@ -23,15 +23,14 @@ class DtStatsPlugin(BasePlugin):
 
         # The root rank needs to open the output file
         if rank == root:
-            self.outf = init_csv(self.cfg, cfgsect, 'n,t,dt,action,error,nfilt,nstep')
+            self.outf = init_csv(self.cfg, cfgsect, 'n,t,dt,action,error')
         else:
             self.outf = None
 
     def __call__(self, intg):
         # Process the sequence of rejected/accepted steps
-        
-        for i, (dt, act, err, nfilt, nstep) in enumerate(intg.stepinfo, start=self.count):
-            self.stats.append((i, self.tprev, dt, act, err, nfilt, nstep))
+        for i, (dt, act, err) in enumerate(intg.stepinfo, start=self.count):
+            self.stats.append((i, self.tprev, dt, act, err))
 
         # Update the total step count and save the current time
         self.count += len(intg.stepinfo)

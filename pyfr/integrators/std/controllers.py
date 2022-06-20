@@ -17,7 +17,6 @@ class BaseStdController(BaseStdIntegrator):
 
         # Stats on the most recent step
         self.stepinfo = []
-        self.nfiltsteps = 0
 
         # Fire off any event handlers if not restarting
         if not self.isrestart:
@@ -28,26 +27,14 @@ class BaseStdController(BaseStdIntegrator):
         self.tcurr += dt
         self.nacptsteps += 1
         self.nacptchain += 1
-    
+        self.stepinfo.append((dt, 'accept', err))
 
         self._idxcurr = idxcurr
-       
-
-
-        
 
         # Filter
-        
         if self._fnsteps and self.nacptsteps % self._fnsteps == 0:
-            self.nfiltsteps = self.nsteps
-            self.stepinfo.append((dt, 'accept', err, self.nfiltsteps, self.nsteps))
-            
             self.system.filt(idxcurr)
-        
-        else:
-            self.stepinfo.append((dt, 'accept', err, self.nfiltsteps, self.nsteps))
 
-        
         # Invalidate the solution cache
         self._curr_soln = None
 
@@ -70,7 +57,7 @@ class BaseStdController(BaseStdIntegrator):
 
         self.nacptchain = 0
         self.nrjctsteps += 1
-        self.stepinfo.append((dt, 'reject', err, self.nfiltsteps, self.nsteps))
+        self.stepinfo.append((dt, 'reject', err))
 
         self._idxcurr = idxold
 
@@ -120,7 +107,7 @@ class StdPIController(BaseStdController):
         # PI control values
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
-        print("Branch develop")
+
         # Estimate of previous error
         self._errprev = 1.0
 
@@ -201,7 +188,6 @@ class StdPIController(BaseStdController):
             fac = min(maxf, max(minf, saff*fac))
 
             # Compute the size of the next step
-            fac = 1
             self._dt = fac*dt
 
             # Decide if to accept or reject the step
