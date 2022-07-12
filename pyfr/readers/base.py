@@ -108,6 +108,7 @@ class NodalMeshAssembler:
 
     def _extract_faces(self, foeles):
         fofaces = defaultdict(list)
+        
 
         for petype, eles in foeles.items():
             for pftype in self._petype_fnums[petype]:
@@ -119,6 +120,7 @@ class NodalMeshAssembler:
     def _pair_fluid_faces(self, ffofaces):
         pairs = defaultdict(list)
         resid = {}
+        
 
         for pftype, faces in ffofaces.items():
             for f, n in chain.from_iterable(zip(f, n) for f, n in faces):
@@ -132,24 +134,47 @@ class NodalMeshAssembler:
                     resid[sn] = f
 
         return pairs, resid
+    
+    def _check_periodic(self, lpf, rpf):
+        for i in lpf:
+            if i not in rpf:
+                raise ValueError("Unmatched periodic faces")
+        
+        
+
+
+
 
     def _pair_periodic_fluid_faces(self, bpart, resid):
         pfaces, pmap = defaultdict(list), {}
+        
 
         for k, (lpent, rpent) in self._pfacespents.items():
+            
             for pftype in bpart[lpent]:
+                #periodic face node array. Shape is Numofelems of pftype*num vertices of the element
                 lfnodes = bpart[lpent][pftype]
                 rfnodes = bpart[rpent][pftype]
 
+                #physical location of the periodic face nodes
                 lfpts = self._nodepts[lfnodes]
                 rfpts = self._nodepts[rfnodes]
+                
+                
 
                 lfidx = fuzzysort(lfpts.mean(axis=1).T, range(len(lfnodes)))
                 rfidx = fuzzysort(rfpts.mean(axis=1).T, range(len(rfnodes)))
+                import pdb;pdb.set_trace()
+                self.cvec = (self._nodepts[sorted(lfidx[0])] - self._nodepts[sorted(rfidx[0])])
+
+                
 
                 for lfn, rfn in zip(lfnodes[lfidx], rfnodes[rfidx]):
+                    
                     lf = resid.pop(tuple(sorted(lfn)))
                     rf = resid.pop(tuple(sorted(rfn)))
+                    
+                    self._check_periodic(self._nodepts[sorted(lfn)], self._nodepts[sorted(rfn)])
 
                     pfaces[pftype].append([lf, rf])
                     pmap[lf, rf] = k
@@ -170,6 +195,7 @@ class NodalMeshAssembler:
 
     def get_connectivity(self):
         # For connectivity a first-order representation is sufficient
+        
         eles = self._to_first_order(self._elenodes)
 
         # Split into fluid and boundary parts

@@ -119,6 +119,7 @@ class StdPIController(BaseStdController):
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
         self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
         self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
+        print("alpha, beta, gamma")
       
     
        
@@ -133,7 +134,7 @@ class StdPIController(BaseStdController):
         self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
-        print("Branch controller")
+        
         
         self.errhist = []
 
