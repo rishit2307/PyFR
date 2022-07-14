@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from ast import Index
 import ctypes as ct
 import functools as ft
 import itertools as it
@@ -85,18 +86,23 @@ def npeval(expr, locals):
 
 def fuzzysort(arr, idx, dim=0, tol=1e-6):
     # Extract our dimension and argsort
+    
     arrd = arr[dim]
+        
     srtdidx = sorted(idx, key=arrd.__getitem__)
-
+    
     if len(srtdidx) > 1:
         i, ix = 0, srtdidx[0]
         for j, jx in enumerate(srtdidx[1:], start=1):
             if arrd[jx] - arrd[ix] >= tol:
+                
                 if j - i > 1:
                     srtdidx[i:j] = fuzzysort(arr, srtdidx[i:j], dim + 1, tol)
                 i, ix = j, jx
-
+        
+        
         if i != j:
+            
             srtdidx[i:] = fuzzysort(arr, srtdidx[i:], dim + 1, tol)
 
     return srtdidx

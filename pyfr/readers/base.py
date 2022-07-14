@@ -96,6 +96,7 @@ class NodalMeshAssembler:
         fnums = self._petype_fnums[petype][pftype]
 
         # First-order nodes associated with this face
+        
         fnmap = self._petype_fnmap[petype][pftype]
 
         # Connectivity: (petype, eidx, fidx, flags)
@@ -116,6 +117,40 @@ class NodalMeshAssembler:
 
         return fofaces
 
+    def _check_periodic(self, lfp, rfp, pftype, idx):
+        
+
+        
+        cvecn = rfp - lfp
+        if np.all(cvecn==0):
+            raise ValueError("Faces are not periodic")
+        
+        if np.isclose(cvecn, cvecn[0], atol=1e-05, rtol=1e-05).all():
+            self._cvec[idx][pftype] =  abs(cvecn[0, :])
+        else:
+            raise ValueError("Faces are not periodic")
+
+                    
+        
+        # for i in range(len(cvecn)):
+        #     if np.all(cvecn[i,:] == 0):
+        #         pass
+        #     elif np.all (cvecn[i,:]) != 0:
+        #         if np.min(cvecn[i,:]) == np.max(cvecn[i,:]):
+        #             self._cvec[idx][pftype] =  cvecn[:, 0]
+        #         else:
+        #             raise ValueError("Faces are not periodic")
+        
+        
+        # if np.min(np.diff(np.flatnonzero(cvecn)))==np.max(np.diff(np.flatnonzero(cvecn))):
+        #     if np.min(cvecn[cvecn!=0]) == np.max(cvecn[cvecn!=0]):
+        #         
+        #     else:
+        #         raise RuntimeError("Faces are not periodic")
+        # else:
+            
+        #     raise RuntimeError("Faces are not periodic")
+
     def _pair_fluid_faces(self, ffofaces):
         pairs = defaultdict(list)
         resid = {}
@@ -134,26 +169,61 @@ class NodalMeshAssembler:
         return pairs, resid
 
     def _pair_periodic_fluid_faces(self, bpart, resid):
-        pfaces, pmap = defaultdict(list), {}
+        pfaces, pmap, self._cvec = defaultdict(list), {} , defaultdict(dict)
+        
 
         for k, (lpent, rpent) in self._pfacespents.items():
             for pftype in bpart[lpent]:
+
                 lfnodes = bpart[lpent][pftype]
                 rfnodes = bpart[rpent][pftype]
 
+                lfnodes_unq = np.unique(lfnodes)
+                rfnodes_unq = np.unique(rfnodes)
+
+
+
                 lfpts = self._nodepts[lfnodes]
                 rfpts = self._nodepts[rfnodes]
-
+                
+                lfpts_unq = self._nodepts[lfnodes_unq, :]
+                rfpts_unq = self._nodepts[rfnodes_unq, :]
+                
                 lfidx = fuzzysort(lfpts.mean(axis=1).T, range(len(lfnodes)))
                 rfidx = fuzzysort(rfpts.mean(axis=1).T, range(len(rfnodes)))
 
+                lfidx_unq = fuzzysort(lfpts_unq.T, range(len(lfpts_unq)))
+                rfidx_unq = fuzzysort(rfpts_unq.T, range(len(rfpts_unq)))
+
+                
+                
+                self._check_periodic(lfpts_unq[lfidx_unq], rfpts_unq[rfidx_unq], pftype, k)
+
+
+                
+                
                 for lfn, rfn in zip(lfnodes[lfidx], rfnodes[rfidx]):
+                   
                     lf = resid.pop(tuple(sorted(lfn)))
                     rf = resid.pop(tuple(sorted(rfn)))
 
                     pfaces[pftype].append([lf, rf])
                     pmap[lf, rf] = k
+        
+       
+        if self._cvec:
+            vec = []
+            for k ,(_, _) in self._pfacespents.items():
+                for  pftype in bpart[lpent]:
+                    vec.append(list(self._cvec[k][pftype]))
+            
+        
+            
+            if not np.isclose(np.array(vec), np.array(vec[0]), atol = 1e-5, rtol = 1e-5).all():
+                raise ValueError("Faces are not periodic")
+        
 
+            
         return pfaces, pmap
 
     def _ident_boundary_faces(self, bpart, resid):
