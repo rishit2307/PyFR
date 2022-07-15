@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
+
 import math
 
 import numpy as np
-from statistics import mean
+
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.mpiutil import get_comm_rank_root, mpi
 
@@ -17,18 +18,16 @@ class BaseStdController(BaseStdIntegrator):
         # Stats on the most recent step
         self.stepinfo = []
 
-
         # Fire off any event handlers if not restarting
         if not self.isrestart:
             for csh in self.completed_step_handlers:
                 csh(self)
 
-    def _accept_step(self, dt, idxcurr, cfl, nsteps,nrej, err=None):
+    def _accept_step(self, dt, idxcurr, err=None):
         self.tcurr += dt
         self.nacptsteps += 1
         self.nacptchain += 1
-        self.stepinfo.append((dt, 'accept', err,cfl, nsteps, nrej))
-
+        self.stepinfo.append((dt, 'accept', err))
 
         self._idxcurr = idxcurr
 
@@ -52,21 +51,19 @@ class BaseStdController(BaseStdIntegrator):
         # Clear the step info
         self.stepinfo = []
 
-
-    def _reject_step(self, dt, idxold, cfl,nsteps,nrej,  err=None):
+    def _reject_step(self, dt, idxold, err=None):
         if dt <= self.dtmin:
             raise RuntimeError('Minimum sized time step rejected')
 
         self.nacptchain = 0
         self.nrjctsteps += 1
-        self.stepinfo.append((dt, 'reject', err, cfl , nsteps, nrej))
+        self.stepinfo.append((dt, 'reject', err))
 
         self._idxcurr = idxold
 
 
 class StdNoneController(BaseStdController):
     controller_name = 'none'
-
 
     @property
     def controller_needs_errest(self):
@@ -87,11 +84,8 @@ class StdNoneController(BaseStdController):
             self._accept_step(dt, idxcurr)
 
 
-
 class StdPIController(BaseStdController):
     controller_name = 'pi'
-
-
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -100,10 +94,6 @@ class StdPIController(BaseStdController):
 
         # Maximum time step
         self.dtmax = self.cfg.getfloat(sect, 'dt-max', 1e2)
-
-        self.cfl = [self.dtmax]
-        
-
 
         # Error tolerances
         self._atol = self.cfg.getfloat(sect, 'atol')
@@ -114,31 +104,20 @@ class StdPIController(BaseStdController):
         if self._norm not in {'l2', 'uniform'}:
             raise ValueError('Invalid error norm')
 
-
         # PI control values
         self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
-        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.21)
-        self._gamma = self.cfg.getfloat(sect, 'pi-beta', 0.1)
-        print("alpha, beta, gamma")
-      
-    
-       
+        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.42)
 
+        print("beta is {}, alpha is {}".format(self._beta, self._alpha))
 
         # Estimate of previous error
         self._errprev = 1.0
 
-        self.nrej = 0
-
         # Step size adjustment factors
-        self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
+        self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.80)
+        print("saff is {}".format(self._saffac))
         self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
         self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.3)
-        
-        
-        self.errhist = []
-
-
 
         if not self._minfac < 1 <= self._maxfac:
             raise ValueError('Invalid max-fact, min-fact')
@@ -183,8 +162,8 @@ class StdPIController(BaseStdController):
             err = math.sqrt(float(err))
 
         return err if not math.isnan(err) else 100
-    def advance_to(self, t):
 
+    def advance_to(self, t):
         if t < self.tcurr:
             raise ValueError('Advance time is in the past')
 
@@ -192,32 +171,23 @@ class StdPIController(BaseStdController):
         maxf = self._maxfac
         minf = self._minfac
         saff = self._saffac
-        sord = self.stepper_order 
-        
-        expb = self._beta / sord
+        sord = self.stepper_order
+
         expa = self._alpha / sord
-        expc = self._gamma / sord
-     
-        
+        expb = self._beta / sord
+
         while self.tcurr < t:
             # Decide on the time step
-            dt = max(min(t - self.tcurr, self._dt, self.dtmax, self.cfl[-1]), self.dtmin)
-            
-           
-                       
+            dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
+
             # Take the step
             idxcurr, idxprev, idxerr = self.step(self.tcurr, dt)
 
             # Estimate the error
-            
             err = self._errest(idxcurr, idxprev, idxerr)
 
-            self.errhist.append(err)
-
             # Determine time step adjustment factor
-        
-            fac = err**-expa * self._errprev**(expb + expc)
-            
+            fac = err**-expa * self._errprev**expb
             fac = min(maxf, max(minf, saff*fac))
 
             # Compute the size of the next step
@@ -226,21 +196,6 @@ class StdPIController(BaseStdController):
             # Decide if to accept or reject the step
             if err < 1.0:
                 self._errprev = err
-                # if self.nsteps >= self.nrej+10 and mean(self.errhist[self.nrej:self.nsteps]) < 0.8 and self.nrej != 0:
-                #     self.cfl.append(1.3*self.cfl[-1])
-                    
-
-                self._accept_step(dt, idxcurr, self.cfl[-1], self.nsteps,self.nrej, err=err)
-                
+                self._accept_step(dt, idxcurr, err=err)
             else:
-                # self.cfl.append(dt)
-                self._reject_step(dt, idxprev, self.cfl[-1],self.nsteps,self.nrej,  err=err)
-                
-                # self.nrej = self.nsteps
-
-
-
-
-
-
-
+                self._reject_step(dt, idxprev, err=err)
