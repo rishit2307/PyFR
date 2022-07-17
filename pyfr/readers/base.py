@@ -122,8 +122,10 @@ class NodalMeshAssembler:
 
         
         cvecn = rfp - lfp
+        import pdb;pdb.set_trace()
         if np.all(cvecn==0):
             raise ValueError("Faces are not periodic")
+
         
         if np.isclose(cvecn, cvecn[0], atol=1e-05, rtol=1e-05).all():
             self._cvec[idx][pftype] =  abs(cvecn[0, :])
