@@ -118,11 +118,7 @@ class NodalMeshAssembler:
         return fofaces
 
     def _check_periodic(self, lfp, rfp, pftype, idx):
-        
-
-        
-        cvecn = rfp - lfp
-        import pdb;pdb.set_trace()
+        cvecn = rfp - lfp 
         if np.all(cvecn==0):
             raise ValueError("Faces are not periodic")
 

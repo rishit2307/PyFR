@@ -39,6 +39,7 @@ class BaseSystem:
         self.ele_map = elemap
 
         # Get the banks, types, num DOFs and shapes of the elements
+        
         self.ele_banks = [e.scal_upts for e in eles]
         self.ele_types = list(elemap)
         self.ele_ndofs = [e.neles*e.nupts*e.nvars for e in eles]
@@ -120,7 +121,6 @@ class BaseSystem:
                 linoff = ele.neles
 
             ele.set_backend(self.backend, nregs, nonce, linoff)
-
         return eles, elemap
 
     def _load_int_inters(self, rallocs, mesh, elemap):
