@@ -76,7 +76,6 @@ def get_local_rank():
 class _MPI:
     def __getattr__(self, attr):
         from mpi4py import MPI
-
         return getattr(MPI, attr)
 
 

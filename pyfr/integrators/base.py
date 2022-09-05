@@ -112,6 +112,7 @@ class BaseIntegrator:
 
     def run(self):
         for t in self.tlist:
+            
             self.advance_to(t)
 
     @property
@@ -160,11 +161,11 @@ class BaseIntegrator:
 
     def _check_abort(self):
         comm, rank, root = get_comm_rank_root()
+        
         if comm.allreduce(self.abort, op=mpi.LOR):
             # Ensure that the callbacks registered in atexit
             # are called only once if stopping the computation
             sys.exit(1)
-
 
 class BaseCommon:
     def _get_gndofs(self):

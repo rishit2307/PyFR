@@ -11,7 +11,6 @@ class DtStatsPlugin(BasePlugin):
 
     def __init__(self, intg, cfgsect, prefix):
         super().__init__(intg, cfgsect, prefix)
-
         self.flushsteps = self.cfg.getint(self.cfgsect, 'flushsteps', 500)
 
         self.count = 0

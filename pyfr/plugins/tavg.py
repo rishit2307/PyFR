@@ -65,13 +65,14 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         c = self.cfg.items_as('constants', float)
         self.anames, self.aexprs = [], []
         self.outfields, self.fexprs = [], []
-        self.varbool = []
+
         # Iterate over accumulation expressions first
         for k in cfg.items(cfgsect):
             if k.startswith('avg-'):
                 self.anames.append(k[4:])
                 self.aexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
+
         # Followed by any functional expressions
         for k in cfg.items(cfgsect):
             if k.startswith('fun-avg-'):
@@ -87,6 +88,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         privarmap = self.elementscls.privarmap[self.ndims]
         self._gradpinfo = [(pname, privarmap.index(pname))
                            for pname in gradpnames]
+        
 
     def _init_accumex(self, intg):
         self.prevt = self.tout_last = intg.tcurr
@@ -148,15 +150,14 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
     def __call__(self, intg):
-        
-    # If we are not supposed to be averaging yet then return
+        # If we are not supposed to be averaging yet then return
         if intg.tcurr < self.tstart:
             return
-    # If necessary, run the start-up routines
+
+        # If necessary, run the start-up routines
         if not self._started:
             self._init_accumex(intg)
             self._started = True
-        
 
         # See if we are due to write and/or accumulate this step
         dowrite = intg.tcurr - self.tout_last >= self.dtout - self.tol

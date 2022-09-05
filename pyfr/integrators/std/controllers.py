@@ -39,17 +39,19 @@ class BaseStdController(BaseStdIntegrator):
         self._curr_soln = None
 
         # Invalidate the solution gradients cache
-        self._curr_grad_soln = None
-
+        self._curr_grad_soln = None 
         # Fire off any event handlers
         for csh in self.completed_step_handlers:
             csh(self)
-
+ 
         # Abort if plugins request it
-        self._check_abort()
-
+        # self._check_abort()
+        
+        
         # Clear the step info
         self.stepinfo = []
+        
+        
 
     def _reject_step(self, dt, idxold, err=None):
         if dt <= self.dtmin:
@@ -172,7 +174,6 @@ class StdPIController(BaseStdController):
 
         expa = self._alpha / sord
         expb = self._beta / sord
-
         while self.tcurr < t:
             # Decide on the time step
             dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
@@ -189,7 +190,7 @@ class StdPIController(BaseStdController):
 
             # Compute the size of the next step
             self._dt = fac*dt
-
+            
             # Decide if to accept or reject the step
             if err < 1.0:
                 self._errprev = err
