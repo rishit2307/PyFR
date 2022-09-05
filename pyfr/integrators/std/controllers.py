@@ -105,8 +105,8 @@ class StdPIController(BaseStdController):
             raise ValueError('Invalid error norm')
 
         # PI control values
-        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
-        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
+        self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
+        self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.42)
 
         # Estimate of previous error
         self._errprev = 1.0
@@ -153,7 +153,7 @@ class StdPIController(BaseStdController):
             err = np.array([max(v for k in ekerns for v in k.retval)])
 
             # Reduce globally (MPI ranks)
-            comm.Allreduce(mpi.IN_PLACE, res, op=mpi.MAX)
+            comm.Allreduce(mpi.IN_PLACE, err, op=mpi.MAX)
 
             # Normalise
             err = math.sqrt(float(err))

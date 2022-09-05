@@ -205,6 +205,12 @@ Parameterises the OpenMP backend with
 
     *int*
 
+4. ``schedule`` --- OpenMP loop scheduling scheme:
+
+    ``static`` | ``dynamic`` | ``dynamic, n`` | ``guided`` | ``guided, n``
+
+    where *n* is a positive integer.
+
 Example::
 
     [backend-openmp]
@@ -397,13 +403,13 @@ Parameterises the time-integration scheme used by the solver with
 
            *float*
 
+        - ``controller`` --- time-step controller
+
+           ``none``
+
         - ``pseudo-dt`` --- pseudo time-step
 
            *float*
-
-        - ``controller`` --- pseudo time-step controller
-
-           ``none``
 
         - ``pseudo-niters-max`` --- minimum number of iterations
 
