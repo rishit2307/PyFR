@@ -65,6 +65,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         c = self.cfg.items_as('constants', float)
         self.anames, self.aexprs = [], []
         self.outfields, self.fexprs = [], []
+        self.varbool, self.varidx = [], []
 
         # Iterate over accumulation expressions first
         for k in cfg.items(cfgsect):
@@ -73,6 +74,12 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 self.aexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
 
+        
+        
+        for k in cfg.items(cfgsect):
+            if k.startswith('var-'):
+                self.varidx = [idx for idx,exprs in self.anames if k[4:] == exprs]
+                
         # Followed by any functional expressions
         for k in cfg.items(cfgsect):
             if k.startswith('fun-avg-'):
@@ -91,9 +98,10 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         
 
     def _init_accumex(self, intg):
-        self.prevt = self.tout_last = intg.tcurr
+        self.ppt = self.prevt = self.tout_last = intg.tcurr
         self.prevex = self._eval_acc_exprs(intg)
         self.accex = [np.zeros_like(p, dtype=np.float64) for p in self.prevex]
+        self.vaccex = [self.accex[i] for i in self.varidx]
 
         # Extra state for continuous accumulation
         if self.mode == 'continuous':
@@ -102,6 +110,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
     def _eval_acc_exprs(self, intg):
         exprs = []
+        varexprs = []
 
         # Get the primitive variable names
         pnames = self.elementscls.privarmap[self.ndims]
@@ -152,6 +161,30 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Stack up the expressions for each element type and return
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
+    def _eval_stats(self, intg):
+        if self.mode == 'windowed':
+            for a, p, c in zip(self.accex, self.prevex, self.currex):
+                a += 0.5*(intg.tcurr - self.prevt)*(p + c)
+            
+            accex = self.accex
+            vaccex = self.vaccex
+            tstart = self.tout_last
+            
+        else:
+            for a,c in zip(self.accex, self.caccex):
+                c += a
+            
+            accex = self.caccex
+            tstart = self.tstart_actual
+        tavg = [a / (intg.tcurr - tstart) for a in accex]
+        
+        for v, c, t in zip(vaccex, self.currex, tavg):
+            v += (intg.tcurr - self.ppt)*(c - t)**2
+
+        
+        
+        return tavg, vaccex
+
     def __call__(self, intg):
         # If we are not supposed to be averaging yet then return
         if intg.tcurr < self.tstart:
@@ -161,22 +194,29 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         if not self._started:
             self._init_accumex(intg)
             self._started = True
+            return
 
         # See if we are due to write and/or accumulate this step
         dowrite = intg.tcurr - self.tout_last >= self.dtout - self.tol
         doaccum = intg.nacptsteps % self.nsteps == 0
 
+
         if dowrite or doaccum:
             # Evaluate the time averaging expressions
-            currex = self._eval_acc_exprs(intg)
+            self.currex = self._eval_acc_exprs(intg)
 
-            # Accumulate them; always do this even when just writing
-            for a, p, c in zip(self.accex, self.prevex, currex):
-                a += 0.5*(intg.tcurr - self.prevt)*(p + c)
 
-            # Save the time and solution
-            self.prevt = intg.tcurr
-            self.prevex = currex
+             # Accumulate them; always do this even when just writing
+            tavg, var = self._eval_stats(intg)
+
+            
+
+           
+            # for a, p, c in zip(self.accex, self.prevex, self.currex):
+            #     a += 0.5*(intg.tcurr - self.prevt)*(p + c)
+
+
+   
 
             if dowrite:
                 comm, rank, root = get_comm_rank_root()
@@ -184,6 +224,10 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 if self.mode == 'windowed':
                     accex = self.accex
                     tstart = self.tout_last
+                    vaccex = self.vaccex
+                    currex = self.currex
+                    
+
                 else:
                     for a, c in zip(self.accex, self.caccex):
                         c += a
@@ -192,12 +236,17 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     tstart = self.tstart_actual
 
                 # Normalise the accumulated expressions
-                tavg = [a / (intg.tcurr - tstart) for a in accex]
+                # tavg = [a / (intg.tcurr - tstart) for a in accex]
 
                 # Evaluate any functional expressions
                 if self.fexprs:
                     funex = self._eval_fun_exprs(intg, tavg)
                     tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
+
+                for v, c, t in zip(vaccex, currex, tavg):
+                    v -= (self.prevt - self.ppt)*(c - t)**2
+
+                var = [v/ (intg.tcurr - tstart) for v in vaccex]
 
                 # Form the output records to be written to disk
                 data = dict(self._ele_region_data)
@@ -231,3 +280,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     a.fill(0)
 
                 self.tout_last = intg.tcurr
+            
+            # Save the time and solution
+            self.ppt = self.prevt
+            self.prevt = intg.tcurr
+            self.prevex = self.currex
