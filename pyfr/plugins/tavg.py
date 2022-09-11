@@ -144,8 +144,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
             # Evaluate the expressions
             exprs.append([npeval(v, subs) for v in self.aexprs])
-
-        # Stack up the expressions for each element type and return
+    # Stack up the expressions for each element type and return
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
     def _eval_fun_exprs(self, intg, accex):
@@ -175,7 +174,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 c += a
             
             accex = self.caccex
-            tstart = self.tstart_actual
+            tstart = self.tstart_actual  
+
         tavg = [a / (intg.tcurr - tstart) for a in accex]
         
         for v, c, t in zip(vaccex, self.currex, tavg):
@@ -186,12 +186,14 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         return tavg, vaccex
 
     def __call__(self, intg):
+        # import pdb;pdb.set_trace()
         # If we are not supposed to be averaging yet then return
         if intg.tcurr < self.tstart:
             return
 
         # If necessary, run the start-up routines
         if not self._started:
+            
             self._init_accumex(intg)
             self._started = True
             return
