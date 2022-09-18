@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 
+from ast import operator
 import re
 
 import numpy as np
-
+import csv
+from collections import defaultdict
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root
 from pyfr.nputil import npeval
@@ -65,7 +67,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         c = self.cfg.items_as('constants', float)
         self.anames, self.aexprs = [], []
         self.outfields, self.fexprs = [], []
-        self.varbool, self.varidx = [], []
+        self.vexprs, self.varidx, self.vnames = [], [], []
+        var_exprs = ['all', 'avg', 'max', 'min']
 
         # Iterate over accumulation expressions first
         for k in cfg.items(cfgsect):
@@ -73,18 +76,23 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 self.anames.append(k[4:])
                 self.aexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
-
-        
-        
-        for k in cfg.items(cfgsect):
-            if k.startswith('var-'):
-                self.varidx = [idx for idx,exprs in self.anames if k[4:] == exprs]
-                
+      
         # Followed by any functional expressions
         for k in cfg.items(cfgsect):
             if k.startswith('fun-avg-'):
                 self.fexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
+
+        for k in cfg.items(cfgsect):
+            if k.startswith('var-'):
+                self.vnames.append(k)
+                self.vexprs.append(cfg.getexpr(cfgsect, k, subs=c))
+                if cfg.getexpr(cfgsect, k, subs=c) == 'all':
+                    self.outfields.append(k)
+       
+        self.varidx = [self.anames.index(name[4:]) for name in
+                       self.vnames if name[4:] in self.anames]
+
 
     def _init_gradients(self, intg):
         # Determine what gradients, if any, are required
@@ -95,22 +103,46 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         privarmap = self.elementscls.privarmap[self.ndims]
         self._gradpinfo = [(pname, privarmap.index(pname))
                            for pname in gradpnames]
-        
 
     def _init_accumex(self, intg):
-        self.ppt = self.prevt = self.tout_last = intg.tcurr
+        self.tstart_acc = self.prevt = self.tout_last = intg.tcurr
         self.prevex = self._eval_acc_exprs(intg)
         self.accex = [np.zeros_like(p, dtype=np.float64) for p in self.prevex]
-        self.vaccex = [self.accex[i] for i in self.varidx]
+        self.vaccex = [a[:, self.varidx, ...] for a in self.accex]
+        self.lamda = 0
+        self.W1m = 1
+        
 
+        header = ['prevex', 'currex', 'time','doinit',  'doaccum', 'dowrite', 'var', 'avg', 'W1m', 'W1mpn']
+
+        
+        
+       
+        if np.amax(self.prevex[0][:, self.varidx, ...] ) > np.amax(self.prevex[1][:, self.varidx, ...] ):
+            self.ab = np.where(self.prevex[0][:, self.varidx, ...] == np.amax(self.prevex[0][:, self.varidx, ...]))
+            self.idx = 0
+        else:
+            self.ab = np.where(self.prevex[1] [:, self.varidx, ...] == np.amax(self.prevex[1][:, self.varidx, ...] ))
+            self.idx = 1
+
+        self.a = self.ab[0][0]
+        self.b = self.varidx[self.ab[1][0]]
+        self.c = self.ab[2][0]
+        self.d = self.ab[1][0]
+        
+        
+        with open('testing.csv', 'w') as f:
+            self.writer = csv.writer(f)
+            self.writer.writerow(header)
+
+        # data = [self.prevex[0][self.ab[0][0], self.ab[1][0], self.ab[2][0]], '-', intg.tcurr,'yes', '-', '-', '-', '-']
         # Extra state for continuous accumulation
-        if self.mode == 'continuous':
-            self.caccex = [np.zeros_like(a) for a in self.accex]
-            self.tstart_actual = intg.tcurr
+        # if self.mode == 'continuous':
+        #     self.vcaccex = [np.zeros_like(v) for v in self.vaccex]
+        #     self.tstart_actual = intg.tcurr
 
     def _eval_acc_exprs(self, intg):
         exprs = []
-        varexprs = []
 
         # Get the primitive variable names
         pnames = self.elementscls.privarmap[self.ndims]
@@ -121,6 +153,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
         # Iterate over each element type in the simulation
         for idx, etype, rgn in self._ele_regions:
+
             soln = intg.soln[idx][..., rgn].swapaxes(0, 1)
 
             # Convert from conservative to primitive variables
@@ -131,6 +164,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
             # Prepare any required gradients
             if self._gradpinfo:
+                
                 grads = np.rollaxis(grad_soln[idx], 2)[..., rgn]
 
                 # Transform from conservative to primitive gradients
@@ -144,7 +178,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
             # Evaluate the expressions
             exprs.append([npeval(v, subs) for v in self.aexprs])
-    # Stack up the expressions for each element type and return
+
+        # Stack up the expressions for each element type and return
+
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
     def _eval_fun_exprs(self, intg, accex):
@@ -160,40 +196,96 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Stack up the expressions for each element type and return
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
-    def _eval_stats(self, intg):
-        if self.mode == 'windowed':
-            for a, p, c in zip(self.accex, self.prevex, self.currex):
-                a += 0.5*(intg.tcurr - self.prevt)*(p + c)
+    def _eval_vexprs(self, vaccex):
+        
+        exprs = defaultdict(list)
+        for vval in vaccex:
             
-            accex = self.accex
-            vaccex = self.vaccex
-            tstart = self.tout_last
-            
-        else:
-            for a,c in zip(self.accex, self.caccex):
-                c += a
-            
-            accex = self.caccex
-            tstart = self.tstart_actual  
+            subs = dict(zip(self.vnames, vval.swapaxes(0,1)))
 
-        tavg = [a / (intg.tcurr - tstart) for a in accex]
+            for v,a in zip(self.vexprs, self.vnames):
+                 
+                exprs[a].append(npeval(v, subs))
         
-        for v, c, t in zip(vaccex, self.currex, tavg):
-            v += (intg.tcurr - self.ppt)*(c - t)**2
+        
+        return [npeval(v, dict(exprs)) for v in self.vexprs]
+
+
+            
+
+
+    def _acc_avg_var(self, intg, currex, dowrite, doaccum):
+
+        # if self.mode == 'windowed':
+        #     # accex = self.accex
+        #     tstart = self.tout_last
+        #     vaccex = self.vaccex
+       
+        # else:
+        #     # accex = self.caccex
+        #     tstart = self.tstart_actual
+        #     vaccex = self.vcaccex
+            
+        prevex = self.prevex
+        vaccex = self.vaccex
+        accex =  self.accex
+        vid  = self.varidx
 
         
         
-        return tavg, vaccex
+        Wmp1mpn = (intg.tcurr - self.prevt)
+        W1mpn = (intg.tcurr - self.tstart_acc)
+        W1m = self.W1m
+
+    
+      
+
+        for v, a, p, c in zip(vaccex, accex, prevex, currex):
+
+            
+            v += Wmp1mpn*(c[:, vid, ...] ** 2 + p[:, vid, ...] ** 2) - \
+                0.5*Wmp1mpn*(p[:, vid, ...] + c[:, vid, ...])**2 + \
+                self.lamda*((W1m / (2 * Wmp1mpn * W1mpn)) * \
+                (Wmp1mpn * a[:, vid, ...]/W1m - \
+                (c[:, vid, ...] + p[:, vid, ...]) * Wmp1mpn)**2)
+        
+
+                                   
+            a += Wmp1mpn*(p + c)
+
+        self.W1m = W1mpn
+        self.lamda = 1
+
+        
+        # print((vaccex[0][self.ab[0][0], self.ab[1][0], self.ab[2][0]])/(intg.tcurr - self.tout_last))
+        a,b,c,d = self.a, self.b, self.c, self.d
+        # tp = self.prevex[self.idx][a,b,c]
+        
+
+        if doaccum and not dowrite:
+           
+
+            data = [self.prevex[self.idx][a,b,c], \
+                currex[self.idx][a,b,c], intg.tcurr, '-', \
+                    doaccum, dowrite, \
+                    self.vaccex[self.idx][a,d,c]/ (2*(intg.tcurr - self.tstart_acc)),\
+                        accex[self.idx][a,b,c] / (2*(intg.tcurr - self.tstart_acc))\
+                            ,self.W1m, W1mpn]
+            with open('testing.csv', 'a') as f:
+                writer = csv.writer(f)
+                writer.writerow(data)
+
+  
+        
+            
 
     def __call__(self, intg):
-        # import pdb;pdb.set_trace()
         # If we are not supposed to be averaging yet then return
         if intg.tcurr < self.tstart:
             return
 
         # If necessary, run the start-up routines
         if not self._started:
-            
             self._init_accumex(intg)
             self._started = True
             return
@@ -202,64 +294,76 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         dowrite = intg.tcurr - self.tout_last >= self.dtout - self.tol
         doaccum = intg.nacptsteps % self.nsteps == 0
 
-
         if dowrite or doaccum:
             # Evaluate the time averaging expressions
-            self.currex = self._eval_acc_exprs(intg)
-
-
-             # Accumulate them; always do this even when just writing
-            tavg, var = self._eval_stats(intg)
-
+           
+            currex = self._eval_acc_exprs(intg)
             
+            
+            
+                
+            self._acc_avg_var(intg,currex, dowrite, doaccum)
 
            
-            # for a, p, c in zip(self.accex, self.prevex, self.currex):
-            #     a += 0.5*(intg.tcurr - self.prevt)*(p + c)
-
-
-   
 
             if dowrite:
                 comm, rank, root = get_comm_rank_root()
 
-                if self.mode == 'windowed':
-                    accex = self.accex
-                    tstart = self.tout_last
-                    vaccex = self.vaccex
-                    currex = self.currex
-                    
+                accex = self.accex
+                vaccex = self.vaccex
 
-                else:
-                    for a, c in zip(self.accex, self.caccex):
-                        c += a
 
-                    accex = self.caccex
-                    tstart = self.tstart_actual
+                # if self.mode == 'windowed':
+                #     tstart = self.tout_last
+                #     vaccex = self.vaccex
+                #     self.lamda = 0
+
+                # else:
+                #     for v, vc in zip(self.vaccex, self.vcaccex):
+                #         vc += v
+
+                #     vaccex = self.vcaccex
+                
+                
 
                 # Normalise the accumulated expressions
-                # tavg = [a / (intg.tcurr - tstart) for a in accex]
+                tavg = [a / (2*(intg.tcurr - self.tstart_acc)) for a in accex]
+                
+               
 
                 # Evaluate any functional expressions
                 if self.fexprs:
+                    
                     funex = self._eval_fun_exprs(intg, tavg)
                     tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
+                
+                if self.vexprs:
+                    
+                    var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
 
-                for v, c, t in zip(vaccex, currex, tavg):
-                    v -= (self.prevt - self.ppt)*(c - t)**2
+                    tavg = [np.hstack([a, v]) for a, v in zip(tavg, var)]
 
-                var = [v/ (intg.tcurr - tstart) for v in vaccex]
+                if dowrite:
+                    a,b,c,d  = self.a, self.b, self.c, self.d
+                    data = [self.prevex[self.idx][a,b,c], currex[self.idx][a,b,c], intg.tcurr, '-', doaccum, dowrite, var[self.idx][a,d,c],tavg[self.idx][a,b,c] ]
+                    with open('testing.csv', 'a') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(data)
+            
+                
 
                 # Form the output records to be written to disk
                 data = dict(self._ele_region_data)
+
                 for (idx, etype, rgn), d in zip(self._ele_regions, tavg):
                     data[etype] = d.astype(self.fpdtype)
 
                 stats = Inifile()
                 stats.set('data', 'prefix', 'tavg')
                 stats.set('data', 'fields', ','.join(self.outfields))
-                stats.set('tavg', 'tstart', tstart)
+                stats.set('tavg', 'tstart', self.tstart_acc)
                 stats.set('tavg', 'tend', intg.tcurr)
+
                 intg.collect_stats(stats)
 
                 # If we are the root rank then prepare the metadata
@@ -271,6 +375,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     metadata = None
 
                 # Write to disk
+   
                 solnfname = self._writer.write(data, intg.tcurr, metadata)
 
                 # If a post-action has been registered then invoke it
@@ -278,12 +383,21 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                                         soln=solnfname, t=intg.tcurr)
 
                 # Reset the accumulators
-                for a in self.accex:
-                    a.fill(0)
+
+                    
+
+                if self.mode == 'windowed':
+                    for a,v in zip(self.accex, self.vaccex):
+                        a.fill(0)
+                        v.fill(0)
+                    self.lamda = 0
+                    self.tstart_acc = intg.tcurr
+
+
 
                 self.tout_last = intg.tcurr
             
+
             # Save the time and solution
-            self.ppt = self.prevt
             self.prevt = intg.tcurr
-            self.prevex = self.currex
+            self.prevex = currex

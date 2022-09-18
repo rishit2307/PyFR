@@ -45,6 +45,7 @@ class DualNoneController(BaseDualController):
     controller_name = 'none'
 
     def advance_to(self, t):
+        
         if t < self.tcurr:
             raise ValueError('Advance time is in the past')
 

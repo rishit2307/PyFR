@@ -197,6 +197,7 @@ def process_partition(args):
 
 def process_export(args):
     # Get writer instance by specified type or outf extension
+    
     if args.type:
         writer = get_writer_by_name(args.type, args)
     else:
@@ -233,8 +234,7 @@ def _process_common(args, mesh, soln, cfg):
     rallocs = get_rank_allocation(mesh, cfg)
 
     # Construct the solver
-    
-   
+
     solver = get_solver(backend, rallocs, mesh, soln, cfg)
 
     # If we are running interactively then create a progress bar

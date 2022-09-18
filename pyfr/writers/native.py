@@ -161,7 +161,9 @@ class NativeWriter:
                 ginfo = comm.gather({}, root=root)
 
                 # Write the metadata
+                
                 for k, v in metadata.items():
+                 
                     if isinstance(v, str):
                         f[k] = np.array(v.encode(), dtype='S')
                     else:
