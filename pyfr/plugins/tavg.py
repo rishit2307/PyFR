@@ -211,6 +211,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         return [npeval(v, dict(exprs)) for v in self.vexprs]
 
 
+
             
 
 
