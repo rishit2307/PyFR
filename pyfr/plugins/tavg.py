@@ -4,6 +4,7 @@ from ast import operator
 import re
 
 import numpy as np
+
 import csv
 from collections import defaultdict
 from pyfr.inifile import Inifile
@@ -28,6 +29,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.mode = self.cfg.get(cfgsect, 'mode', 'windowed')
         if self.mode not in {'continuous', 'windowed'}:
             raise ValueError('Invalid averaging mode')
+        
+        self.dev_mode = self.cfg.get(cfgsect, 'std-dev', 'none')
+        
 
         # Expressions pre-processing
         self._prepare_exprs()
@@ -67,8 +71,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         c = self.cfg.items_as('constants', float)
         self.anames, self.aexprs = [], []
         self.outfields, self.fexprs = [], []
-        self.vexprs, self.varidx, self.vnames = [], [], []
-        var_exprs = ['all', 'avg', 'max', 'min']
+        self.vnames = []
+        
+        
 
         # Iterate over accumulation expressions first
         for k in cfg.items(cfgsect):
@@ -76,22 +81,16 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 self.anames.append(k[4:])
                 self.aexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
-      
+                if self.dev_mode == 'all':
+                    self.outfields.append(re.sub('avg-', 'std-dev-', k))
+        
         # Followed by any functional expressions
         for k in cfg.items(cfgsect):
             if k.startswith('fun-avg-'):
                 self.fexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
+                        
 
-        for k in cfg.items(cfgsect):
-            if k.startswith('var-'):
-                self.vnames.append(k)
-                self.vexprs.append(cfg.getexpr(cfgsect, k, subs=c))
-                if cfg.getexpr(cfgsect, k, subs=c) == 'all':
-                    self.outfields.append(k)
-       
-        self.varidx = [self.anames.index(name[4:]) for name in
-                       self.vnames if name[4:] in self.anames]
 
 
     def _init_gradients(self, intg):
@@ -108,7 +107,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.tstart_acc = self.prevt = self.tout_last = intg.tcurr
         self.prevex = self._eval_acc_exprs(intg)
         self.accex = [np.zeros_like(p, dtype=np.float64) for p in self.prevex]
-        self.vaccex = [a[:, self.varidx, ...] for a in self.accex]
+        self.vaccex = [np.zeros_like(a, dtype=np.float64) for a in self.accex]
         self.lamda = 0
         self.W1m = 1
         
@@ -118,17 +117,17 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         
         
        
-        if np.amax(self.prevex[0][:, self.varidx, ...] ) > np.amax(self.prevex[1][:, self.varidx, ...] ):
-            self.ab = np.where(self.prevex[0][:, self.varidx, ...] == np.amax(self.prevex[0][:, self.varidx, ...]))
+        if np.amax(self.prevex[0] ) > np.amax(self.prevex[1] ):
+            self.ab = np.where(self.prevex[0] == np.amax(self.prevex[0]))
             self.idx = 0
         else:
-            self.ab = np.where(self.prevex[1] [:, self.varidx, ...] == np.amax(self.prevex[1][:, self.varidx, ...] ))
+            self.ab = np.where(self.prevex[1]== np.amax(self.prevex[1]))
             self.idx = 1
 
         self.a = self.ab[0][0]
-        self.b = self.varidx[self.ab[1][0]]
+        self.b = self.ab[1][0]
         self.c = self.ab[2][0]
-        self.d = self.ab[1][0]
+
         
         
         with open('testing.csv', 'w') as f:
@@ -196,19 +195,30 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Stack up the expressions for each element type and return
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
-    def _eval_vexprs(self, vaccex):
-        
-        exprs = defaultdict(list)
-        for vval in vaccex:
-            
-            subs = dict(zip(self.vnames, vval.swapaxes(0,1)))
+    def _eval_vexprs(self, var):
+        pass
+     
 
-            for v,a in zip(self.vexprs, self.vnames):
+       
+        
+        # eavg_dev = []
+        # emax_dev = []
+        # for v in var:
+        #     emax_dev.append([np.amax(val) for val in v])
+        #     eavg_dev.append([np.average(val) for val in v])
+
+        
+        # exprs = defaultdict(list)
+        # for vval in vaccex:
+            
+        #     subs = dict(zip(self.vnames, vval.swapaxes(0,1)))
+
+        #     for v,a in zip(self.vexprs, self.vnames):
                  
-                exprs[a].append(npeval(v, subs))
+        #         exprs[a].append(npeval(v, subs))
         
         
-        return [npeval(v, dict(exprs)) for v in self.vexprs]
+        # return [npeval(v, dict(exprs)) for v in self.vexprs]
 
 
 
@@ -230,7 +240,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         prevex = self.prevex
         vaccex = self.vaccex
         accex =  self.accex
-        vid  = self.varidx
+        
 
         
         
@@ -244,11 +254,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         for v, a, p, c in zip(vaccex, accex, prevex, currex):
 
             
-            v += Wmp1mpn*(c[:, vid, ...] ** 2 + p[:, vid, ...] ** 2) - \
-                0.5*Wmp1mpn*(p[:, vid, ...] + c[:, vid, ...])**2 + \
+            v += Wmp1mpn*(c ** 2 + p** 2) - 0.5*Wmp1mpn*(p+ c)**2 + \
                 self.lamda*((W1m / (2 * Wmp1mpn * W1mpn)) * \
-                (Wmp1mpn * a[:, vid, ...]/W1m - \
-                (c[:, vid, ...] + p[:, vid, ...]) * Wmp1mpn)**2)
+                (Wmp1mpn * a/W1m - (c + p) * Wmp1mpn)**2)
         
 
                                    
@@ -259,7 +267,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
         
         # print((vaccex[0][self.ab[0][0], self.ab[1][0], self.ab[2][0]])/(intg.tcurr - self.tout_last))
-        a,b,c,d = self.a, self.b, self.c, self.d
+        a,b,c = self.a, self.b, self.c
         # tp = self.prevex[self.idx][a,b,c]
         
 
@@ -269,7 +277,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             data = [self.prevex[self.idx][a,b,c], \
                 currex[self.idx][a,b,c], intg.tcurr, '-', \
                     doaccum, dowrite, \
-                    self.vaccex[self.idx][a,d,c]/ (2*(intg.tcurr - self.tstart_acc)),\
+                    self.vaccex[self.idx][a,b,c]/ (2*(intg.tcurr - self.tstart_acc)),\
                         accex[self.idx][a,b,c] / (2*(intg.tcurr - self.tstart_acc))\
                             ,self.W1m, W1mpn]
             with open('testing.csv', 'a') as f:
@@ -312,21 +320,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
                 accex = self.accex
                 vaccex = self.vaccex
-
-
-                # if self.mode == 'windowed':
-                #     tstart = self.tout_last
-                #     vaccex = self.vaccex
-                #     self.lamda = 0
-
-                # else:
-                #     for v, vc in zip(self.vaccex, self.vcaccex):
-                #         vc += v
-
-                #     vaccex = self.vcaccex
-                
-                
-
+                               
                 # Normalise the accumulated expressions
                 tavg = [a / (2*(intg.tcurr - self.tstart_acc)) for a in accex]
                 
@@ -338,21 +332,29 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     funex = self._eval_fun_exprs(intg, tavg)
                     tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
                 
-                if self.vexprs:
-                    
-                    var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
+                if self.dev_mode == 'all':
 
+                    var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
                     tavg = [np.hstack([a, v]) for a, v in zip(tavg, var)]
+                    
+                elif self.dev_mode == 'summarise':
+                    import pdb;pdb.set_trace()
+
+                    var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
+                    
+                    max_dev = [max(map(np.amax(np.swapaxes(1,2)), v)) for v in zip(*var)]
+                    avg_dev = [np.mean(np.hstack(list(map(np.ravel(np.swapaxes(1,2)),v))))
+                               for v in zip(*var)]
 
                 if dowrite:
-                    a,b,c,d  = self.a, self.b, self.c, self.d
-                    data = [self.prevex[self.idx][a,b,c], currex[self.idx][a,b,c], intg.tcurr, '-', doaccum, dowrite, var[self.idx][a,d,c],tavg[self.idx][a,b,c] ]
+                    a,b,c  = self.a, self.b, self.c
+                    data = [self.prevex[self.idx][a,b,c], currex[self.idx][a,b,c], intg.tcurr, '-', doaccum, dowrite, var[self.idx][a,b,c],tavg[self.idx][a,b,c] ]
                     with open('testing.csv', 'a') as f:
                         writer = csv.writer(f)
                         writer.writerow(data)
             
                 
-
+                
                 # Form the output records to be written to disk
                 data = dict(self._ele_region_data)
 
@@ -364,6 +366,12 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 stats.set('data', 'fields', ','.join(self.outfields))
                 stats.set('tavg', 'tstart', self.tstart_acc)
                 stats.set('tavg', 'tend', intg.tcurr)
+                
+                if self.dev_mode == 'summarise':
+                    for vn, vm, va in zip(self.vnames, max_dev, avg_dev):
+                        stats.set('tavg', f'avg-std-dev-{vn}',va)
+                        stats.set('tavg', f'max-std-dev-{vn}',vm)
+
 
                 intg.collect_stats(stats)
 
