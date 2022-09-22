@@ -196,7 +196,15 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
     def _eval_vexprs(self, var):
+        
+        
+
         pass
+
+
+
+   
+
      
 
        
@@ -332,19 +340,19 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     funex = self._eval_fun_exprs(intg, tavg)
                     tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
                 
-                if self.dev_mode == 'all':
-
-                    var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
-                    tavg = [np.hstack([a, v]) for a, v in zip(tavg, var)]
+                if self.dev_mode in {'summarise', 'all'}:
                     
-                elif self.dev_mode == 'summarise':
-                    import pdb;pdb.set_trace()
-
                     var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
+                    vexpr = list(map(lambda v: v.swapaxes(0,1), var))
+
+        
+                    max_dev = [max(map(np.amax, v)) for v in zip(*vexpr)]
+                    avg_dev = [np.hstack(list(map(np.ravel, v))).mean()
+                               for v in zip(*vexpr)]
+
+                    if self.dev_mode == 'all':
+                        tavg = [np.hstack([a, v]) for a, v in zip(tavg, var)]
                     
-                    max_dev = [max(map(np.amax(np.swapaxes(1,2)), v)) for v in zip(*var)]
-                    avg_dev = [np.mean(np.hstack(list(map(np.ravel(np.swapaxes(1,2)),v))))
-                               for v in zip(*var)]
 
                 if dowrite:
                     a,b,c  = self.a, self.b, self.c
@@ -368,9 +376,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 stats.set('tavg', 'tend', intg.tcurr)
                 
                 if self.dev_mode == 'summarise':
-                    for vn, vm, va in zip(self.vnames, max_dev, avg_dev):
-                        stats.set('tavg', f'avg-std-dev-{vn}',va)
-                        stats.set('tavg', f'max-std-dev-{vn}',vm)
+                    for an, vm, va in zip(self.anames, max_dev, avg_dev):
+                        stats.set('tavg', f'avg-std-dev-{an}',va)
+                        stats.set('tavg', f'max-std-dev-{an}',vm)
 
 
                 intg.collect_stats(stats)
