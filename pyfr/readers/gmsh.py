@@ -11,6 +11,7 @@ from pyfr.readers import BaseReader, NodalMeshAssembler
 def msh_section(mshit, section):
     endln = f'$End{section}\n'
     endix = int(next(mshit))
+  
 
     for i, l in enumerate(mshit, start=1):
         if l == endln:

@@ -189,7 +189,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         for avals in accex:
             # Prepare the substitution dictionary
             subs = dict(zip(self.anames, avals.swapaxes(0, 1)))
-
+            import pdb;pdb.set_trace()
             exprs.append([npeval(v, subs) for v in self.fexprs])
 
         # Stack up the expressions for each element type and return
@@ -342,16 +342,17 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 
                 if self.dev_mode in {'summarise', 'all'}:
                     
-                    var = [v / (2*(intg.tcurr - self.tstart_acc)) for v in vaccex]
-                    vexpr = list(map(lambda v: v.swapaxes(0,1), var))
+                    dev = [np.sqrt(np.abs(v / (2*(intg.tcurr - self.tstart_acc))))
+                          for v in vaccex]
+                    dexpr = list(map(lambda v: v.swapaxes(0,1), dev))
 
         
-                    max_dev = [max(map(np.amax, v)) for v in zip(*vexpr)]
+                    max_dev = [max(map(np.amax, v)) for v in zip(*dexpr)]
                     avg_dev = [np.hstack(list(map(np.ravel, v))).mean()
-                               for v in zip(*vexpr)]
+                               for v in zip(*dexpr)]
 
                     if self.dev_mode == 'all':
-                        tavg = [np.hstack([a, v]) for a, v in zip(tavg, var)]
+                        tavg = [np.hstack([a, v]) for a, v in zip(tavg, dev)]
                     
 
                 if dowrite:

@@ -16,6 +16,7 @@ class BaseWriter:
         self.mesh = NativeReader(args.meshf)
 
         # Check solution and mesh are compatible
+
         if self.mesh['mesh_uuid'] != self.soln['mesh_uuid']:
             raise RuntimeError(f'Solution "{args.solnf}" was not computed on '
                                f'mesh "{args.meshf}"')

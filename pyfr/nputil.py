@@ -64,17 +64,17 @@ _npeval_syms = {
     'abs': np.abs, 'pow': np.power, 'sqrt': np.sqrt,
     'tanh': np.tanh, 'pi': np.pi,
     'max': np.maximum, 'min': np.minimum,
-    'amax': np.amax, 'amin': np.amin,
-    'avg': np.mean
 }
 
 
 def npeval(expr, locals):
     # Disallow direct exponentiation
+    
     if '^' in expr or '**' in expr:
         raise ValueError('Direct exponentiation is not supported; use pow')
 
     # Ensure the expression does not contain invalid characters
+ 
     if not re.match(r'[A-Za-z0-9_ \t\n\r.,+\-*/%()]+$', expr):
         raise ValueError('Invalid characters in expression')
 
