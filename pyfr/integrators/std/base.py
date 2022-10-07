@@ -23,6 +23,7 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
         self.nregs = self.stepper_nregs
 
         # Construct the relevant system
+    
         self.system = systemcls(backend, rallocs, mesh, initsoln,
                                 nregs=self.nregs, cfg=cfg)
 

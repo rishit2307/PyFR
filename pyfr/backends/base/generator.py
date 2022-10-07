@@ -71,6 +71,7 @@ class Arg:
 
 class BaseKernelGenerator:
     def __init__(self, name, ndim, args, body, fpdtype):
+        import pdb;pdb.set_trace
         self.name = name
         self.ndim = ndim
         self.fpdtype = fpdtype
