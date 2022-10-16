@@ -64,9 +64,11 @@ class BaseBackend:
         # If no extent has been specified then autocommit
         if extent is None:
             # Perform the allocation
+
             data = self._malloc_impl(obj.nbytes)
 
             # Fire the callback
+            
             obj.onalloc(data, 0)
 
             # Retain a (weak) reference to the allocated extent

@@ -4,7 +4,7 @@ import ast
 import re
 
 import numpy as np
-
+from pyfr.mpiutil import get_comm_rank_root
 import csv
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root
@@ -190,34 +190,34 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         fexp = self.fexprs
         devs = [d.swapaxes(0,1) for d in dev]
 
+        # Iterate over each element type our averaging region
         for avals in accex:
             df = []
             
-
             av = avals.swapaxes(0,1)
             
-
+            # Iterate over averaged variables
             for idx,avar in enumerate(an):
                 
                 h = np.zeros_like(av, dtype=np.float64)
+
+                # Calculate step size  
                 h[idx] = eps * av[idx]
                 h[idx][h[idx] == 0] = eps
+
+                # Prepare the substitution dictionary
                 subsh = dict(zip(an, av+h))
                 subs = dict(zip(an, av))
             
-
+                # Calculate derivatives for functional averages
                 df.append([(npeval(v, subsh) - npeval(v, subs)) / h[idx]
                              for v in fexp])
             
             dfexpr.append(np.stack(df).swapaxes(0,1))
         
-        return [np.sqrt(np.einsum('ij..., j... -> i...', df**2, sd**2)).swapaxes(0,1)
-                for df, sd in zip(dfexpr, devs)]
-    
-       
-    
-       
-
+        # Multiply with variance and take R.M.S value
+        return [np.sqrt(np.einsum('ij..., j... -> i...', 
+            df**2, sd**2)).swapaxes(0,1) for df, sd in zip(dfexpr, devs)]
     
 
 
@@ -229,23 +229,21 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         
 
         
-        
+        # Weights for online variance estimation
         Wmp1mpn = (intg.tcurr - self.prevt)
         W1mpn = (intg.tcurr - self.tstart_acc)
         W1m = self.W1m
 
-    
-      
-
+        # Iterate over element type
         for v, a, p, c in zip(vaccex, accex, prevex, currex):
 
-            
+            # Accumulate online variance
             v += Wmp1mpn*(c ** 2 + p** 2) - 0.5*Wmp1mpn*(p+ c)**2 + \
                 self.sw*((W1m / (2 * Wmp1mpn * W1mpn)) * \
                 (Wmp1mpn * a/W1m - (c + p) * Wmp1mpn)**2)
         
 
-                                   
+            # Accumulate average
             a += Wmp1mpn*(p + c)
 
         self.W1m = W1mpn
@@ -282,6 +280,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
                 accex = self.accex
                 vaccex = self.vaccex
+
+                
                                
                 # Normalise the accumulated expressions
                 tavg = [a / (2*(intg.tcurr - self.tstart_acc)) for a in accex]
@@ -319,36 +319,57 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                         tavg = [np.hstack([a, df]) for a, df in zip(tavg, fvar)]
 
 
-
+            
+                
 
                 # Evaluate any functional expressions
         
                     
                 
-                
+               
                 # Form the output records to be written to disk
                 data = dict(self._ele_region_data)
 
                 for (idx, etype, rgn), d in zip(self._ele_regions, tavg):
+                    print(f'Rank is {rank}')
+                    
                     data[etype] = d.astype(self.fpdtype)
+                
+              
+                
+                
 
+                
+                
+                
+                
+                
                 stats = Inifile()
                 stats.set('data', 'prefix', 'tavg')
                 stats.set('data', 'fields', ','.join(self.outfields))
                 stats.set('tavg', 'tstart', self.tstart_acc)
                 stats.set('tavg', 'tend', intg.tcurr)
+
+            
                 
                 if self.dev_mode in {'summarise', 'all'}:
+          
+                    
                     for an, vm, va in zip(self.anames, max_dev, avg_dev):
+                        
+                       
+                       
                         stats.set('tavg', f'avg-std-dev-{an}',va)
                         stats.set('tavg', f'max-std-dev-{an}',vm)
+                        comm.Isend(stats, root)
+                   
                     
                     if self.fexprs:
                         for fn, fm, fa in zip(self.fnames, max_fdev, avg_fdev):
                             stats.set('tavg', f'fun-avg-std-dev-{fn}', fa)
                             stats.set('tavg', f'fun-max-std-dev-{fn}', fm)
+                            comm.Isend(stats, root)
 
-            
                 intg.collect_stats(stats)
 
                 # If we are the root rank then prepare the metadata
@@ -368,9 +389,6 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                                         soln=solnfname, t=intg.tcurr)
 
                 # Reset the accumulators
-
-                    
-
                 if self.mode == 'windowed':
                     for a,v in zip(self.accex, self.vaccex):
                         a.fill(0)

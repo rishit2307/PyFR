@@ -513,6 +513,7 @@ class CUDA:
         return np.array(alloc, copy=False)
 
     def memcpy(self, dst, src, nbytes, stream=None):
+       
         if isinstance(dst, (np.ndarray, np.generic)):
             dst = dst.ctypes.data
 
