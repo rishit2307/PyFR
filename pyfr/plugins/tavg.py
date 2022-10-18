@@ -1,14 +1,10 @@
-# -*- coding: utf-8 -*-
-
-import ast
 import re
 
 import numpy as np
-from pyfr.mpiutil import get_comm_rank_root
-import csv
+
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root
-from pyfr.nputil import npeval, _npeval_syms
+from pyfr.nputil import npeval
 from pyfr.plugins.base import BasePlugin, PostactionMixin, RegionMixin
 from pyfr.writers.native import NativeWriter
 
@@ -29,7 +25,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         if self.mode not in {'continuous', 'windowed'}:
             raise ValueError('Invalid averaging mode')
         
-        
+        # Std deviation mode
         self.dev_mode = self.cfg.get(cfgsect, 'std-dev', 'none')
         self.dev_mode = None if self.dev_mode == 'none' else self.dev_mode
 
@@ -75,40 +71,28 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.outfields, self.fexprs = [], []
         self.vnames, self.fnames = [], []
         
-        
-
         # Iterate over accumulation expressions first
-        for k in cfg.items(cfgsect):
-            if k.startswith('avg-'):
-                self.anames.append(k[4:])
+        for k in cfg.items(cfgsect, prefix='avg-'):
+                self.anames.append(k.removeprefix('avg-'))
                 self.aexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
 
         # Followed by any functional expressions
-        
-        for k in cfg.items(cfgsect):
-            if k.startswith('fun-avg-'):
-                self.fnames.append(k[4:])
+        for k in cfg.items(cfgsect, prefix='fun-avg-'):
+                self.fnames.append(k.removeprefix('fun-avg-'))
                 self.fexprs.append(cfg.getexpr(cfgsect, k, subs=c))
                 self.outfields.append(k)
 
-        
+        # Create fields for std deviations        
         if self.dev_mode == 'all':
-            for k in cfg.items(cfgsect):
-                if k.startswith('avg-'):
+            for k in cfg.items(cfgsect, prefix='avg-'):
                     self.outfields.append(re.sub('avg-', 'std-dev-', k))
-                
-        
-        
+                 
+        # Followed by functional deviations
         if self.dev_mode == 'all':
-            for k in cfg.items(cfgsect):
-                if k.startswith('fun-avg-'): 
+            for k in cfg.items(cfgsect, prefix='fun-avg-'):
                     self.outfields.append(re.sub('fun-avg-', 'fun-std-dev-', k))
         
-                        
-
-    
-
     def _init_gradients(self, intg):
         # Determine what gradients, if any, are required
         gradpnames = set()
@@ -120,13 +104,20 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                            for pname in gradpnames]
 
     def _init_accumex(self, intg):
+        comm, rank, root = get_comm_rank_root()
         self.tstart_acc = self.prevt = self.tout_last = intg.tcurr
         self.prevex = self._eval_acc_exprs(intg)
         self.accex = [np.zeros_like(p, dtype=np.float64) for p in self.prevex]
         self.vaccex = [np.zeros_like(a, dtype=np.float64) for a in self.accex]
         self.sw = 0
         self.W1m = 1
+        num = 0
+        for idx, etype, rgn in self._ele_regions:
+            soln = intg.soln[idx][..., rgn].swapaxes(0, 1)
+            num += np.prod(soln.shape[1:])
         
+        self.ct = comm.gather(num, root=root )
+   
     def _eval_acc_exprs(self, intg):
         exprs = []
 
@@ -139,7 +130,6 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
         # Iterate over each element type in the simulation
         for idx, etype, rgn in self._ele_regions:
-
             soln = intg.soln[idx][..., rgn].swapaxes(0, 1)
 
             # Convert from conservative to primitive variables
@@ -150,7 +140,6 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
             # Prepare any required gradients
             if self._gradpinfo:
-                
                 grads = np.rollaxis(grad_soln[idx], 2)[..., rgn]
 
                 # Transform from conservative to primitive gradients
@@ -166,13 +155,11 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             exprs.append([npeval(v, subs) for v in self.aexprs])
 
         # Stack up the expressions for each element type and return
-
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
     def _eval_fun_exprs(self, intg, accex):
         exprs = []
         
-
         # Iterate over each element type our averaging region
         for avals in accex:
             # Prepare the substitution dictionary
@@ -189,16 +176,14 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         an = self.anames
         fexp = self.fexprs
         devs = [d.swapaxes(0,1) for d in dev]
-
+        
         # Iterate over each element type our averaging region
         for avals in accex:
             df = []
-            
             av = avals.swapaxes(0,1)
             
             # Iterate over averaged variables
             for idx,avar in enumerate(an):
-                
                 h = np.zeros_like(av, dtype=np.float64)
 
                 # Calculate step size  
@@ -215,21 +200,16 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             
             dfexpr.append(np.stack(df).swapaxes(0,1))
         
-        # Multiply with variance and take R.M.S value
+        # Multiply with variance and RMS value
         return [np.sqrt(np.einsum('ij..., j... -> i...', 
             df**2, sd**2)).swapaxes(0,1) for df, sd in zip(dfexpr, devs)]
     
-
-
-    def _acc_avg_var(self, intg, currex, dowrite, doaccum):
-            
+    def _acc_avg_var(self, intg, currex, dowrite, doaccum):    
         prevex = self.prevex
         vaccex = self.vaccex
         accex =  self.accex
-        
-
-        
-        # Weights for online variance estimation
+                
+        # Weights for online variance and average
         Wmp1mpn = (intg.tcurr - self.prevt)
         W1mpn = (intg.tcurr - self.tstart_acc)
         W1m = self.W1m
@@ -241,7 +221,6 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             v += Wmp1mpn*(c ** 2 + p** 2) - 0.5*Wmp1mpn*(p+ c)**2 + \
                 self.sw*((W1m / (2 * Wmp1mpn * W1mpn)) * \
                 (Wmp1mpn * a/W1m - (c + p) * Wmp1mpn)**2)
-        
 
             # Accumulate average
             a += Wmp1mpn*(p + c)
@@ -249,7 +228,28 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.W1m = W1mpn
         self.sw = 1
 
-            
+    def _verify_reductions(self, max_fdev, avg_fdev, max_dev, avg_dev, dexpr, fexpr):
+        comm, rank, root = get_comm_rank_root()
+        maxfdev = []
+        accfdev = []
+        numeles = 0
+       
+        for dv in dexpr:
+            maxfdev.append([np.amax(v) for v in dv])
+        
+        for adv in dexpr:
+                accfdev.append([np.sum(ad) for ad in adv])
+
+        
+        for arr in dexpr:
+            numeles +=  np.prod(arr.shape[1:])
+        
+        
+        print(f'rank is {rank}, accdev is {maxfdev} , numeles is {numeles}, length is {len(fexpr)}, fexpr is {type(fexpr)}')
+         
+
+        if rank == root:
+            print(f'rank is {rank}, calculated avg_dev is {max_fdev}')
 
     def __call__(self, intg):
         # If we are not supposed to be averaging yet then return
@@ -268,108 +268,110 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
         if dowrite or doaccum:
             # Evaluate the time averaging expressions
-           
             currex = self._eval_acc_exprs(intg)
-  
+            
+            # Accumulate them; always do this even when just writing
             self._acc_avg_var(intg,currex, dowrite, doaccum)
-
-           
 
             if dowrite:
                 comm, rank, root = get_comm_rank_root()
-
                 accex = self.accex
                 vaccex = self.vaccex
-
-                
-                               
+                ct = self.ct
+               
                 # Normalise the accumulated expressions
                 tavg = [a / (2*(intg.tcurr - self.tstart_acc)) for a in accex]
                 
                 if self.dev_mode:
-                    
+                    ct = self.ct
+    
+                    # Calculate standard deviation
                     dev = [np.sqrt(np.abs(v / (2*(intg.tcurr - self.tstart_acc))))
                           for v in vaccex]
-
                     dexpr = list(map(lambda v: v.swapaxes(0,1), dev))
                     
-                    
-                    max_dev = [max(map(np.amax, v)) for v in zip(*dexpr)]
-                    avg_dev = [np.hstack(list(map(np.ravel, v))).mean()
+                    # Calculate max standard deviation on each rank
+                    mdat = [max(map(np.amax, v)) for v in zip(*dexpr)]
+
+                    # Sum standard deviation for average
+                    acdat = [np.hstack(list(map(np.ravel, v))).sum()
                                for v in zip(*dexpr)]
-
-                    if self.fexprs:
-                        
-                        fvar = self._eval_fun_var(dev, tavg)
-
-                        max_fdev = [max(map(np.amax, v)) for v in zip(*fvar)]
-                        avg_fdev = [np.hstack(list(map(np.ravel, v))).mean()
-                                        for v in zip(*fvar)]
-                
-                if self.fexprs:                    
-                    
-                    funex = self._eval_fun_exprs(intg, tavg)
-                    tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
-
-                    
-                    
-                if self.dev_mode == 'all':
-                    tavg = [np.hstack([a, d]) for a, d in zip(tavg, dev)]
-                    if self.fexprs:
-                        tavg = [np.hstack([a, df]) for a, df in zip(tavg, fvar)]
-
-
             
-                
-
-                # Evaluate any functional expressions
-        
+                    # Gather max and summmed values 
+                    md = comm.gather(mdat, root=root)
+                    ad = comm.gather(acdat, root=root)
                     
+                    if rank==root:
+                        # Calculate max and average deviations on root
+                        max_dev = [max(v) for v in zip(*list(filter(None, md)))]
+                        avg_dev = [sum(v)/sum(ct) for v in
+                                    zip(*list(filter(None, ad)))]
+
+                    if self.fexprs:                    
+                        # Evaluate functional variance
+                        fvar = self._eval_fun_var(dev, tavg)
+                        fexpr = list(map(lambda v: v.swapaxes(0,1), fvar))
+
+                        # Calculate max functional deviation on each rank
+                        mfdat = [max(map(np.amax, v)) for v in zip(*fexpr)]
+
+                        # Sum functional deviation over element types
+                        afdat = [np.hstack(list(map(np.ravel, v))).sum()
+                                        for v in zip(*fexpr)]
+
+                        # Gather max and summmed values 
+                        mfd = comm.gather(mfdat, root=root)
+                        afd = comm.gather(afdat, root=root)
+
+                        if rank == root:
+                            # Calculate max and average functional deviations
+                            max_fdev = [max(v) for v in zip(*list(filter(None, mfd)))]
+                            avg_fdev = [sum(v)/sum(ct) for v in
+                                            zip(*list(filter(None, afd)))]
                 
-               
+                self._verify_reductions(self, max_fdev, avg_fdev, max_dev, avg_dev, dexpr, fexpr)
+                    
+                if self.fexprs:                      
+                    # Evaluate functional averages
+                    funex = self._eval_fun_exprs(intg, tavg)
+
+                    # Stack the average expressions
+                    tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
+   
+                if self.dev_mode == 'all':
+                    # Stack std deviations
+                    tavg = [np.hstack([a, d]) for a, d in zip(tavg, dev)]
+                    
+                    if self.fexprs:
+                        # Stack functional deviations
+                        tavg = [np.hstack([a, df]) for a, df in zip(tavg, fvar)]
+                    
                 # Form the output records to be written to disk
                 data = dict(self._ele_region_data)
 
                 for (idx, etype, rgn), d in zip(self._ele_regions, tavg):
-                    print(f'Rank is {rank}')
-                    
                     data[etype] = d.astype(self.fpdtype)
                 
-              
-                
-                
 
-                
-                
-                
-                
-                
                 stats = Inifile()
                 stats.set('data', 'prefix', 'tavg')
                 stats.set('data', 'fields', ','.join(self.outfields))
                 stats.set('tavg', 'tstart', self.tstart_acc)
                 stats.set('tavg', 'tend', intg.tcurr)
 
-            
-                
-                if self.dev_mode in {'summarise', 'all'}:
-          
-                    
-                    for an, vm, va in zip(self.anames, max_dev, avg_dev):
+                # Write summarised stats   
+                if self.dev_mode:
+                    if rank == root:
+                        # Write std deviations
+                        for an, vm, va in zip(self.anames, max_dev, avg_dev):
+                            stats.set('tavg', f'avg-std-dev-{an}',va)
+                            stats.set('tavg', f'max-std-dev-{an}',vm)
                         
-                       
-                       
-                        stats.set('tavg', f'avg-std-dev-{an}',va)
-                        stats.set('tavg', f'max-std-dev-{an}',vm)
-                        comm.Isend(stats, root)
-                   
-                    
-                    if self.fexprs:
-                        for fn, fm, fa in zip(self.fnames, max_fdev, avg_fdev):
-                            stats.set('tavg', f'fun-avg-std-dev-{fn}', fa)
-                            stats.set('tavg', f'fun-max-std-dev-{fn}', fm)
-                            comm.Isend(stats, root)
-
+                        # Followed by functional deviations
+                        if self.fexprs:
+                            for fn, fm, fa in zip(self.fnames, max_fdev, avg_fdev):
+                                stats.set('tavg', f'fun-avg-std-dev-{fn}', fa)
+                                stats.set('tavg', f'fun-max-std-dev-{fn}', fm)
                 intg.collect_stats(stats)
 
                 # If we are the root rank then prepare the metadata
@@ -381,7 +383,6 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     metadata = None
 
                 # Write to disk
-   
                 solnfname = self._writer.write(data, intg.tcurr, metadata)
 
                 # If a post-action has been registered then invoke it
@@ -396,11 +397,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     self.sw = 0
                     self.tstart_acc = intg.tcurr
 
-
-
                 self.tout_last = intg.tcurr
             
-
             # Save the time and solution
             self.prevt = intg.tcurr
             self.prevex = currex

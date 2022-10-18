@@ -44,6 +44,7 @@ class NativeWriter:
         # Parallel I/O
         if (h5py.get_config().mpi and
             'PYFR_FORCE_SERIAL_HDF5' not in os.environ):
+            print("Hils")
             self._write = self._write_parallel
         # Serial I/O
         else:
