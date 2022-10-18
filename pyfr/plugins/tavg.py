@@ -236,6 +236,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         accdev = []
         numeles = 0
        
+        import pdb;pdb.set_trace()
         for dv in dexpr:
             maxdev.append([np.amax(v) for v in dv])
         
@@ -243,21 +244,21 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 accdev.append([np.sum(ad) for ad in adv])
         
         for dfv in fexpr:
-            maxfdev.append([np.amax(v) for v in dv])
+            maxfdev.append([np.amax(v) for v in dfv])
         
         for adfv in fexpr:
-                accfdev.append([np.sum(ad) for ad in adv])
+                accfdev.append([np.sum(ad) for ad in adfv])
 
         
         for arr in dexpr:
             numeles +=  np.prod(arr.shape[1:])
         
         
-        print(f'rank is {rank}, maxfdev is {maxfdev} , numeles is {numeles}')
+        print(f'rank is {rank}, maxdev is {maxdev} , numeles is {numeles}')
          
 
         if rank == root:
-            print(f'rank is {rank}, calculated max_fdev is {max_fdev}')
+            print(f'rank is {rank}, calculated max_dev is {max_dev}')
 
     def __call__(self, intg):
         # If we are not supposed to be averaging yet then return
