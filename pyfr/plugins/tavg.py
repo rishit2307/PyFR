@@ -51,7 +51,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self._writer = NativeWriter(intg, basedir, basename, 'tavg')
 
         # Gradient pre-processing
-        self._init_gradients(intg)
+        self._init_gradients()
 
         # Time averaging parameters
         self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)

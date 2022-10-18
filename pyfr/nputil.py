@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-
-from ast import Index
 import ctypes as ct
 import functools as ft
 import itertools as it

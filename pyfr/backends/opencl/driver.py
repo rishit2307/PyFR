@@ -92,6 +92,8 @@ class OpenCLWrappers(LibWrapper):
         (c_int, 'clReleaseCommandQueue', c_void_p),
         (c_int, 'clFinish', c_void_p),
         (c_int, 'clFlush', c_void_p),
+        (c_int, 'clGetEventProfilingInfo', c_void_p, c_uint, c_size_t,
+         c_void_p, POINTER(c_size_t)),
         (c_int, 'clReleaseEvent', c_void_p),
         (c_int, 'clWaitForEvents', c_uint, c_void_p),
         (c_void_p, 'clCreateBuffer', c_void_p, c_uint64, c_size_t, c_void_p,
@@ -129,10 +131,7 @@ class OpenCLWrappers(LibWrapper):
         (c_int, 'clEnqueueNDRangeKernel', c_void_p, c_void_p, c_uint,
          POINTER(c_size_t), POINTER(c_size_t), POINTER(c_size_t), c_uint,
          POINTER(c_void_p), POINTER(c_void_p)),
-        (c_int, 'clSetKernelArg', c_void_p, c_uint, c_size_t, c_void_p),
-
-        (c_int, 'clGetEventProfilingInfo', c_void_p, c_uint, c_size_t,
-         c_void_p, POINTER(c_size_t))
+        (c_int, 'clSetKernelArg', c_void_p, c_uint, c_size_t, c_void_p)
     ]
 
     def __init__(self):
@@ -269,7 +268,7 @@ class OpenCLDevice(_OpenCLBase):
         v = type_t()
         self.lib.clGetDeviceInfo(self, param, sizeof(v), byref(v), None)
 
-        return v.value
+        return v.raw if hasattr(v, 'raw') else v.value
 
     def _query_str(self, param):
         param = getattr(self.lib, f'DEVICE_{param.upper()}')
