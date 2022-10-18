@@ -93,7 +93,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             for k in cfg.items(cfgsect, prefix='fun-avg-'):
                     self.outfields.append(re.sub('fun-avg-', 'fun-std-dev-', k))
         
-    def _init_gradients(self, intg):
+    def _init_gradients(self):
         # Determine what gradients, if any, are required
         gradpnames = set()
         for ex in self.aexprs:
@@ -200,7 +200,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             
             dfexpr.append(np.stack(df).swapaxes(0,1))
         
-        # Multiply with variance and RMS value
+        # Multiply with variance and take the RMS value
         return [np.sqrt(np.einsum('ij..., j... -> i...', 
             df**2, sd**2)).swapaxes(0,1) for df, sd in zip(dfexpr, devs)]
     
@@ -232,12 +232,20 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         comm, rank, root = get_comm_rank_root()
         maxfdev = []
         accfdev = []
+        maxdev = []
+        accdev = []
         numeles = 0
        
         for dv in dexpr:
-            maxfdev.append([np.amax(v) for v in dv])
+            maxdev.append([np.amax(v) for v in dv])
         
         for adv in dexpr:
+                accdev.append([np.sum(ad) for ad in adv])
+        
+        for dfv in fexpr:
+            maxfdev.append([np.amax(v) for v in dv])
+        
+        for adfv in fexpr:
                 accfdev.append([np.sum(ad) for ad in adv])
 
         
@@ -245,11 +253,11 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             numeles +=  np.prod(arr.shape[1:])
         
         
-        print(f'rank is {rank}, accdev is {maxfdev} , numeles is {numeles}, length is {len(fexpr)}, fexpr is {type(fexpr)}')
+        print(f'rank is {rank}, maxfdev is {maxfdev} , numeles is {numeles}')
          
 
         if rank == root:
-            print(f'rank is {rank}, calculated avg_dev is {max_fdev}')
+            print(f'rank is {rank}, calculated max_fdev is {max_fdev}')
 
     def __call__(self, intg):
         # If we are not supposed to be averaging yet then return
@@ -274,6 +282,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             self._acc_avg_var(intg,currex, dowrite, doaccum)
 
             if dowrite:
+                max_fdev, avg_fdev, max_dev, avg_dev = [],[],[],[]
                 comm, rank, root = get_comm_rank_root()
                 accex = self.accex
                 vaccex = self.vaccex
@@ -329,7 +338,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                             avg_fdev = [sum(v)/sum(ct) for v in
                                             zip(*list(filter(None, afd)))]
                 
-                self._verify_reductions(self, max_fdev, avg_fdev, max_dev, avg_dev, dexpr, fexpr)
+                self._verify_reductions(max_fdev, avg_fdev, max_dev, avg_dev, dexpr, fexpr)
                     
                 if self.fexprs:                      
                     # Evaluate functional averages
