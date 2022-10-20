@@ -128,7 +128,7 @@ class IntegratePlugin(BasePlugin):
 
     def _eval_exprs(self, intg):
         intvals = np.zeros(len(self.exprs))
-
+        comm, rank, root = get_comm_rank_root()
         # Get the primitive variable names
         pnames = self.elementscls.privarmap[self.ndims]
 
@@ -139,7 +139,7 @@ class IntegratePlugin(BasePlugin):
         # Iterate over each element type in the simulation
         for i, (soln, eleinfo) in enumerate(zip(intg.soln, self.eleinfo)):
             plocs, wts, m0, eset, emask = eleinfo
-
+            
             # Subset and transpose the solution
             soln = soln[..., eset].swapaxes(0, 1)
 
@@ -189,6 +189,7 @@ class IntegratePlugin(BasePlugin):
             iintex = self._eval_exprs(intg)
 
             # Reduce and output if we're the root rank
+           
             if rank != root:
                 comm.Reduce(iintex, None, op=mpi.SUM, root=root)
             else:

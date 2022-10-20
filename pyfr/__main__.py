@@ -127,6 +127,7 @@ def process_import(args):
         reader = get_reader_by_extn(extn, args.inmesh)
 
     # Get the mesh in the PyFR format
+    import pdb;pdb.set_trace()
     mesh = reader.to_pyfrm(args.lintol)
 
     # Save to disk

@@ -142,6 +142,7 @@ class FluidForcePlugin(BasePlugin):
         fm = np.zeros((2 if self._viscous else 1, ndims + mcomp))
 
         for etype, fidx in self._m0:
+
             # Get the interpolation operator
             m0 = self._m0[etype, fidx]
             nfpts, nupts = m0.shape
@@ -164,6 +165,7 @@ class FluidForcePlugin(BasePlugin):
 
             # Do the quadrature
             fm[0, :ndims] += np.einsum('i...,ij,jik', qwts, p, norms)
+            print(f'rank is {comm.rank}')
 
             if self._viscous:
                 # Get operator and J^-T matrix
@@ -201,7 +203,7 @@ class FluidForcePlugin(BasePlugin):
 
                 # Pressure force moments
                 fm[0, ndims:] += np.einsum('i...,ij,jik->k', qwts, p, rcn)
-
+           
                 if self._viscous:
                     # Normal viscous force at each flux point
                     viscf = np.einsum('ijkl,lkj->lki', vis, norms)
@@ -211,8 +213,9 @@ class FluidForcePlugin(BasePlugin):
 
                     # Do the quadrature
                     fm[1, ndims:] += np.einsum('i,jik->k', qwts, rcf)
-
+                  
         # Reduce and output if we're the root rank
+       
         if rank != root:
             comm.Reduce(fm, None, op=mpi.SUM, root=root)
         else:
