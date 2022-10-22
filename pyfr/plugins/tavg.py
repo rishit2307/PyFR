@@ -3,7 +3,7 @@ import re
 import numpy as np
 
 from pyfr.inifile import Inifile
-from pyfr.mpiutil import get_comm_rank_root
+from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.nputil import npeval
 from pyfr.plugins.base import BasePlugin, PostactionMixin, RegionMixin
 from pyfr.writers.native import NativeWriter
@@ -26,10 +26,10 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             raise ValueError('Invalid averaging mode')
         
         # Std deviation mode
-        self.dev_mode = self.cfg.get(cfgsect, 'std-dev', 'none')
-        if self.dev_mode not in {'summarise', 'all', 'none'}:
+        self.dev_mode = self.cfg.get(cfgsect, 'std-dev', 'summarise')
+        if self.dev_mode not in {'summarise', 'all'}:
             raise ValueError('Invalid standard deviation mode')
-        self.dev_mode = None if self.dev_mode == 'none' else self.dev_mode
+
 
         # Expressions pre-processing
         self._prepare_exprs()
@@ -112,10 +112,10 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.accex = [np.zeros_like(p, dtype=np.float64) for p in self.prevex]
         self.vaccex = [np.zeros_like(a, dtype=np.float64) for a in self.accex]
         neles = 0
-        import pdb;pdb.set_trace()
-        for idx, etype, rgn in self._ele_regions:
-            neles += intg.system.ele_shapes[idx][0]*len(rgn)
-        self.ct = comm.reduce(neles, root=root)
+        self.ct = 1
+        # for idx, etype, rgn in self._ele_regions:
+        #     neles += intg.system.ele_shapes[idx][0]*len(rgn)
+        # self.ct = comm.reduce(neles, root=root)
    
     def _eval_acc_exprs(self, intg):
         exprs = []
@@ -156,18 +156,44 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Stack up the expressions for each element type and return
         return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
 
-    def _eval_fun_exprs(self, intg, accex):
+    def _eval_fun_exprs_var(self, dev, accex):
+        dfexpr = []
         exprs = []
+        eps = self.eps
+        an = self.anames
+        devs = [d.swapaxes(0,1) for d in dev]
+
         
         # Iterate over each element type our averaging region
         for avals in accex:
+            df = []
+            
             # Prepare the substitution dictionary
             subs = dict(zip(self.anames, avals.swapaxes(0, 1)))
 
             exprs.append([npeval(v, subs) for v in self.fexprs])
 
+            for idx, avar in enumerate(self.anames):
+                h = np.zeros_like(avals.swapaxes(0, 1), dtype=np.float64)
+
+                # Calculate step size  
+                h[idx] = eps * avals.swapaxes(0, 1)[idx]
+                h[idx][h[idx] == 0] = eps
+
+                # Prepare the substitution dictionary for step
+                subsh = dict(zip(an, avals.swapaxes(0, 1) + h)) 
+
+                # Calculate derivatives for functional averages
+                df.append([(npeval(v, subsh) - exprs[-1][i]) / h[idx]
+                             for i, v in enumerate(self.fexprs)])
+
+            dfexpr.append(np.stack(df).swapaxes(0,1))
+
+
+        tp = [np.sqrt(np.sum(df**2 * sd[None, :]**2), axis = 1).swapaxes(0,1) for df, sd in zip(dfexpr, devs)]
+
         # Stack up the expressions for each element type and return
-        return [np.dstack(exs).swapaxes(1, 2) for exs in exprs]
+        return [np.dstack(exs).swapaxes(1, 2) for exs in exprs], tp
 
     def _eval_fun_var(self, dev, accex):
         dfexpr = []
@@ -208,7 +234,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             
             
             dfexpr.append(np.stack(df).swapaxes(0,1))
-        import pdb;pdb.set_trace()
+
         tp = [np.sqrt(np.sum(df**2 * sd[None, :]**2), axis = 1).swapaxes(0,1)\
              for df, sd in zip(dfexpr, devs)]
         # Multiply with variance and take the RMS value
@@ -278,74 +304,59 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                
                 # Normalise the accumulated expressions
                 tavg = [a / (2*(intg.tcurr - self.tstart_acc)) for a in accex]
-                
-                if self.dev_mode:
-                    ct = self.ct
-    
-                    # Calculate standard deviation
-                    dev = [np.sqrt(np.abs(v / (2*(intg.tcurr - self.tstart_acc))))
-                          for v in vaccex]
 
-                    dexpr = [d.swapaxes(0, 1) for d in dev]
+                # Calculate standard deviation
+                ct = self.ct
+                dev = [np.sqrt(np.abs(v / (2*(intg.tcurr - self.tstart_acc))))
+                        for v in vaccex]
+                dexpr = [d.swapaxes(0, 1) for d in dev]
 
-                    # Maximum and sum of standard deviations
-                    mdat = np.zeros((len(self.anames)))
-                    acdat = np.zeros((len(self.anames)))
+                # Maximum and sum of standard deviations
+                max_dev = np.zeros((len(self.anames)))
+                avg_dev = np.zeros((len(self.anames)))
 
-                    import pdb;pdb.set_trace()
-                        
+                for dx in dexpr:
+                    max_dev = np.array([max(max_dev[i], np.amax(d)) for i, d in enumerate(dx)])
+                    avg_dev = np.array([sum(sum(d), avg_dev[i]) for i, d in enumerate(dx)])
 
+                # Reduce and output if we're the root rank
+                if rank != root:
+                    comm.Reduce(max_dev, None, op=mpi.MAX, root=root)
+                    comm.Reduce(avg_dev, None, root=root)
+                else:
+                    comm.Reduce(mpi.IN_PLACE, max_dev, op=mpi.MAX, root=root)
+                    comm.Reduce(mpi.IN_PLACE, avg_dev, root=root)
 
-                    # Maximum and sum of functional deviations
-                    mfdat = np.zeros((len(self.fnames)))
-                    afdat = np.zeros((len(self.fnames)))
-
-
-                
-                    
-                    # Calculate max standard deviation on each rank
-                    mdat = [max(map(np.amax, v)) for v in zip(*dexpr)]
-
-                    # Sum standard deviation for average
-                    acdat = [np.hstack(list(map(np.ravel, v))).sum()
-                               for v in zip(*dexpr)]
-            
-                    # Gather max and summmed values 
-                    md = comm.gather(mdat, root=root)
-                    ad = comm.gather(acdat, root=root)
-                    
-                    if rank==root:
-                        
-                        # Calculate max and average deviations on root
-                        max_dev = [max(v) for v in zip(*list(filter(None, md)))]
-                        avg_dev = [sum(v)/ct for v in
-                                    zip(*list(filter(None, ad)))]
-
-                    if self.fexprs:                    
-                        # Evaluate functional variance
-                        fvar = self._eval_fun_var(dev, tavg)
-                        fexpr = list(map(lambda v: v.swapaxes(0,1), fvar))
-
-                        # Calculate max functional deviation on each rank
-                        mfdat = [max(map(np.amax, v)) for v in zip(*fexpr)]
-
-                        # Sum functional deviation over element types
-                        afdat = [np.hstack(list(map(np.ravel, v))).sum()
-                                        for v in zip(*fexpr)]
-
-                        # Gather max and summmed values 
-                        mfd = comm.gather(mfdat, root=root)
-                        afd = comm.gather(afdat, root=root)
-
-                        if rank == root:
-                            # Calculate max and average functional deviations
-                            max_fdev = [max(v) for v in zip(*list(filter(None, mfd)))]
-                            avg_fdev = [sum(v)/sum(ct) for v in
-                                            zip(*list(filter(None, afd)))]
-                    
-                if self.fexprs:                      
+                if self.fexprs:              
                     # Evaluate functional averages
                     funex = self._eval_fun_exprs(intg, tavg)
+
+                    # Evaluate functional variance
+                    fvar = self._eval_fun_var(dev, tavg)
+
+                    fetp, fvtp = self._eval_fun_var_expr(dev, tavg)
+                    
+
+
+
+                    fexpr = list(map(lambda v: v.swapaxes(0,1), fvar))
+
+                    # Calculate max functional deviation on each rank
+                    mfdat = [max(map(np.amax, v)) for v in zip(*fexpr)]
+
+                    # Sum functional deviation over element types
+                    afdat = [np.hstack(list(map(np.ravel, v))).sum()
+                                    for v in zip(*fexpr)]
+
+                    # Gather max and summmed values 
+                    mfd = comm.gather(mfdat, root=root)
+                    afd = comm.gather(afdat, root=root)
+
+                    if rank == root:
+                        # Calculate max and average functional deviations
+                        max_fdev = [max(v) for v in zip(*list(filter(None, mfd)))]
+                        avg_fdev = [sum(v)/sum(ct) for v in
+                                        zip(*list(filter(None, afd)))]
 
                     # Stack the average expressions
                     tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]
