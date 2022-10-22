@@ -292,7 +292,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     mdat = np.zeros((len(self.anames)))
                     acdat = np.zeros((len(self.anames)))
 
-                    for v in dev:
+                    import pdb;pdb.set_trace()
                         
 
 
@@ -301,8 +301,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     afdat = np.zeros((len(self.fnames)))
 
 
-                    for v in dexpr:
-
+                
                     
                     # Calculate max standard deviation on each rank
                     mdat = [max(map(np.amax, v)) for v in zip(*dexpr)]
