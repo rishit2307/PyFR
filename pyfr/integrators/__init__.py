@@ -29,6 +29,6 @@ def get_integrator(backend, systemcls, rallocs, mesh, initsoln, cfg):
 
     # Composite the base classes together to form a new type
     integrator = type(name, (cc, sc), dict(name=name))
-
+    
     # Construct and return an instance of this new integrator class
     return integrator(backend, systemcls, rallocs, mesh, initsoln, cfg)

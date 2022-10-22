@@ -165,7 +165,6 @@ class FluidForcePlugin(BasePlugin):
 
             # Do the quadrature
             fm[0, :ndims] += np.einsum('i...,ij,jik', qwts, p, norms)
-            print(f'rank is {comm.rank}')
 
             if self._viscous:
                 # Get operator and J^-T matrix
