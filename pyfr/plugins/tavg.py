@@ -1,7 +1,7 @@
 import re
 
 import numpy as np
-import csv
+
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.nputil import npeval
@@ -70,10 +70,24 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.tpts = 0
         emap = intg.system.ele_map
         for idx, etype, rgn in self._ele_regions:
-            self.tpts += emap[etype].neles * emap[etype].nupts
-        print(f"rank is {rank}, tpts is {self.tpts}")
+
+            # Handle the case when region is full domain
+            if self.cfg.get(self.cfgsect, 'region') == '*':
+                self.tpts += emap[etype].neles * emap[etype].nupts
+
+            else:
+                self.tpts += emap[etype].nupts * len(rgn)
+
+        # Reduce
         self.tpts = comm.reduce(self.tpts, root=root)
-        print(f"rank is root, tpts is {self.tpts}")
+        # UNCOMMENT FOR DEBUGGING
+        # for idx, etype,_ in self._ele_regions:
+
+        #     print(f'rank is {rank} , {intg.soln[idx][..., rgn].shape}')
+            
+        
+        # if rank == 0:
+        #     print(f'rank is {rank}, self.tpts is {self.tpts} ')
 
     def _prepare_exprs(self):
         cfg, cfgsect = self.cfg, self.cfgsect
@@ -397,11 +411,14 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                             
                 if self.fexprs:  
                     #UNCOMMENT FOR DEBUGGING            
-                    # funex = self._eval_fun_exprs(intg, tavg)
-                    # fvar = self._eval_fun_var(dev, tavg)
+                    funex = self._eval_fun_exprs(intg, tavg)
+                    fdev = self._eval_fun_var(dev, tavg)
 
                     # Evaluate functional expressions and deviations
-                    funex, fdev = self._eval_fun_exprs_var(dev, tavg)
+                    funex1, fdev1 = self._eval_fun_exprs_var(dev, tavg)
+
+                    print(f'rank is {rank}, fd diff is {[np.all(f - f1 == 0) for (f, f1) in zip(fdev, fdev1)]}')
+                    print(f'rank is {rank}, f diff is {[np.all(f - f1 == 0) for (f, f1) in zip(funex, funex1)]}')
 
                     # Maximum and sum of functional deviations
                     max_fdev = np.zeros_like(self.fnames, dtype=np.float64)
@@ -411,14 +428,14 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                                     for i, f in enumerate(fx.swapaxes(0, 1))])
                         acc_fdev = np.array([sum(sum(f), acc_fdev[i]) for 
                                     i, f in enumerate(fx.swapaxes(0, 1))])
-                    
-                    accd = []
-                    md = []
-                    for d in fdev:
-                        accd.append(np.sum(d.swapaxes(0, 1), axis=(1, 2)))
-                        md.append(np.amax(d.swapaxes(0, 1), axis = (1, 2)))
-                    print(f'rank is {rank}, accd is {accd}')
-                    print(f'rankk is {rank}, maxfd is {md}')
+                    #UNCOMMENT FOR DEBUGGING    
+                    # accd = []
+                    # md = []
+                    # for d in fdev:
+                    #     accd.append(np.sum(d.swapaxes(0, 1), axis=(1, 2)))
+                    #     md.append(np.amax(d.swapaxes(0, 1), axis = (1, 2)))
+                    # print(f'rank is {rank}, accd is {accd}')
+                    # print(f'rankk is {rank}, maxfd is {md}')
                     # Reduce and output if we're the root rank
                     if rank != root:
                         comm.Reduce(max_fdev, None, op=mpi.MAX, root=root)
@@ -426,8 +443,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     else:
                         comm.Reduce(mpi.IN_PLACE, max_fdev, op=mpi.MAX, root=root)
                         comm.Reduce(mpi.IN_PLACE, acc_fdev, root=root)
-                        print(f'rank is root, {acc_fdev}')
-                        print(f'rank is root, {max_fdev}')
+                        #UNCOMMENT FOR DEBUGGING    
+                        # print(f'rank is root, {acc_fdev}')
+                        # print(f'rank is root, {max_fdev}')
 
                     # Stack the functional expressions
                     tavg = [np.hstack([a, f]) for a, f in zip(tavg, funex)]

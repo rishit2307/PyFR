@@ -123,7 +123,7 @@ class RegionMixin:
             else:
                 m = re.match(r'(\w+)(?:\s+\+(\d+))?$', region)
                 rgn = BoundaryRegion(m[1], nlayers=int(m[2] or 1))
-
+            
             eset = rgn.interior_eles(intg.system.mesh, intg.rallocs)
             self._prepare_region_data_eset(intg, eset)
 
