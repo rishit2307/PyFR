@@ -229,9 +229,9 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
                 # Evaluate function for the step
                 fxh = self._eval_fun_exprs(avals + h)
-              
+                import pdb;pdb.set_trace()
                 # Calculate derivatives for functional averages
-                df.append([(fxh[i] - fx[i]) / h[idx] for i, _ in enumerate(self.fnames)])
+                df.append((fxh - fx) / h[idx])
                              
             # Stack derivatives     
             dfexpr.append(np.stack(df))
@@ -447,7 +447,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     dfdav = np.sqrt((dfdav0*dev[1][0,3, 29])**2 + (dfdav1*dev[1][1, 3, 29])**2 + (dfdav2*dev[1][2, 3, 29])**2)
 
                     funex, fdev = self._eval_fun_var(dev, tavg)
-                    import pdb;pdb.set_trace()
+                    
 
                     
                     
