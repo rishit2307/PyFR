@@ -409,7 +409,11 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
                     # Evaluate functional expressions and deviations
                     funex, fdev = self._eval_fun_var(dev, tavg)
-                    import pdb;pdb.set_trace()
+                    print(f'{fdev[0].shape}, {fdev[0][1, 7, 33]}')
+                    
+                    
+
+                
                     
                     # print(f'rank is {rank}, fd diff is {[np.all(f - f1 == 0) for (f, f1) in zip(fdev, fdev1)]}')
                     # print(f'rank is {rank}, f diff is {[np.all(f - f1 == 0) for (f, f1) in zip(funex, funex1)]}')
