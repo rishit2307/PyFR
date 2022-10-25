@@ -215,10 +215,12 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             exprs.append(fx)
             
             for i, _ in enumerate(an):
-
+                
                 # Calculate step size
-                h = eps * abs(av[i]) 
-                np.maximum(h, eps, where=h<eps**2, out=h)
+
+                h = eps * np.maximum(abs(av[i]), eps, where=abs(av[i])>eps, out=np.ones_like(av[i]))   
+                # tp = h = eps * abs(av[i]) 
+                # np.maximum(tp, eps, where=h<eps**2, out=tp)
                 av[i] += h
                 
                 # Evaluate function for the step
@@ -393,44 +395,44 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                     # fdev = self._eval_fun_var(dev, tavg)
 
                     # Evaluate functional expressions and deviations
-                    funex, fdev = self._eval_fun_var(dev, tavg)
+                    
                     
                     # UNCOMMENT FOR DEBUGGING
-                    # av0 = tavg[1][0, 3, 29]
-                    # av1 = tavg[1][1, 3, 29]
-                    # av2 = tavg[1][2, 3, 29]
-                    # if abs(av0) > self.eps:
-                    #     av0h = av0*np.sqrt(self.eps)
-                    # else:
-                    #     av0h = np.sqrt(self.eps)
+                    av0 = tavg[1][0, 3, 29]
+                    av1 = tavg[1][1, 3, 29]
+                    av2 = tavg[1][2, 3, 29]
+                    if abs(av0) > np.sqrt(self.eps):
+                        av0h = abs(av0)*np.sqrt(self.eps)
+                    else:
+                        av0h = np.sqrt(self.eps)
 
-                    # if abs(av1) > self.eps:
-                    #     av1h = av1*np.sqrt(self.eps)
-                    # else:
-                    #     av1h = np.sqrt(self.eps)
+                    if abs(av1) > np.sqrt(self.eps):
+                        av1h = abs(av1)*np.sqrt(self.eps)
+                    else:
+                        av1h = np.sqrt(self.eps)
 
-                    # if abs(av2) > self.eps:
-                    #     av2h = av2*np.sqrt(self.eps)
-                    # else:
-                    #     av2h = np.sqrt(self.eps)
+                    if abs(av2) > np.sqrt(self.eps):
+                        av2h = abs(av2)*np.sqrt(self.eps)
+                    else:
+                        av2h = np.sqrt(self.eps)
 
-                    # print(av0h, av1h, av2h)
+                    print(av0h, av1h, av2h)
                     
 
-                    # fav   = av0*av1 + av2
-                    # fav0h = (av0h+av0)*av1+av2
-                    # fav1h = av0*(av1h+av1) + av2
-                    # fav2h = av0*av1 + av2h+av2
-                    # dfdav0 = (fav0h - fav)/av0h
-                    # dfdav1 = (fav1h - fav)/av1h
-                    # dfdav2 = (fav2h - fav)/av2h
-                    # print(fav, fav0h, fav1h, fav2h)
-                    # print(dfdav0, dfdav1, dfdav2)
+                    fav   = av0*av1 + av2
+                    fav0h = (av0h+av0)*av1+av2
+                    fav1h = av0*(av1h+av1) + av2
+                    fav2h = av0*av1 + av2h+av2
+                    dfdav0 = (fav0h - fav)/av0h
+                    dfdav1 = (fav1h - fav)/av1h
+                    dfdav2 = (fav2h - fav)/av2h
+                    print(fav, fav0h, fav1h, fav2h)
+                    print(dfdav0, dfdav1, dfdav2)
 
-                    # dfdav = np.sqrt((dfdav0*dev[1][0,3, 29])**2 + (dfdav1*dev[1][1, 3, 29])**2 + (dfdav2*dev[1][2, 3, 29])**2)
+                    dfdav = np.sqrt((dfdav0*dev[1][0,3, 29])**2 + (dfdav1*dev[1][1, 3, 29])**2 + (dfdav2*dev[1][2, 3, 29])**2)
 
-                
-                  
+                    import pdb;pdb.set_trace()
+                    funex, fdev = self._eval_fun_var(dev, tavg)
                     
 
 
