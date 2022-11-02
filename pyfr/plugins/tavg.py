@@ -290,7 +290,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         # Weights for online variance and average
         Wmp1mpn = intg.tcurr - self.prevt
         W1mpn = intg.tcurr - self.tstart_acc
-        W1m = W1mpn - Wmp1mpn
+        W1m  = W1mpn - Wmp1mpn 
+        Wp = 2 * (W1mpn - Wmp1mpn) * W1mpn
 
         # Iterate over element type
     
@@ -302,7 +303,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             # Accumulate variance          
             v += Wmp1mpn*(c**2 + p**2 - 0.5 * ppc**2) 
             if self.tstart_acc != self.prevt:
-                v +=  ((Wmp1mpn / (2 * W1m * W1mpn)) * (a - W1mpn * ppc)**2)
+                v +=  (Wmp1mpn / Wp * (a - W1mpn * ppc)**2)
 
         # # print((vaccex[0][self.ab[0][0], self.ab[1][0], self.ab[2][0]])/(intg.tcurr - self.tout_last))
         a,b,c = self.a, self.b, self.c
