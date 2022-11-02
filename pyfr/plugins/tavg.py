@@ -1,7 +1,7 @@
 import re
 import itertools as it
 import numpy as np
-
+import csv
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.nputil import npeval
@@ -131,26 +131,26 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         self.vaccex = [np.zeros_like(a, dtype=np.float64) for a in self.accex]
 
 
-        # # Code for testing
-        # header = ['prevex', 'currex', 'time','doinit',  'doaccum', 'dowrite', 'var', 'avg', 'W1m', 'W1mpn']
+        # Code for testing
+        header = ['prevex', 'currex', 'time','doinit',  'doaccum', 'dowrite', 'var', 'avg', 'W1m', 'W1mpn']
 
         
         
        
-        # if np.amax(self.prevex[0] ) > np.amax(self.prevex[1] ):
-        #     self.ab = np.where(self.prevex[0] == np.amax(self.prevex[0]))
-        #     self.idx = 0
-        # else:
-        #     self.ab = np.where(self.prevex[1]== np.amax(self.prevex[1]))
-        #     self.idx = 1
+        if np.amax(self.prevex[0] ) > np.amax(self.prevex[1] ):
+            self.ab = np.where(self.prevex[0] == np.amax(self.prevex[0]))
+            self.idx = 0
+        else:
+            self.ab = np.where(self.prevex[1]== np.amax(self.prevex[1]))
+            self.idx = 1
 
-        # self.a = self.ab[0][0]
-        # self.b = self.ab[1][0]
-        # self.c = self.ab[2][0]
+        self.a = self.ab[0][0]
+        self.b = self.ab[1][0]
+        self.c = self.ab[2][0]
         
-        # with open('testing.csv', 'w') as f:
-        #     self.writer = csv.writer(f)
-        #     self.writer.writerow(header)
+        with open('testing.csv', 'w') as f:
+            self.writer = csv.writer(f)
+            self.writer.writerow(header)
 
 
    
@@ -299,31 +299,31 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             a += Wmp1mpn*(p + c)
 
             # Accumulate variance
-            if self.tstart_acc == self.prevt:
-                v += Wmp1mpn*(c**2 + p**2) - 0.5*Wmp1mpn*(p + c)**2
-
-            else:
-                v += (Wmp1mpn*(c**2 + p**2) - 0.5*Wmp1mpn*(p + c)**2 + 
-                     ((W1m / (2 * Wmp1mpn * W1mpn)) * 
-                     (Wmp1mpn * a/W1m - (c + p) * Wmp1mpn * W1mpn / W1m)**2))
+            
+            # Accumulate variance          
+            
+            v += Wmp1mpn*(c**2 + p**2 - 0.5*(p + c)**2) 
+            if not self.tstart_acc == self.prevt:
+                v +=  ((W1m / (2 * Wmp1mpn * W1mpn)) * (Wmp1mpn / W1m)**2 *
+                     (a - (c + p) * W1mpn)**2)
 
         # # print((vaccex[0][self.ab[0][0], self.ab[1][0], self.ab[2][0]])/(intg.tcurr - self.tout_last))
-        # a,b,c = self.a, self.b, self.c
+        a,b,c = self.a, self.b, self.c
         # # tp = self.prevex[self.idx][a,b,c]
         
         # # Code for testing
-        # if doaccum and not dowrite and intg.tcurr != self.prevt:
+        if doaccum and not dowrite and intg.tcurr != self.prevt:
            
 
-        #     data = [self.prevex[self.idx][a,b,c], \
-        #         currex[self.idx][a,b,c], intg.tcurr, '-', \
-        #             doaccum, dowrite, \
-        #             self.vaccex[self.idx][a,b,c]/ (2*(intg.tcurr - self.tstart_acc)),\
-        #                 accex[self.idx][a,b,c] / (2*(intg.tcurr - self.tstart_acc))\
-        #                     ,W1m, W1mpn]
-        #     with open('testing.csv', 'a') as f:
-        #         writer = csv.writer(f)
-        #         writer.writerow(data)
+            data = [self.prevex[self.idx][a,b,c], \
+                currex[self.idx][a,b,c], intg.tcurr, '-', \
+                    doaccum, dowrite, \
+                    self.vaccex[self.idx][a,b,c]/ (2*(intg.tcurr - self.tstart_acc)),\
+                        accex[self.idx][a,b,c] / (2*(intg.tcurr - self.tstart_acc))\
+                            ,W1m, W1mpn]
+            with open('testing.csv', 'a') as f:
+                writer = csv.writer(f)
+                writer.writerow(data)
 
   
         # Code for testing ends
@@ -349,12 +349,12 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
             # Accumulate them; always do this even when just writing
             self._acc_avg_var(intg, currex, doaccum, dowrite)
 
-            # if dowrite:
-            #     a,b,c  = self.a, self.b, self.c
-            #     data = [self.prevex[self.idx][a,b,c], currex[self.idx][a,b,c], intg.tcurr, '-', doaccum, dowrite, self.vaccex[self.idx][a,b,c]/ (2*(intg.tcurr - self.tstart_acc)), self.accex[self.idx][a,b,c] / (2*(intg.tcurr - self.tstart_acc)) ]
-            #     with open('testing.csv', 'a') as f:
-            #         writer = csv.writer(f)
-            #         writer.writerow(data)
+            if dowrite:
+                a,b,c  = self.a, self.b, self.c
+                data = [self.prevex[self.idx][a,b,c], currex[self.idx][a,b,c], intg.tcurr, '-', doaccum, dowrite, self.vaccex[self.idx][a,b,c]/ (2*(intg.tcurr - self.tstart_acc)), self.accex[self.idx][a,b,c] / (2*(intg.tcurr - self.tstart_acc)) ]
+                with open('testing.csv', 'a') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(data)
             
             # Save the time and solution
             self.prevt = intg.tcurr
@@ -431,7 +431,7 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
 
                     dfdav = np.sqrt((dfdav0*dev[1][0,3, 29])**2 + (dfdav1*dev[1][1, 3, 29])**2 + (dfdav2*dev[1][2, 3, 29])**2)
 
-                    import pdb;pdb.set_trace()
+                  
                     funex, fdev = self._eval_fun_var(dev, tavg)
                     
 
