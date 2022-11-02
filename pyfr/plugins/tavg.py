@@ -293,19 +293,16 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
         W1m = W1mpn - Wmp1mpn
 
         # Iterate over element type
+    
         for v, a, p, c in zip(vaccex, accex, prevex, currex):
-
+            ppc = p + c
             # Accumulate average
-            a += Wmp1mpn*(p + c)
+            a += Wmp1mpn * ppc
 
-            # Accumulate variance
-            
             # Accumulate variance          
-            
-            v += Wmp1mpn*(c**2 + p**2 - 0.5*(p + c)**2) 
-            if not self.tstart_acc == self.prevt:
-                v +=  ((W1m / (2 * Wmp1mpn * W1mpn)) * (Wmp1mpn / W1m)**2 *
-                     (a - (c + p) * W1mpn)**2)
+            v += Wmp1mpn*(c**2 + p**2 - 0.5 * ppc**2) 
+            if self.tstart_acc != self.prevt:
+                v +=  ((Wmp1mpn / (2 * W1m * W1mpn)) * (a - W1mpn * ppc)**2)
 
         # # print((vaccex[0][self.ab[0][0], self.ab[1][0], self.ab[2][0]])/(intg.tcurr - self.tout_last))
         a,b,c = self.a, self.b, self.c
