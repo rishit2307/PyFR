@@ -446,8 +446,8 @@ class TavgPlugin(PostactionMixin, RegionMixin, BasePlugin):
                 # print(f'rank is {rank}, f diff is {[np.all(f - f1 == 0) for (f, f1) in zip(funex, funex1)]}')
                 
                 # Maximum and sum of deviations
-                maxd = np.zeros_like(self.fnames + self.anames, dtype=np.float64)
-                accd = np.zeros_like(self.fnames + self.anames, dtype=np.float64) 
+                maxd = np.zeros(len(self.fnames) + len(self.anames), dtype=np.float64)
+                accd = np.zeros(len(self.fnames) + len(self.anames), dtype=np.float64) 
 
                 for dx, fx in it.zip_longest(dev, fdev):
                     fdv = np.vstack((dx, fx)) if fdev else dx
