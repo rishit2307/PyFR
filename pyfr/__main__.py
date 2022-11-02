@@ -127,7 +127,7 @@ def process_import(args):
         reader = get_reader_by_extn(extn, args.inmesh)
 
     # Get the mesh in the PyFR format
-    import pdb;pdb.set_trace()
+   
     mesh = reader.to_pyfrm(args.lintol)
 
     # Save to disk
@@ -231,11 +231,10 @@ def _process_common(args, mesh, soln, cfg):
 
     # Get the mapping from physical ranks to MPI ranks
     rallocs = get_rank_allocation(mesh, cfg)
-
+    
     # Construct the solver
-
     solver = get_solver(backend, rallocs, mesh, soln, cfg)
-
+    
     # If we are running interactively then create a progress bar
     if args.progress and MPI.COMM_WORLD.rank == 0:
         pb = ProgressBar(solver.tstart, solver.tcurr, solver.tend)

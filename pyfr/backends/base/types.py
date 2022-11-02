@@ -33,7 +33,7 @@ class MatrixBase:
             nblocks = (ncol - (ncol % -leaddim)) // leaddim
             datashape = [nblocks, nrow, leaddim]
         else:
-            nvar, narr, k = shape[-2], shape[-1], soasz
+            nvar, narr, k = shape[-2], shape[-1], soasz # narr = neles, nvar = num vars
             nparr = narr - narr % -csubsz
 
             nrow = shape[0] if ndim == 3 else shape[0]*shape[1]

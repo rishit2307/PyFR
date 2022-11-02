@@ -59,6 +59,7 @@ class BaseBackend:
         return DottedTemplateLookup(pkg, dfltargs)
 
     def malloc(self, obj, extent):
+       
         # If no extent has been specified then autocommit
         if extent is None:
             # Perform the allocation

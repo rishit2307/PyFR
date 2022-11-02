@@ -26,9 +26,9 @@ def get_integrator(backend, systemcls, rallocs, mesh, initsoln, cfg):
     # Determine the integrator name
     name = '_'.join([form, cn, sn, 'integrator'])
     name = re.sub('(?:^|_|-)([a-z])', lambda m: m[1].upper(), name)
-
+    
     # Composite the base classes together to form a new type
     integrator = type(name, (cc, sc), dict(name=name))
-    
+
     # Construct and return an instance of this new integrator class
     return integrator(backend, systemcls, rallocs, mesh, initsoln, cfg)
