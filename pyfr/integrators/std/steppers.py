@@ -1,6 +1,8 @@
+import numpy as np
+
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.util import memoize
-
+from pyfr.mpiutil import get_comm_rank_root, mpi
 
 class BaseStdStepper(BaseStdIntegrator):
     def collect_stats(self, stats):
@@ -29,6 +31,180 @@ class StdEulerStepper(BaseStdStepper):
 
         return ut
 
+class Trapezoidal(BaseStdStepper):
+    stepper_name = 'trapezium'
+    stepper_has_errest = False
+    stepper_nregs = 3
+    stepper_order = 1
+
+    @property
+    def _stepper_nfevals(self):
+        return self.nsteps
+    
+    def arnoldi(self, Q, k, eps, dt, t, eletype):
+        add, rhs_with_postproc = self._add, self.system.rhs
+        r0, r1, r2 = self._regidx
+        netype = len(self.system.ele_types)
+        h, qnorm = dict(), dict()
+
+        comm, rank, root = get_comm_rank_root()
+
+        for i in range(netype):
+            self.system.ele_banks[i][r2].set(Q[i][..., k])
+
+        # r1 = Un + eps*Q
+        add(0.0, r1, eps, r2, 1.0, r0)
+
+        # r1 = R(Un+eps*Q)
+        rhs_with_postproc(t, r1, r1)      
+
+        # r1 = R(Un+eps*Q)/eps + Q/dt
+        add(-1.0/(2*eps), r1, 1.0/dt, r2)
+
+        # r2 = R(Un)
+        rhs_with_postproc(t, r0, r2)
+        # r1 = R(Un+eps*Q)/eps + Q/dt  - R(Un)/eps 
+        add(1.0, r1, 1.0/(2*eps), r2)
+
+        for etype in self.system.ele_types:
+            h[etype] = np.zeros(k+2)
+        
+        q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
+       
+        for j in range(0, k+1):
+            for etype in eletype:
+                idx = self.system.ele_types.index(etype)
+                h[etype][j] = np.dot(q[idx].flatten(), Q[idx][..., j].flatten())
+                h[etype][j] = comm.allreduce(h[etype][j], op=mpi.SUM)
+                q[idx] = q[idx] - h[etype][j] * Q[idx][..., j]
+                
+
+        for etype in eletype:
+            idx = self.system.ele_types.index(etype)
+            qnorm[etype] = np.linalg.norm(q[idx])**2
+            qnorm[etype] = np.sqrt(comm.allreduce(qnorm[etype], mpi.SUM))
+
+        for etype in eletype:
+            i = self.system.ele_types.index(etype)
+            h[etype][k+1] = qnorm[etype]
+            q[i] /= h[etype][k+1]
+
+        return h, q
+
+    def step(self, t, dt):
+        add, rhs_with_postproc = self._add, self.system.rhs
+        r0, r1, r2 = self._regidx
+        ntol, m = 0.01, 15
+
+        # MPI info
+        comm, rank, root = get_comm_rank_root()
+
+        # Initialise
+        netype = len(self.system.ele_types)
+        nnorm = 1.0
+        rnorm, l2u, normele = dict(), dict(), dict()
+        if rank == 0:
+            eletype = self.system.ele_types
+        else:
+            eletype = None
+
+        eletype = comm.bcast(eletype, root=root)
+
+        nonlin_iter = 0
+        while np.amax(nnorm) > ntol:
+            e1 = [np.zeros(m+1) for i in range(netype)]
+            for i in range(netype):
+                e1[i][0] =  1.0
+
+            y = [[] for _ in range(netype)]
+
+            x = [self.system.ele_banks[i][r2].get() for i in range(netype)]
+
+            for etype in eletype:
+                i = self.system.ele_types.index(etype)
+                l2u[etype] = (np.linalg.norm(self.soln[i]))**2
+                l2u[etype] = np.sqrt(comm.allreduce(l2u[etype], op=mpi.SUM))
+            
+            
+            max_etp = max(l2u, key=l2u.get)
+            
+            eps = 1e-7*l2u[max_etp]
+            
+            # r1 = Un+1 = Un + eps*dU0
+            add(0.0, r1, eps, r2, 1.0, r0)
+
+            # r1 = R(Un+1)
+            rhs_with_postproc(t, r1, r1)
+            # r1 = R(Un+1)/eps + dU0/dt
+            add(-1.0/(2*eps), r1, 1/dt, r2)
+
+            # r2 = R(Un)
+            rhs_with_postproc(t, r0, r2)
+
+            # r1 = R(Un+1)/eps + dU0/dt - R(Un)/eps
+            add(1.0, r1, 1.0/(2*eps), r2)
+
+            # r1 = b - Adu0: first step of GMRES
+            add(-1.0, r1, 1.0, r2)
+
+            for etype in eletype:
+                idx = self.system.ele_types.index(etype)
+                rnorm[etype] = (np.linalg.norm(self.system.ele_banks[idx][r1].get()))**2
+                rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
+
+            Q = [[] for i in range(netype)]
+            
+            for i, etype in enumerate(self.system.ele_types):
+                nupts, nvars, neles = self.system.ele_shapes[i]
+                Q[i] = np.zeros((nupts, nvars, neles, m+1))
+                Q[i][..., 0] = self.system.ele_banks[i][r1].get() / rnorm[etype]
+            
+            H = [np.zeros((m+1, m)) for i in range(netype)]
+
+            beta = [rnorm[etype]*e1[i] for i, etype
+                    in enumerate(self.system.ele_types)]
+            
+            for k in range(m):
+                h, q = self.arnoldi(Q, k, eps, dt, t, eletype)
+                for i, etype in enumerate(self.system.ele_types):
+                    H[i][:k+2, k], Q[i][..., k+1] = h[etype], q[i]
+
+            for i, etype in enumerate(self.system.ele_types):
+                y[i] = np.linalg.lstsq(H[i][:k+1, :k+1], beta[i][:k+1], rcond=None)[0]
+                x[i] += Q[i][..., :k+1] @ y[i]
+                self.system.ele_banks[i][r2].set(x[i])
+            
+            # r1 = R(Un)
+            rhs_with_postproc(t, r0, r1)
+
+            # r0 = Un+1 = Un + dUn
+            add(1.0, r0, 1.0, r2)
+
+            # r1 = R(Un)/2 + Du/Dt
+            add(-1/2, r1, 1/dt, r2)
+
+            # r2 = R(Un+1)
+            rhs_with_postproc(t, r0, r2)
+
+            # r1 = R(Un)/2 + Du/dt + R(Un+1)/2
+            add(1.0, r1, -1/2, r2)
+            
+            for i, etype in enumerate(eletype):
+                idx = self.system.ele_types.index(etype)
+                normele[etype] = (np.linalg.norm(self.system.ele_banks[idx][r1].get()))**2
+                normele[etype] = np.sqrt(comm.allreduce(normele[etype], mpi.SUM))
+            
+            nnorm = normele[max(normele, key=normele.get)]
+            
+            for i in range(netype):
+                self.system.ele_banks[i][r2].set(x[i])
+
+            nonlin_iter+= 1
+            if rank == root:
+                print(nnorm)
+                print(nonlin_iter)
+       
+        return r0
 
 class StdTVDRK3Stepper(BaseStdStepper):
     stepper_name = 'tvd-rk3'
