@@ -189,6 +189,10 @@ class BaseElements:
         self.scal_upts = [backend.matrix(self.scal_upts.shape,
                                          self.scal_upts, tags={'align'})
                           for i in range(nscalupts)]
+        
+        self.scal_upts[-1] = backend.matrix(np.zeros(self.scal_upts[0].get().shape).shape, 
+                                            np.zeros(self.scal_upts[0].get().shape), tags={'align'})
+        
 
         # Find/allocate space for a solution-sized scalar
         tags = self.scal_upts[0].tags
