@@ -1,5 +1,5 @@
 import numpy as np
-
+import copy
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.util import memoize
 from pyfr.mpiutil import get_comm_rank_root, mpi
@@ -81,6 +81,8 @@ class Trapezoidal(BaseStdStepper):
 
         for i, etype in enumerate(self.system.ele_types):
             qnorm[etype] = (np.linalg.norm(q[i]))**2
+        
+        for etype in eletype:
             qnorm[etype] = np.sqrt(comm.allreduce(qnorm[etype], mpi.SUM))
 
         for i, etype in enumerate(self.system.ele_types):
@@ -88,11 +90,34 @@ class Trapezoidal(BaseStdStepper):
             q[i] /= h[etype][k+1]
 
         return h, q
+    
+    def apply_givens_rotation(self, h, cs, sn, k):
+        for i in range(k):
+            temp = cs[i] * h[i] + sn[i] * h[i+1]
+
+            h[i+1] = -sn[i] * h[i] + cs[i] * h[i+1]
+            h[i] = temp
+        
+        cs_k, sn_k = self.givens_rotation(h[k], h[k+1])
+
+        h[k] = cs_k * h[k] + sn_k * h[k+1]
+        h[k+1] = 0.0
+
+
+        return h, cs_k, sn_k
+
+    def givens_rotation(self, v1, v2):
+        tt = np.sqrt(v1**2 + v2**2)
+        cs = v1/tt
+        sn = v2/tt
+
+        return cs, sn
+
 
     def step(self, t, dt):
         add, rhs_with_postproc = self._add, self.system.rhs
         r0, r1, r2 = self._regidx
-        ntol, m = 0.01, 15
+        ntol, m = 0.01, 10
 
         # MPI info
         comm, rank, root = get_comm_rank_root()
@@ -101,32 +126,34 @@ class Trapezoidal(BaseStdStepper):
         netype = len(self.system.ele_types)
         nnorm = 1.0
         rnorm, l2u, normele = dict(), dict(), dict()
-        
+        err = dict()
         if rank == 0:
             eletype = self.system.ele_types
         else:
             eletype = None
 
+        ltol = 3e-8
         eletype = comm.bcast(eletype, root=root)
         for etp in eletype:
             rnorm[etp] = 0
             l2u[etp] = 0
             normele[etp] = 0
+            err[etp] = 0.0
 
 
         nonlin_iter = 0
-        lconv = [[] for _ in range(netype)]
-        lintol = 1e-4
-
 
         while np.amax(nnorm) > ntol:
             e1 = [np.zeros(m+1) for i in range(netype)]
             for i in range(netype):
                 e1[i][0] =  1.0
+            
+            sn = [np.zeros(m) for i in range(netype)]
+            cs = [np.zeros(m) for i in range(netype)]
 
             y = [[] for _ in range(netype)]
 
-            x = [self.system.ele_banks[i][r2].get() for i in range(netype)]
+            x = copy.deepcopy(self.system.ele_scal_upts(r2))
 
             for i, etype in enumerate(self.system.ele_types):
                 l2u[etype] = (np.linalg.norm(self.soln[i]))**2
@@ -161,8 +188,6 @@ class Trapezoidal(BaseStdStepper):
             for etype in eletype:
                 rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
 
-            print(rnorm)
-            exit()
             Q = [[] for i in range(netype)]
             
             for i, etype in enumerate(self.system.ele_types):
@@ -181,17 +206,28 @@ class Trapezoidal(BaseStdStepper):
                 
                 for i, etype in enumerate(self.system.ele_types):
                     H[i][:k+2, k], Q[i][..., k+1] = h[etype], q[i]
-                    
-                    
+
+                    H[i][:k+2, k], cs[i][k], sn[i][k] = self.apply_givens_rotation(H[i][:k+2, k], cs[i], sn[i] ,k)
+
+                    beta[i][k+1] = -sn[i][k] * beta[i][k]
+                    beta[i][k] = cs[i][k] * beta[i][k]
+
+                    err[etype] = abs(beta[i][k+1]) / l2u[etype]
+
+                for etype in eletype:
+                    error = np.amax(comm.allreduce(err[etype], op=mpi.SUM))
                 
-            
-            
+                if error < ltol:
+                    print(f'GMRES converged in {k} iterations, error is {err}')
+                    break
+
+            if k == m-1:
+                print(f'GMRES did not converge in {m} iterations, error is {err}')
             for i, etype in enumerate(self.system.ele_types):
-                y[i], _, _, lconv[i] = np.linalg.lstsq(H[i][:k+1, :k+1], 
-                                        beta[i][:k+1], rcond=None)
+                y[i] =  np.linalg.solve(H[i][:k+1, :k+1], beta[i][:k+1])
                 x[i] += Q[i][..., :k+1] @ y[i]
                 self.system.ele_banks[i][r2].set(x[i])
-            
+
             # r1 = R(Un)
             rhs_with_postproc(t, r0, r1)
 
@@ -207,11 +243,12 @@ class Trapezoidal(BaseStdStepper):
             # r1 = R(Un)/2 + Du/dt + R(Un+1)/2
             add(1.0, r1, -1/2, r2)
             
-            for i, etype in enumerate(eletype):
-                idx = self.system.ele_types.index(etype)
-                normele[etype] = (np.linalg.norm(self.system.ele_banks[idx][r1].get()))**2
+            for i, etype in enumerate(self.system.ele_types):
+                normele[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
+
+            for etype in eletype:
                 normele[etype] = np.sqrt(comm.allreduce(normele[etype], mpi.SUM))
-            
+
             nnorm = normele[max(normele, key=normele.get)]
             
             for i in range(netype):
@@ -220,12 +257,16 @@ class Trapezoidal(BaseStdStepper):
             nonlin_iter+= 1
             if rank == root:
                 print(nnorm)
-            
-        
                 print(nonlin_iter)
-            exit()
-       
+
         return r0
+    
+# class BDF2(Trape):
+#     stepper_name = 'bdf2'
+#     stepper_has_errest = False
+#     stepper_nregs = 4
+#     stepper_order = 2
+
 
 class StdTVDRK3Stepper(BaseStdStepper):
     stepper_name = 'tvd-rk3'
