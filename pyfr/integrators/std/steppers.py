@@ -12,10 +12,10 @@ class BaseStdStepper(BaseStdIntegrator):
         stats.set('solver-time-integrator', 'nfevals', self._stepper_nfevals)
 
     def _init_gmres(self):
-        self.ntol, self.m = 0.01, 8
+        self.ntol, self.m = 0.001, 25
         self.rnorm, self.l2u = dict(), dict()
 
-        self.ltol = 3e-8
+        self.ltol = 1e-7
         self.eletype, self.err = dict(), dict()
 
         comm, rank, root = get_comm_rank_root()
@@ -42,7 +42,7 @@ class BaseStdStepper(BaseStdIntegrator):
         
         self.y = [[] for _ in range(len(self.system.ele_types))]
     
-    def solve_gmres(self, r0, r1, r2, t, dt, fac=1.0, r3=None):
+    def solve_gmres(self, t, dt, eps, x, dtfac=1.0):
         comm, rank, root = get_comm_rank_root()
         y = self.y
         cs, sn = self.cs, self.sn
@@ -50,35 +50,7 @@ class BaseStdStepper(BaseStdIntegrator):
         rnorm, m = self.rnorm, self.m
         add, rhs_with_postproc = self._add, self.system.rhs
         l2u, eletype = self.l2u, self.eletype
-        x = copy.deepcopy(self.system.ele_scal_upts(r2))
-
-        for i, etype in enumerate(self.system.ele_types):
-            l2u[etype] = (np.linalg.norm(self.soln[i]))**2
-
-        for etype in eletype:
-            l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
-                          op=mpi.SUM))
-        
-        max_etp = max(l2u, key=l2u.get)
-        eps = 1e-7*l2u[max_etp]
-
-        # r1 = Un+1 = Un + eps*dU0
-        add(0.0, r1, eps, r2, 1.0, r0)
-
-        # r1 = R(Un+1)
-        rhs_with_postproc(t, r1, r1)
-
-        # r1 = R(Un+1)/eps + dU0/dt
-        add(-1.0/(2*eps), r1, 1/dt, r2)
-
-        # r2 = R(Un)
-        rhs_with_postproc(t, r0, r2)
-
-        # r1 = R(Un+1)/eps + dU0/dt - R(Un)/eps
-        add(1.0, r1, 1.0/(2*eps), r2)
-
-        # r1 = b - Adu0: first step of GMRES
-        add(-1.0, r1, 1.0, r2)
+        r0, r1, r2, r3, *r4 = self._regidx
 
         for i, etype in enumerate(self.system.ele_types):
                 rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
@@ -97,14 +69,15 @@ class BaseStdStepper(BaseStdIntegrator):
         beta = [rnorm[etype]*self.e1[i] for i, etype
                     in enumerate(self.system.ele_types)]
             
-
+        
         for k in range(m):
-            h, q = self.arnoldi(Q, k, eps, dt, t, eletype, r0, r1, r2, fac=2.)
+            h, q = self.arnoldi(Q, k, eps, t, dt, dtfac)
             
             for i, etype in enumerate(self.system.ele_types):
                 H[i][:k+2, k], Q[i][..., k+1] = h[etype], q[i]
 
-                H[i][:k+2, k], cs[i][k], sn[i][k] = self.apply_givens_rotation(H[i][:k+2, k], cs[i], sn[i] ,k)
+                H[i][:k+2, k], cs[i][k], sn[i][k] = self.giv_rot(H[i][:k+2, k], 
+                                                                            cs[i], sn[i] ,k)
 
                 beta[i][k+1] = -sn[i][k] * beta[i][k]
                 beta[i][k] = cs[i][k] * beta[i][k]
@@ -120,38 +93,44 @@ class BaseStdStepper(BaseStdIntegrator):
 
         if k == m-1:
             print(f'GMRES did not converge in {m} iterations, error is {err}')
+        # import pdb;pdb.set_trace()
         for i, etype in enumerate(self.system.ele_types):
             y[i] =  np.linalg.solve(H[i][:k+1, :k+1], beta[i][:k+1])
             x[i] += Q[i][..., :k+1] @ y[i]
-            self.system.ele_banks[i][r2].set(x[i])
+            self.system.ele_banks[i][r3].set(x[i])
         
-        return x
+        # r2 = Un+1,k+1 = Un+1,k + dUk
+        add(1.0, r2, 1.0, r3)
 
 
-    def arnoldi(self, Q, k, eps, dt, t, eletype, r0, r1, r2, fac=1.0):
+
+    def arnoldi(self, Q, k, eps, t, dt, dtfac):
         add, rhs_with_postproc = self._add, self.system.rhs
         h, qnorm = dict(), dict()
         netype = len(self.system.ele_types)
+        eletype = self.eletype
+        
+
+
+        r0, r1, r2, r3, *r4 = self._regidx
+        r4 = r4[0]
 
         comm, rank, root = get_comm_rank_root()
 
         for i in range(netype):
-            self.system.ele_banks[i][r2].set(Q[i][..., k])
+            self.system.ele_banks[i][r3].set(Q[i][..., k])
 
-        # r1 = Un + eps*Q
-        add(0.0, r1, eps, r2, 1.0, r0)
+        # r1 = Un+1,k + eps*Q
+        add(0.0, r1, eps, r3, 1.0, r2)
 
         # r1 = R(Un+eps*Q)
-        rhs_with_postproc(t, r1, r1)      
+        rhs_with_postproc(t+dt, r1, r1)      
 
         # r1 = R(Un+eps*Q)/eps + Q/dt
-        add(-1.0/(2*eps), r1, 1.0/dt, r2)
-
-        # r2 = R(Un)
-        rhs_with_postproc(t, r0, r2)
+        add(-1.0/eps, r1, dtfac/dt, r3)
 
         # r1 = R(Un+eps*Q)/eps + Q/dt  - R(Un)/eps 
-        add(1.0, r1, 1.0/(2*eps), r2)
+        add(1.0, r1, 1.0/eps, r4)
 
         for etype in eletype:
             h[etype] = np.zeros(k+2)
@@ -178,14 +157,14 @@ class BaseStdStepper(BaseStdIntegrator):
 
         return h, q
     
-    def apply_givens_rotation(self, h, cs, sn, k):
+    def giv_rot(self, h, cs, sn, k):
         for i in range(k):
             temp = cs[i] * h[i] + sn[i] * h[i+1]
 
             h[i+1] = -sn[i] * h[i] + cs[i] * h[i+1]
             h[i] = temp
         
-        cs_k, sn_k = self.givens_rotation(h[k], h[k+1])
+        cs_k, sn_k = self.giv(h[k], h[k+1])
 
         h[k] = cs_k * h[k] + sn_k * h[k+1]
         h[k+1] = 0.0
@@ -193,7 +172,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
         return h, cs_k, sn_k
 
-    def givens_rotation(self, v1, v2):
+    def giv(self, v1, v2):
         tt = np.sqrt(v1**2 + v2**2)
         cs = v1/tt
         sn = v2/tt
@@ -222,20 +201,103 @@ class StdEulerStepper(BaseStdStepper):
 class Trapezoidal(BaseStdStepper):
     stepper_name = 'trapezium'
     stepper_has_errest = False
-    stepper_nregs = 3
+    stepper_nregs = 5
     stepper_order = 1
 
     @property
     def _stepper_nfevals(self):
         return self.nsteps
+    
+
+    def _res(self, t, dt, dtfac=1.0):
+
+        add, rhs_with_postproc = self._add, self.system.rhs
+        l2u, eletype = self.l2u, self.eletype
+        comm, rank, root = get_comm_rank_root()
+        # import pdb;pdb.set_trace()
+        r0, r1, r2, r3, *r4 = self._regidx
+        r4 = r4[0]
+        for i, etype in enumerate(self.system.ele_types):
+            l2u[etype] = (np.linalg.norm(self.soln[i]))**2
+
+        for etype in eletype:
+            l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
+                          op=mpi.SUM))
+        
+        max_etp = max(l2u, key=l2u.get)
+        eps = 1e-7*l2u[max_etp]
+
+       
+        # r1 = Un+1,k + eps*DUn+1,k
+        add(0.0, r1, eps, r3, 1.0, r2)
+
+        # r1 = R(Un+1,k+1)
+        rhs_with_postproc(t+dt, r1, r1)
+
+        # r1 = R(Un+1,k+1)/eps + dUnk/dt
+        add(-1.0/eps, r1, dtfac/dt, r3)
+
+        # r3 = R(Un)
+        rhs_with_postproc(t, r0, r3)
+
+        # r4 = R(Un+1, k)
+        rhs_with_postproc(t+dt, r2, r4)
+
+        # r1 = R(Un+1,k+1)/eps + dUnk/dt - R(Un+1,k)/eps
+        add(1.0, r1, 1.0/eps, r4)
+
+        # r3 = R(Un)/2 + R(Un+1,k)/2 
+        add(dtfac/2., r3, dtfac/2., r4)
+
+        # r3 = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
+        add(1.0, r3, -dtfac/dt, r2, dtfac/dt, r0)
+
+        # r1 = b - Ax
+        add(-1.0, r1, 1.0, r3)
+
+        return eps
+
+
+    def newton_res(self, t, dt):
+        add, rhs_with_postproc = self._add, self.system.rhs
+        self.normele = dict()
+        comm, rank, root = get_comm_rank_root()
+
+        r0, r1, r2, r3, *r4 = self._regidx
+        r4 = r4[0]
+
+        for etp in self.eletype:
+            self.normele[etp] = 0
+
+        # r1 = R(Un)
+        rhs_with_postproc(t, r0, r1)
+
+        # r1 = R(Un)/2 + Du/Dt
+        add(-1/2, r1, 1/dt, r2, -1/dt, r0)
+
+        # r4 = R(Un+1)
+        rhs_with_postproc(t+dt, r2, r4)
+
+        # r1 = R(Un)/2 + Du/dt + R(Un+1)/2
+        add(1.0, r1, -1/2, r4)
+
+        for i, etype in enumerate(self.system.ele_types):
+            self.normele[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
+
+        for etype in self.eletype:
+            self.normele[etype] = np.sqrt(comm.allreduce(self.normele[etype], mpi.SUM))
+
+        nnorm = self.normele[max(self.normele, key=self.normele.get)]
+        
+
+        return nnorm/self._get_gndofs()
 
     def step(self, t, dt):
-        add, rhs_with_postproc = self._add, self.system.rhs
-        r0, r1, r2 = self._regidx
-        ntol= 0.01
-
+        r0, r1, r2, r3, *r4 = self._regidx
+        r4 = r4[0]
+        ntol = self.ntol
+        add = self._add
         nnorm = 1.0
-        normele = dict()
         comm, rank, root = get_comm_rank_root()
 
         nonlin_iter = 0
@@ -243,45 +305,185 @@ class Trapezoidal(BaseStdStepper):
         while np.amax(nnorm) > ntol:
             self._init_gmres()
 
-            for etp in self.eletype:
-                normele[etp] = 0
-
-
-            x = self.solve_gmres(r0, r1, r2, t, dt, fac=2.0)
-
-            # r1 = R(Un)
-            rhs_with_postproc(t, r0, r1)
-
-            # r0 = Un+1 = Un + dUn
-            add(1.0, r0, 1.0, r2)
-
-            # r1 = R(Un)/2 + Du/Dt
-            add(-1/2, r1, 1/dt, r2)
-
-            # r2 = R(Un+1)
-            rhs_with_postproc(t, r0, r2)
-
-            # r1 = R(Un)/2 + Du/dt + R(Un+1)/2
-            add(1.0, r1, -1/2, r2)
+            x = copy.deepcopy(self.system.ele_scal_upts(r3))
             
-            for i, etype in enumerate(self.system.ele_types):
-                normele[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
-
-            for etype in self.eletype:
-                normele[etype] = np.sqrt(comm.allreduce(normele[etype], mpi.SUM))
-
-            nnorm = normele[max(normele, key=normele.get)]
+            eps = self._res(t, dt, dtfac=2.0)
             
+            self.solve_gmres(t, dt, eps, x, dtfac=2.0)
+            
+            nnorm = self.newton_res(t, dt)
+            
+            # for i in range(len(self.system.ele_types)):
+            #     self.system.ele_banks[i][r1].set(x[i])
+
+            nonlin_iter+= 1
+            if rank == root:
+                print(nnorm)
+                print(nonlin_iter)
+        
+        print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
+        # r0 = Un+1 = Un + dUn
+        add(0.0, r0, 1.0, r2)
+
+        return r0
+
+class BDF2(Trapezoidal):
+    stepper_name = 'bdf2'
+    stepper_has_errest = False
+    stepper_nregs = 6
+    stepper_order = 3
+
+    @property
+    def _stepper_nfvals(self):
+        return 4*self.nsteps
+    
+    def _res(self, t, dt, dtfac=1.0):
+        add, rhs_with_postproc = self._add, self.system.rhs
+        l2u, eletype = self.l2u, self.eletype
+        comm, rank, root = get_comm_rank_root()
+
+        r0, r1, r2, r3, r4, r5 = self._regidx
+
+        for i, etype in enumerate(self.system.ele_types):
+            l2u[etype] = (np.linalg.norm(self.soln[i]))**2
+
+        for etype in eletype:
+            l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
+                          op=mpi.SUM))
+        
+        max_etp = max(l2u, key=l2u.get)
+        eps = 1e-7*l2u[max_etp]
+
+        # r1 = Un+2,k + eps*DUn+2,k
+        add(0.0, r1, 1.0, r2, eps, r3)
+
+        # r1 = R(Un+2,k+1)
+        rhs_with_postproc(t+dt, r1, r1)
+
+        # r1 = R(Un+2,k+1)/eps + dUnk/dt
+        add(-1.0/eps, r1, dtfac/dt, r3)
+
+        # r4 = R(Un+2, k)
+        rhs_with_postproc(t+dt, r2, r4)
+
+        # r1 = R(Un+2,k+1)/eps + dUnk/dt - R(Un+2,k)/eps
+        add(1.0, r1, 1.0/eps, r4)
+
+        # r3 = 3*Un+2,k/2*dt - 2*Un+1/dt + Un/2*dt
+        add(0.0, r3, -dtfac/dt, r2, dtfac*4/(3*dt), r5, -dtfac/(dt*3), r0)
+
+        # r3 = r3 + R(Un+2, k, tn+2)
+        add(1.0, r3, 1.0, r4)
+
+        # r1 = b - Ax
+        add(-1.0, r1, 1.0, r3)
+
+        return eps
+    
+    def newton_res(self, t, dt):
+        add, rhs_with_postproc = self._add, self.system.rhs
+        self.normele = dict()
+        comm, rank, root = get_comm_rank_root()
+
+        r0, r1, r2, r3, r4, r5 = self._regidx
+
+        for etp in self.eletype:
+            self.normele[etp] = 0
+
+        # r1 = R(Un+2,k+1)
+        rhs_with_postproc(t+dt, r2, r1)
+
+        # r1 = Un+2,k - 4*Un+1/3 + Un/3 + 2*dt*R(Un+2,tn+2)/3
+        add(-2*dt/3, r1, 1.0, r2, -4/3, r5, 1/3, r0)
+
+        for i, etype in enumerate(self.system.ele_types):
+            self.normele[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
+
+        for etype in self.eletype:
+            self.normele[etype] = np.sqrt(comm.allreduce(self.normele[etype], mpi.SUM))
+
+        nnorm = self.normele[max(self.normele, key=self.normele.get)]
+        
+
+        return nnorm/self._get_gndofs()
+
+
+    def step(self, t, dt):
+        r0, r1, r2, r3, r4, r5 = self._regidx
+        self._init_gmres()
+        ntol = self.ntol
+        
+        add = self._add
+
+        nnorm = 1.0
+        nonlin_iter = 0
+        comm, root, rank = get_comm_rank_root()
+        y = copy.deepcopy(self.system.ele_scal_upts(r0))
+
+        if t == 0.0:
+            dt /= 5.
+            for j in range(5):
+                while np.amax(nnorm) > ntol:
+                    self._init_gmres()
+
+                    x = copy.deepcopy(self.system.ele_scal_upts(r3))
+
+                    eps = super()._res(t, dt, dtfac=2.0)
+            
+                    self.solve_gmres(t, dt, eps, x, dtfac=2.0)
+
+                    nnorm = super().newton_res(t, dt)
+                    
+                    nonlin_iter+= 1
+                    if rank == root:
+                        print(f'Trapezium rule {j} step')
+                        print(nnorm)
+                        print(nonlin_iter)
+                
+                # r0 = Un+1 = Un + dUn
+                add(0.0, r0, 1.0, r2)
+                print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
+
+                nnorm = 1.0
+
+                t += dt/5.
+            
+            add(0.0, r5, 1.0, r2)
             for i in range(len(self.system.ele_types)):
-                self.system.ele_banks[i][r2].set(x[i])
+                self.system.ele_banks[i][r0].set(y[i])
+
+            return r2
+
+        
+
+        
+        print(f'time is {t}')
+        while np.amax(nnorm) > ntol:
+            self._init_gmres()
+
+            x = copy.deepcopy(self.system.ele_scal_upts(r3))
+
+            eps = self._res(t, dt, dtfac=1.5)
+
+            self.solve_gmres(t, dt, eps, x, dtfac=1.5)
+
+            nnorm = self.newton_res(t, dt)
 
             nonlin_iter+= 1
             if rank == root:
                 print(nnorm)
                 print(nonlin_iter)
 
-        return r0
-    
+        add(0.0, r0, 1.0, r5)
+        add(0.0, r5, 1.0, r2)
+
+        return r2
+
+
+
+
+        
+
 
 
 

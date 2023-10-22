@@ -268,7 +268,7 @@ class BaseSystem:
         self._prepare_kernels(t, uinbank, foutbank)
 
         for graph in self._rhs_graphs(uinbank, foutbank):
-            self.backend.run_graph(graph)
+            self.backend.run_graph(graph, wait=True)
 
     def _preproc_graphs(self, uinbank):
         pass
