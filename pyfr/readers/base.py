@@ -191,7 +191,7 @@ class NodalMeshAssembler:
         # Identify the fixed boundary faces
         bf = self._ident_boundary_faces(bpart, resid)
         spinner()
-
+        import pdb;pdb.set_trace()
         if any(resid.values()):
             raise ValueError('Unpaired faces in mesh')
 

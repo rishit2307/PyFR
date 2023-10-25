@@ -12,33 +12,30 @@ class BaseStdStepper(BaseStdIntegrator):
         stats.set('solver-time-integrator', 'nfevals', self._stepper_nfevals)
 
     def _init_gmres(self):
-        self.ntol, self.m = 0.001, 25
-        self.rnorm, self.l2u = dict(), dict()
+        self.m = 30
+        self.rnorm= dict()
 
-        self.ltol = 1e-7
-        self.eletype, self.err = dict(), dict()
+        self.ltol = 1e-13
+        self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
-        self.eletype = comm.allreduce(self.system.ele_types, op=mpi.SUM)
-
+        self.eletype = set(comm.allreduce(self.system.ele_types, op=mpi.SUM))
         self.eletype = comm.bcast(self.eletype, root=root)
 
-        for etype in self.eletype:
-            self.rnorm[etype] = 0.0
-            self.l2u[etype] = 0.0
-            self.err[etype] = 0.0
+        # for etype in self.eletype:
+        #     self.rnorm[etype] = 0.0
+        #     self.l2u[etype] = 0.0
+        #     self.err[etype] = 0.0
         
 
-        self.e1 = [np.zeros(self.m+1) for i in 
-                   range(len(self.system.ele_types))]
+        self.e1 = np.zeros(self.m+1)
+        self.e1[0] = 1.0
         
-        for i in range(len(self.system.ele_types)):
-            self.e1[i][0] =  1.0
+        # for i in range(len(self.system.ele_types)):
+        #     self.e1[i][0] =  1.0
             
-        self.sn = [np.zeros(self.m) for i in 
-                   range(len(self.system.ele_types))]
-        self.cs = [np.zeros(self.m) for i in 
-                   range(len(self.system.ele_types))]
+        self.sn = np.zeros(self.m)
+        self.cs = np.zeros(self.m)
         
         self.y = [[] for _ in range(len(self.system.ele_types))]
     
@@ -46,67 +43,69 @@ class BaseStdStepper(BaseStdIntegrator):
         comm, rank, root = get_comm_rank_root()
         y = self.y
         cs, sn = self.cs, self.sn
-        err, ltol = self.err, self.ltol
+        ltol = self.ltol
         rnorm, m = self.rnorm, self.m
         add, rhs_with_postproc = self._add, self.system.rhs
         l2u, eletype = self.l2u, self.eletype
         r0, r1, r2, r3, *r4 = self._regidx
 
-        for i, etype in enumerate(self.system.ele_types):
-                rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
+        # for i, etype in enumerate(self.system.ele_types):
+        #         rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
             
-        for etype in eletype:
-                rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
+        # for etype in eletype:
+        #         rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
+
+        rnorm = sum([np.linalg.norm(self.system.ele_banks[i][r1].get())**2
+                              for i in range(len(self.system.ele_types))])
+        rnorm = np.sqrt(comm.allreduce(rnorm, op=mpi.SUM))
 
         Q = [[] for i in range(len(self.system.ele_types))]
             
         for i, etype in enumerate(self.system.ele_types):
             nupts, nvars, neles = self.system.ele_shapes[i]
             Q[i] = np.zeros((nupts, nvars, neles, m+1))
-            Q[i][..., 0] = self.system.ele_banks[i][r1].get() / rnorm[etype]
+            Q[i][..., 0] = self.system.ele_banks[i][r1].get() / rnorm
 
-        H = [np.zeros((m+1, m)) for i in range(len(self.system.ele_types))]
-        beta = [rnorm[etype]*self.e1[i] for i, etype
-                    in enumerate(self.system.ele_types)]
-            
-        
+        H = np.zeros((m+1, m))
+        beta = rnorm*self.e1
+
+
         for k in range(m):
-            h, q = self.arnoldi(Q, k, eps, t, dt, dtfac)
-            
-            for i, etype in enumerate(self.system.ele_types):
-                H[i][:k+2, k], Q[i][..., k+1] = h[etype], q[i]
+            H[:k+2, k], q = self.arnoldi(Q, k, eps, t, dt, dtfac)
 
-                H[i][:k+2, k], cs[i][k], sn[i][k] = self.giv_rot(H[i][:k+2, k], 
-                                                                            cs[i], sn[i] ,k)
+            for i in range(len(self.system.ele_types)):
+                Q[i][..., k+1] = q[i]
 
-                beta[i][k+1] = -sn[i][k] * beta[i][k]
-                beta[i][k] = cs[i][k] * beta[i][k]
+            H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
+                                                    cs, sn ,k)
 
-                err[etype] = abs(beta[i][k+1]) / l2u[etype]
+            beta[k+1] = -sn[k] * beta[k]
+            beta[k] = cs[k] * beta[k]
 
-            for etype in eletype:
-                error = np.amax(comm.allreduce(err[etype], op=mpi.SUM))
-            
-            if error < ltol:
-                print(f'GMRES converged in {k} iterations, error is {err}')
+            err = abs(beta[k+1]) / l2u
+
+            if err < ltol:
+                if rank == root:
+                    print(f'GMRES converged in {k} iterations, error is {err}')
+
                 break
 
-        if k == m-1:
-            print(f'GMRES did not converge in {m} iterations, error is {err}')
-        # import pdb;pdb.set_trace()
-        for i, etype in enumerate(self.system.ele_types):
-            y[i] =  np.linalg.solve(H[i][:k+1, :k+1], beta[i][:k+1])
-            x[i] += Q[i][..., :k+1] @ y[i]
+        if k == m-1 and err > ltol:
+            if rank == root:
+                print(f'GMRES did not converge in {m} iterations, error is {err}')
+
+        for i in range(len(self.system.ele_types)):
+            y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
+            x[i] += Q[i][..., :k+1] @ y
             self.system.ele_banks[i][r3].set(x[i])
         
         # r2 = Un+1,k+1 = Un+1,k + dUk
         add(1.0, r2, 1.0, r3)
 
-
-
     def arnoldi(self, Q, k, eps, t, dt, dtfac):
         add, rhs_with_postproc = self._add, self.system.rhs
-        h, qnorm = dict(), dict()
+        # h, qnorm = dict(), dict()
+        h = np.zeros(k+2)
         netype = len(self.system.ele_types)
         eletype = self.eletype
         
@@ -132,28 +131,32 @@ class BaseStdStepper(BaseStdIntegrator):
         # r1 = R(Un+eps*Q)/eps + Q/dt  - R(Un)/eps 
         add(1.0, r1, 1.0/eps, r4)
 
-        for etype in eletype:
-            h[etype] = np.zeros(k+2)
-            qnorm[etype] = 0
+        # for etype in eletype:
+        #     h[etype] = np.zeros(k+2)
+        #     qnorm[etype] = 0
         
         q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
 
-        for j in range(0, k+1):
-            for i, etype in enumerate(self.system.ele_types):
-                h[etype][j] = np.dot(q[i].flatten(), Q[i][..., j].flatten())
-                h[etype][j] = comm.allreduce(h[etype][j], op=mpi.SUM)
-                q[i] -= h[etype][j] * Q[i][..., j]
-                
+        for j in range(k+1):
+            h[j] = sum([np.dot(q[i].reshape(-1), Q[i][..., j].reshape(-1))
+                        for i in range(len(self.system.ele_types))])
+            h[j] = comm.allreduce(h[j], op=mpi.SUM)
 
-        for i, etype in enumerate(self.system.ele_types):
-            qnorm[etype] = (np.linalg.norm(q[i]))**2
+            for i in range(netype):
+                q[i] -= h[j] * Q[i][..., j]
+            
+
+        qnorm = sum([np.linalg.norm(q[i])**2 for i in range(netype)])
+        qnorm = np.sqrt(comm.allreduce(qnorm, op=mpi.SUM))
+        h[k+1] = qnorm
+        # for i, etype in enumerate(self.system.ele_types):
+        #     qnorm[etype] = (np.linalg.norm(q[i]))**2
         
-        for etype in eletype:
-            qnorm[etype] = np.sqrt(comm.allreduce(qnorm[etype], mpi.SUM))
+        # for etype in eletype:
+        #     qnorm[etype] = np.sqrt(comm.allreduce(qnorm[etype], mpi.SUM))
 
-        for i, etype in enumerate(self.system.ele_types):
-            h[etype][k+1] = qnorm[etype]
-            q[i] /= h[etype][k+1]
+        for i in range(netype):
+            q[i] /= h[k+1]
 
         return h, q
     
@@ -212,22 +215,27 @@ class Trapezoidal(BaseStdStepper):
     def _res(self, t, dt, dtfac=1.0):
 
         add, rhs_with_postproc = self._add, self.system.rhs
-        l2u, eletype = self.l2u, self.eletype
+        eletype =  self.eletype
         comm, rank, root = get_comm_rank_root()
         # import pdb;pdb.set_trace()
         r0, r1, r2, r3, *r4 = self._regidx
         r4 = r4[0]
-        for i, etype in enumerate(self.system.ele_types):
-            l2u[etype] = (np.linalg.norm(self.soln[i]))**2
+        # for i, etype in enumerate(self.system.ele_types):
+        #     l2u[etype] = (np.linalg.norm(self.soln[i]))**2
+ 
+        # for etype in eletype:
+        #     l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
+        #                   op=mpi.SUM))
 
-        for etype in eletype:
-            l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
-                          op=mpi.SUM))
+        self.l2u = np.array(sum([np.linalg.norm(self.soln[i])**2 for 
+                        i in range(len(self.system.ele_types))]))
         
-        max_etp = max(l2u, key=l2u.get)
-        eps = 1e-7*l2u[max_etp]
+        comm.Allreduce(mpi.IN_PLACE, self.l2u, mpi.SUM)
+        self.l2u = np.sqrt(self.l2u)
+        
+        # max_etp = max(l2u, key=l2u.get)
+        eps = 1e-7*self.l2u
 
-       
         # r1 = Un+1,k + eps*DUn+1,k
         add(0.0, r1, eps, r3, 1.0, r2)
 
@@ -281,23 +289,18 @@ class Trapezoidal(BaseStdStepper):
         # r1 = R(Un)/2 + Du/dt + R(Un+1)/2
         add(1.0, r1, -1/2, r4)
 
-        for i, etype in enumerate(self.system.ele_types):
-            self.normele[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
-
-        for etype in self.eletype:
-            self.normele[etype] = np.sqrt(comm.allreduce(self.normele[etype], mpi.SUM))
-
-        nnorm = self.normele[max(self.normele, key=self.normele.get)]
+        self.normele = sum([np.linalg.norm(self.system.ele_banks[i][r1]
+                            .get())**2 for i in range(len(self.system.ele_types))])
         
-
-        return nnorm/self._get_gndofs()
+        self.normele = np.sqrt(comm.allreduce(self.normele, op=mpi.SUM))
+        return self.normele/self._get_gndofs()
 
     def step(self, t, dt):
         r0, r1, r2, r3, *r4 = self._regidx
         r4 = r4[0]
-        ntol = self.ntol
         add = self._add
         nnorm = 1.0
+        ntol = self.ntol = 0.01
         comm, rank, root = get_comm_rank_root()
 
         nonlin_iter = 0
@@ -321,7 +324,7 @@ class Trapezoidal(BaseStdStepper):
                 print(nnorm)
                 print(nonlin_iter)
         
-        print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
+        # print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
         # r0 = Un+1 = Un + dUn
         add(0.0, r0, 1.0, r2)
 
@@ -344,15 +347,13 @@ class BDF2(Trapezoidal):
 
         r0, r1, r2, r3, r4, r5 = self._regidx
 
-        for i, etype in enumerate(self.system.ele_types):
-            l2u[etype] = (np.linalg.norm(self.soln[i]))**2
-
-        for etype in eletype:
-            l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
-                          op=mpi.SUM))
+        self.l2u = np.array(sum([np.linalg.norm(self.soln[i])**2 for 
+                        i in range(len(self.system.ele_types))]))
         
-        max_etp = max(l2u, key=l2u.get)
-        eps = 1e-7*l2u[max_etp]
+        comm.Allreduce(mpi.IN_PLACE, self.l2u, mpi.SUM)
+        self.l2u = np.sqrt(self.l2u)
+
+        eps = 1e-7*l2u
 
         # r1 = Un+2,k + eps*DUn+2,k
         add(0.0, r1, 1.0, r2, eps, r3)
@@ -382,13 +383,13 @@ class BDF2(Trapezoidal):
     
     def newton_res(self, t, dt):
         add, rhs_with_postproc = self._add, self.system.rhs
-        self.normele = dict()
+        # self.normele = dict()
         comm, rank, root = get_comm_rank_root()
 
         r0, r1, r2, r3, r4, r5 = self._regidx
 
-        for etp in self.eletype:
-            self.normele[etp] = 0
+        # for etp in self.eletype:
+        #     self.normele[etp] = 0
 
         # r1 = R(Un+2,k+1)
         rhs_with_postproc(t+dt, r2, r1)
@@ -396,25 +397,18 @@ class BDF2(Trapezoidal):
         # r1 = Un+2,k - 4*Un+1/3 + Un/3 + 2*dt*R(Un+2,tn+2)/3
         add(-2*dt/3, r1, 1.0, r2, -4/3, r5, 1/3, r0)
 
-        for i, etype in enumerate(self.system.ele_types):
-            self.normele[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
-
-        for etype in self.eletype:
-            self.normele[etype] = np.sqrt(comm.allreduce(self.normele[etype], mpi.SUM))
-
-        nnorm = self.normele[max(self.normele, key=self.normele.get)]
+        self.normele = sum([np.linalg.norm(self.system.ele_banks[i][r1]
+                            .get())**2 for i in range(len(self.system.ele_types))])
         
+        self.normele = np.sqrt(comm.allreduce(self.normele, op=mpi.SUM))
+        return self.normele/self._get_gndofs()
 
-        return nnorm/self._get_gndofs()
 
 
     def step(self, t, dt):
         r0, r1, r2, r3, r4, r5 = self._regidx
-        self._init_gmres()
-        ntol = self.ntol
-        
+        ntol = self.ntol = 0.001
         add = self._add
-
         nnorm = 1.0
         nonlin_iter = 0
         comm, root, rank = get_comm_rank_root()
@@ -442,7 +436,7 @@ class BDF2(Trapezoidal):
                 
                 # r0 = Un+1 = Un + dUn
                 add(0.0, r0, 1.0, r2)
-                print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
+                # print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
 
                 nnorm = 1.0
 
