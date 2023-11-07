@@ -24,6 +24,7 @@ class BaseIntegrator:
         # Start time
         self.tstart = cfg.getfloat('solver-time-integrator', 'tstart', 0.0)
         self.tend = cfg.getfloat('solver-time-integrator', 'tend')
+        self.tintg = cfg.getfloat('soln-plugin-integrate', 'tout')
 
         # Current time; defaults to tstart unless restarting
         if self.isrestart:

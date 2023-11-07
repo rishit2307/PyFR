@@ -188,11 +188,11 @@ class IntegratePlugin(BaseSolnPlugin):
                 for pname, idx in self._gradpinfo:
                     for dim, grad in zip('xyz', pgrads[idx]):
                         subs[f'grad_{pname}_{dim}'] = grad
-
+            
             for j, v in enumerate(self.exprs):
                 # Evaluate the expression at each point
                 e = npeval(v, subs)
-
+                import pdb;pdb.set_trace()
                 # Either max or quadrature and sum
                 if self.lp == float('inf'):
                     intvals[j] = max(intvals[j], np.amax(e))
@@ -205,10 +205,10 @@ class IntegratePlugin(BaseSolnPlugin):
         return intvals
 
     def __call__(self, intg):
-        if intg.nacptsteps % self.nsteps == 0:
+        if intg.tcurr == intg.tintg:
             # MPI info
             comm, rank, root = get_comm_rank_root()
-
+            
             # Evaluate the integation expressions
             iintex = self._eval_exprs(intg)
 

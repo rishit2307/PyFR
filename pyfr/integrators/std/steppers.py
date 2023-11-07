@@ -12,7 +12,7 @@ class BaseStdStepper(BaseStdIntegrator):
         stats.set('solver-time-integrator', 'nfevals', self._stepper_nfevals)
 
     def _init_gmres(self):
-        self.m = 30
+        self.m = 50
         self.rnorm= dict()
 
         self.ltol = 1e-13
@@ -293,14 +293,15 @@ class Trapezoidal(BaseStdStepper):
                             .get())**2 for i in range(len(self.system.ele_types))])
         
         self.normele = np.sqrt(comm.allreduce(self.normele, op=mpi.SUM))
-        return self.normele/self._get_gndofs()
+        # return self.normele/self._get_gndofs()
+        return self.normele
 
     def step(self, t, dt):
         r0, r1, r2, r3, *r4 = self._regidx
         r4 = r4[0]
         add = self._add
         nnorm = 1.0
-        ntol = self.ntol = 0.01
+        ntol = self.ntol = 1e-2
         comm, rank, root = get_comm_rank_root()
 
         nonlin_iter = 0
@@ -517,6 +518,36 @@ class StdTVDRK3Stepper(BaseStdStepper):
         # Return the index of the bank containing u(t + dt)
         return r1
 
+class StdRK2Stepper(BaseStdStepper):
+    stepper_name = 'rk2'
+    stepper_has_errest = False
+    stepper_nregs = 3
+    stepper_order = 4
+
+    @property
+    def _stepper_nfevals(self):
+        return 2*self.nsteps
+
+    def step(self, t, dt):
+        add, rhs_with_postproc = self._add, self.system.rhs
+
+        r0, r1, r2 = self._regidx
+
+        # Ensure r0 references the bank containing u(t)
+        if r0 != self._idxcurr:
+            r0, r1 = r1, r0
+
+        rhs_with_postproc(t, r0, r1)
+
+        add(0.0, r2, dt, r1, 1.0, r0)
+
+        rhs_with_postproc(t+dt, r2, r2)
+
+        add(dt/2, r1, dt/2, r2)
+
+        add(1.0, r1, 1.0, r0)
+
+        return r1
 
 class StdRK4Stepper(BaseStdStepper):
     stepper_name = 'rk4'
@@ -533,7 +564,7 @@ class StdRK4Stepper(BaseStdStepper):
 
         # Get the bank indices for each register
         r0, r1, r2 = self._regidx
-
+        import pdb;pdb.set_trace()
         # Ensure r0 references the bank containing u(t)
         if r0 != self._idxcurr:
             r0, r1 = r1, r0
@@ -564,10 +595,11 @@ class StdRK4Stepper(BaseStdStepper):
         # r2 = -∇·f(r2)
         add(dt, r2, 1.0, r0)
         rhs_with_postproc(t + dt, r2, r2)
-
+        print(f't is {t}, idxcurr is {self._idxcurr}')
         # Final accumulation r1 = r1 + dt/6*r2 = u(t + dt)
         add(1.0, r1, dt/6.0, r2)
-
+        if t == 0.004:
+            import pdb;pdb.set_trace()
         # Return the index of the bank containing u(t + dt)
         return r1
 
