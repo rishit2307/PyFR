@@ -166,6 +166,7 @@ class BaseBackend:
 
         # Loop through each kernel provider instance
         for prov in self._providers:
+
             # See if it can potentially provide the requested kernel
             kern_meth = getattr(prov, name, None)
             if kern_meth:

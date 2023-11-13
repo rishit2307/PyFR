@@ -192,7 +192,7 @@ class IntegratePlugin(BaseSolnPlugin):
             for j, v in enumerate(self.exprs):
                 # Evaluate the expression at each point
                 e = npeval(v, subs)
-                import pdb;pdb.set_trace()
+
                 # Either max or quadrature and sum
                 if self.lp == float('inf'):
                     intvals[j] = max(intvals[j], np.amax(e))
@@ -205,7 +205,7 @@ class IntegratePlugin(BaseSolnPlugin):
         return intvals
 
     def __call__(self, intg):
-        if intg.tcurr == intg.tintg:
+        if intg.nacptsteps % self.nsteps == 0:
             # MPI info
             comm, rank, root = get_comm_rank_root()
             
