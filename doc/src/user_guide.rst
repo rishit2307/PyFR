@@ -117,15 +117,20 @@ Parameterises the backend with
 
     ``single`` | ``double``
 
-2. ``rank-allocator`` --- MPI rank allocator:
+2.  ``memory-model`` --- if to enable support for large working sets;
+    should be ``normal`` unless a memory-model error is encountered:
+
+    ``normal`` | ``large``
+
+3. ``rank-allocator`` --- MPI rank allocator:
 
     ``linear`` | ``random``
 
-3. ``collect-wait-times`` --- If to track MPI request wait times or not:
+4. ``collect-wait-times`` --- if to track MPI request wait times or not:
 
     ``True`` | ``False``
 
-4. ``collect-wait-times-len`` --- Size of the wait time history buffer:
+5. ``collect-wait-times-len`` --- size of the wait time history buffer:
 
      *int*
 
@@ -170,6 +175,11 @@ Parameterises the HIP backend with
 2. ``mpi-type`` --- type of MPI library that is being used:
 
      ``standard`` | ``hip-aware``
+
+3. ``rocblas-nkerns`` --- maximum number of kernel algorithms to try, defaults
+   to 2048:
+
+     *int*
 
 Example::
 
@@ -521,7 +531,7 @@ Parameterises multi-p for dual time-stepping with
 
     where ``order`` in the first and last bracketed pair must be the
     overall polynomial order used for the simulation, ``order`` can
-    only change by one between subsequent bracketed pairs, and 
+    only change by one between subsequent bracketed pairs, and
     ``nsteps`` is a non-negative rational number.
 
 Example::
@@ -945,7 +955,7 @@ suffixed the triangular interfaces at multi-p level *order*, with
 1. ``flux-pts`` --- location of the flux points on a triangular
    interface:
 
-    ``williams-shunn``
+    ``alpha-opt`` | ``williams-shunn``
 
 2. ``quad-deg`` --- degree of quadrature rule for anti-aliasing on a
    triangular interface:
@@ -1002,7 +1012,7 @@ the triangular elements at multi-p level *order*, with
 1. ``soln-pts`` --- location of the solution points in a triangular
    element:
 
-    ``williams-shunn``
+    ``alpha-opt`` | ``williams-shunn``
 
 2. ``quad-deg`` --- degree of quadrature rule for anti-aliasing in a
    triangular element:
@@ -1088,7 +1098,7 @@ the tetrahedral elements at multi-p level *order*, with
 1. ``soln-pts`` --- location of the solution points in a tetrahedral
    element:
 
-    ``shunn-ham``
+    ``alpha-opt`` | ``shunn-ham``
 
 2. ``quad-deg`` --- degree of quadrature rule for anti-aliasing in a
    tetrahedral element:
@@ -1116,6 +1126,7 @@ the prismatic elements at multi-p level *order*, with
 1. ``soln-pts`` --- location of the solution points in a prismatic
    element:
 
+    ``alpha-opt~gauss-legendre-lobatto`` |
     ``williams-shunn~gauss-legendre`` |
     ``williams-shunn~gauss-legendre-lobatto``
 
@@ -1253,12 +1264,22 @@ vectors to a CSV file. Parameterised with
 
     ``(x, y, [z])``
 
+5. ``quad-deg-{etype}`` --- degree of quadrature rule for fluid force
+   integration, optionally this can be specified for different element types:
+
+    *int*
+
+6. ``quad-pts-{etype}`` --- name of quadrature rule (optional):
+
+    *string*
+
 Example::
 
     [soln-plugin-fluidforce-wing]
     nsteps = 10
     file = wing-forces.csv
     header = true
+    quad-deg = 6
     morigin = (0.0, 0.0, 0.5)
 
 [soln-plugin-nancheck]
@@ -1605,6 +1626,132 @@ Example::
     rhow = 1.0
     E = 1.0/(1.0+x)
 
+[solver-plugin-turbulence]
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Injects synthetic eddies into a region of the domain. Parameterised with
+
+1. ``avg-rho`` --- average free-stream density:
+
+    *float*
+
+2. ``avg-u`` --- average free-stream velocity magnitude:
+
+    *float*
+
+3. ``avg-mach`` --- averge free-stream Mach number:
+
+    *float*
+
+4. ``turbulence-intensity`` --- percentage turbulence intensity:
+
+    *float*
+
+5. ``turbulence-length-scale`` --- turbulent length scale:
+
+    *float*
+
+6. ``sigma`` --- standard deviation of Gaussian sythetic eddy profile:
+
+    *float*
+
+7. ``centre`` --- centre of plane on which synthetic eddies are injected:
+
+    (*float*, *float*, *float*)
+
+8. ``y-dim`` --- y-dimension of plane:
+
+    *float*
+
+9. ``z-dim`` --- z-dimension of plane:
+
+    *float*
+
+10. ``rot-axis`` --- axis about which plane is rotated:
+
+    (*float*, *float*, *float*)
+
+11. ``rot-angle`` --- angle in degrees that plane is rotated:
+
+    *float*
+
+Example::
+
+    [solver-plugin-turbulence]
+    avg-rho = 1.0
+    avg-u = 1.0
+    avg-mach = 0.2
+    turbulence-intensity = 1.0
+    turbulence-length-scale = 0.075
+    sigma = 0.7
+    centre = (0.15, 2.0, 2.0)
+    y-dim = 3.0
+    z-dim = 3.0
+    rot-axis = (0, 0, 1)
+    rot-angle = 0.0
+
+[soln-plugin-fwh]
+^^^^^^^^^^^^^^^^^
+
+Use Ffowcs Williams--Hawkings equation to approximate far field noise in a
+uniformly moving medium:
+
+1. ``tstart`` --- time at which to start sampling, default is ``0``:
+
+    *float*
+
+2. ``dt`` --- time step between samples:
+
+    *float*
+
+3. ``file`` --- output file path; should the file already exist it
+   will be appended to:
+
+    *string*
+
+4. ``header`` --- if to output a header row or not:
+
+    *boolean*
+
+5. ``surface`` --- a region the surface of which is saple for the FWH sovler,
+   only use a combination of the geometric shapes specified in :ref:`regions`:
+
+   ``shape(args, ...)``
+
+6. ``quad-deg`` --- degree of surface quadrature rule (optional):
+
+    *int*
+
+7. ``quad-pts-{etype}`` --- name of surface quadrature rule (optional):
+
+    *string*
+
+8. ``observer-pts`` --- the obversation point in the far field at which noise is
+   approximated:
+
+   ``[(x, y), (x, y), ...]`` | ``[(x, y, z), (x, y, z), ...]``
+
+9. ``rho, u, v, (w), p, (c)`` --- the constant far field properties of the
+   flow. For incompressible calculations the sound speed ``c`` and the dnsity
+   ``rho`` must be given:
+
+    *float*
+
+Example::
+
+    [soln-plugin-fwh]
+    file = fwh.csv
+    region = box((1, -5), (10, 5))
+    header = true
+    tstart = 10
+    dt = 1e-2
+    observer-pts = [(1, 10), (1, 30), (1, 100), (1, 300)]
+
+    rho = 1
+    u = 1
+    v = 0
+    p = 10
+
 Regions
 -------
 
@@ -1640,8 +1787,13 @@ Sphere ``sphere(x0, r)``
   A sphere centred at *x0* with a radius of *r*. Equivalent to
   ``ellipsoid(x0, r, r, r)``. Only valid in 3D.
 
-Region expressions can also be added and subtracted together
-arbitrarily.  For example
+All region shapes also support rotation.  In 2D this is accomplished by
+passing a trailing `rot=angle` argument where `angle` is a rotation
+angle in degrees; for example ``box((-5, 2), (2, 0), rot=30)``.
+In 3D the syntax is `rot=(phi, theta, phi)` and corresponds to a
+sequence of Euler angles in the so-called *ZYX convention*.  Region
+expressions can also be added and subtracted together  arbitrarily.
+For example
 ``box((-10, -10, -10), (10, 10, 10)) - sphere((0, 0, 0), 3)`` will
 result in a cube-shaped region with a sphere cut out of the middle.
 

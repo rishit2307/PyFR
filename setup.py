@@ -80,7 +80,6 @@ package_data = {
     'pyfr.backends.openmp.kernels': ['*.mako'],
     'pyfr.integrators.dual.pseudo.kernels': ['*.mako'],
     'pyfr.integrators.std.kernels': ['*.mako'],
-    'pyfr.integrators': ['schemes/*.txt'],
     'pyfr.plugins.kernels': ['*.mako'],
     'pyfr.quadrules': [
         'hex/*.txt',
@@ -108,7 +107,7 @@ package_data = {
 
 # Hard dependencies
 install_requires = [
-    'gimmik >= 3.1.1',
+    'gimmik >= 3.2.1',
     'h5py >= 2.10',
     'mako >= 1.0.0',
     'mpi4py >= 3.1.0',
