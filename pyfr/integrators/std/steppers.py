@@ -3,7 +3,7 @@ import copy
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.util import memoize
 from pyfr.mpiutil import get_comm_rank_root, mpi
-import scipy
+
 class BaseStdStepper(BaseStdIntegrator):
     def collect_stats(self, stats):
         super().collect_stats(stats)
@@ -15,13 +15,17 @@ class BaseStdStepper(BaseStdIntegrator):
         self.m = 200
         self.rnorm= dict()
 
-        self.ltol = 1e-30
+        self.ltol = 1e-13
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
         self.eletype = set(comm.allreduce(self.system.ele_types, op=mpi.SUM))
         self.eletype = comm.bcast(self.eletype, root=root)
-
+        prec = self.cfg.get('backend', 'precision')
+        if prec == 'double':
+            self.epsmc = np.sqrt(np.finfo(float).eps)
+        else:
+            self.epsmc = np.sqrt(np.finfo(np.float32).eps)
         # for etype in self.eletype:
         #     self.rnorm[etype] = 0.0
         #     self.l2u[etype] = 0.0
@@ -69,7 +73,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
         H = np.zeros((m+1, m))
         beta = rnorm*self.e1
-        print(f'm is {m}')
+
 
         for k in range(m):
             H[:k+2, k], q = self.arnoldi(Q, k, t, dt, dtfac)
@@ -78,37 +82,35 @@ class BaseStdStepper(BaseStdIntegrator):
                 Q[i][..., k+1] = q[i]
 
             
-        #     H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
-        #                                             cs, sn ,k)
-            
-            
+            H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
+                                                    cs, sn ,k)
 
-        #     beta[k+1] = -sn[k] * beta[k]
-        #     beta[k] = cs[k] * beta[k]
+            beta[k+1] = -sn[k] * beta[k]
+            beta[k] = cs[k] * beta[k]
 
-        #     err = abs(beta[k+1]) / rnorm
+            err = abs(beta[k+1]) / rnorm
 
-        #     if err < ltol:
-        #         if rank == root:
-        #             print(f'GMRES converged in {k} iterations, error is {err}')
-        #             print(f'betakp1 is {beta[k+1]}')
-        #         break
+            if err < ltol:
+                if rank == root:
+                    print(f'GMRES converged in {k} iterations, error is {err}')
+                    
+                break
 
-        # if k == m-1 and err > ltol:
-        #     if rank == root:
-        #         print(f'betakp1 is {beta[k+1]}')
-        #         print(f'GMRES did not converge in {m} iterations, error is {err}')
+        if k == m-1 and err > ltol:
+            if rank == root:
 
-        # y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
+                print(f'GMRES did not converge in {m} iterations, error is {err}')
+
+        y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
     
-        # for i in range(len(self.system.ele_types)):
-        #     x[i] += Q[i][..., :k+1] @ y
-        #     self.system.ele_banks[i][r3].set(x[i])
-
-        y = np.linalg.lstsq(H[:m+1, :m], beta, rcond=None)[0]
         for i in range(len(self.system.ele_types)):
             x[i] += Q[i][..., :k+1] @ y
             self.system.ele_banks[i][r3].set(x[i])
+
+        # y = np.linalg.lstsq(H[:m+1, :m], beta, rcond=None)[0]
+        # for i in range(len(self.system.ele_types)):
+        #     x[i] += Q[i][..., :k+1] @ y
+        #     self.system.ele_banks[i][r3].set(x[i])
        
 
     def arnoldi(self, Q, k, t, dt, dtfac):
@@ -131,16 +133,13 @@ class BaseStdStepper(BaseStdIntegrator):
         
         Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
                 for i in range(netype)])
-        
-        Un = comm.allreduce(Un, op=mpi.SUM)
-        Un = np.sqrt(Un)
-        
+        Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
 
         Qn = sum([np.linalg.norm(self.system.ele_scal_upts(r3)[i])**2
                   for i in range(netype)])
         Qn = comm.allreduce(Qn, op=mpi.SUM)
-
-        eps = (1e-8)*np.sqrt(Un + 1)/np.sqrt(Qn)
+        
+        eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
         # r1 = Un+1,k + eps*Q
         add(0.0, r1, eps, r3, 1.0, r2)
@@ -153,10 +152,6 @@ class BaseStdStepper(BaseStdIntegrator):
 
         # r1 = R(Un+eps*Q)/eps + Q/dt  - R(Un)/eps 
         add(1.0, r1, 1.0/eps, r4)
-
-        # for etype in eletype:
-        #     h[etype] = np.zeros(k+2)
-        #     qnorm[etype] = 0
         
         q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
 
@@ -234,7 +229,7 @@ class Euler(BaseStdStepper):
     def _stepper_nfevals(self):
         return self.nsteps
 
-    def _res(self, t, dt, dtfac=1.0):
+    def _res(self, t, dt, dtfac=1.0, eps=None):
         add, rhs_with_postproc = self._add, self.system.rhs
         eletype =  self.eletype
         comm, rank, root = get_comm_rank_root()
@@ -251,9 +246,9 @@ class Euler(BaseStdStepper):
                 for i in range(len(self.system.ele_types))])
         dUn = comm.allreduce(dUn, op=mpi.SUM)
         dUn = np.sqrt(dUn)
-
+        
         # max_etp = max(l2u, key=l2u.get)
-        eps = (1e-8)*np.sqrt(self.l2u+1)/(dUn + 1e-16)
+        eps = self.epsmc*np.sqrt(self.l2u+1)/(dUn + self.epsmc**2)
 
         # r1 = Un+1,k + eps*DUn+1,k
         add(0.0, r1, eps, r3, 1.0, r2)
@@ -285,9 +280,7 @@ class Euler(BaseStdStepper):
         # r1 = b - Ax
         add(-1.0, r1, 1.0, r3)
 
-        return eps
-
-    def newton_res(self, t, dt, tp=0):
+    def newton_res(self, t, dt):
         add, rhs_with_postproc = self._add, self.system.rhs
         self.normele = dict()
         comm, rank, root = get_comm_rank_root()
@@ -318,15 +311,16 @@ class Euler(BaseStdStepper):
         nnorm = np.inf
         s = 1.0
         ntol = self.ntol = 1e-4
+
         comm, rank, root = get_comm_rank_root()
         print(f't is {t}, dt is {dt}')
         nonlin_iter = 0
 
         while nnorm > ntol:
             self._init_gmres()
-            # print(f'Prev err is {prev_err}')
+
             x = copy.deepcopy(self.system.ele_scal_upts(r3))
-            
+
             self._res(t, dt, dtfac=1.0)
 
             self.solve_gmres(t, dt, x, dtfac=1.0)
@@ -334,8 +328,6 @@ class Euler(BaseStdStepper):
             # r2 = Un+1,k+1 = Un+1,k + s*dUk
             add(1.0, r2, s, r3)
 
-            # import pdb;pdb.set_trace()
-            # self._res(t, dt, dtfac=1.0)
             nnorm = self.newton_res(t, dt)
 
             nonlin_iter+= 1
@@ -381,20 +373,18 @@ class Trapezoidal(BaseStdStepper):
         #     l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
         #                   op=mpi.SUM))
 
-        self.l2u = np.array(sum([np.linalg.norm(self.soln[i])**2 for 
-                        i in range(len(self.system.ele_types))]))
+        self.l2u = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2 for 
+                        i in range(len(self.system.ele_types))])
         
-        comm.Allreduce(mpi.IN_PLACE, self.l2u, mpi.SUM)
-        self.l2u = np.sqrt(self.l2u)
-
-        v = np.array(sum([np.linalg.norm(self.system.ele_scal_upts(r3)[i])**2
-                          for i in range(len(self.system.ele_types))]))
+        self.l2u = np.sqrt(comm.allreduce(self.l2u, mpi.SUM))
         
-        comm.Allreduce(mpi.IN_PLACE, v, mpi.SUM)
-        vn = np.sqrt(v)
+        dUn = sum([np.linalg.norm(self.system.ele_scal_upts(r3)[i])**2
+                for i in range(len(self.system.ele_types))])
+        dUn = comm.allreduce(dUn, op=mpi.SUM)
+        dUn = np.sqrt(dUn)
         
         # max_etp = max(l2u, key=l2u.get)
-        eps = 1e-7*self.l2u
+        eps = self.epsmc*np.sqrt(self.l2u+1)/(dUn + self.epsmc**2)
 
         # r1 = Un+1,k + eps*DUn+1,k
         add(0.0, r1, eps, r3, 1.0, r2)
@@ -423,7 +413,6 @@ class Trapezoidal(BaseStdStepper):
         # r1 = b - Ax
         add(-1.0, r1, 1.0, r3)
 
-        return eps
 
 
     def newton_res(self, t, dt, tp=0):
@@ -477,10 +466,10 @@ class Trapezoidal(BaseStdStepper):
         s = 1.0
         ntol = self.ntol = 1e-4
         comm, rank, root = get_comm_rank_root()
-        print(f't is {t}, dt is {dt}')
-        nonlin_iter = 0
 
-        prev_err = self.newton_res(t, dt, tp=1)
+        nonlin_iter = 0
+        print(f't is {t}, dt is {dt}')
+        # prev_err = self.newton_res(t, dt, tp=1)
         
         
         while nnorm > ntol:
@@ -488,9 +477,9 @@ class Trapezoidal(BaseStdStepper):
             # print(f'Prev err is {prev_err}')
             x = copy.deepcopy(self.system.ele_scal_upts(r3))
             
-            eps = self._res(t, dt, dtfac=2.0)
+            self._res(t, dt, dtfac=2.0)
             
-            self.solve_gmres(t, dt, eps, x, dtfac=2.0)
+            self.solve_gmres(t, dt, x, dtfac=2.0)
 
             y = copy.deepcopy(self.system.ele_scal_upts(r2))
 
@@ -500,21 +489,21 @@ class Trapezoidal(BaseStdStepper):
             nnorm = self.newton_res(t, dt)
             
 
-            while nnorm >= prev_err:
-                for i in range(len(self.system.ele_types)):
-                    self.system.ele_banks[i][r2].set(y[i])
+            # while nnorm >= prev_err:
+            #     for i in range(len(self.system.ele_types)):
+            #         self.system.ele_banks[i][r2].set(y[i])
                 
-                s /= 2
-                print("Line search activated")
-                # r2 = Un+1,k+1 = Un+1,k + s*dUk
-                add(1.0, r2, s, r3)
+            #     s /= 2
+            #     print("Line search activated")
+            #     # r2 = Un+1,k+1 = Un+1,k + s*dUk
+            #     add(1.0, r2, s, r3)
 
-                nnorm = self.newton_res(t, dt)
+            #     nnorm = self.newton_res(t, dt)
 
-                print(f'Line search nnorm is {nnorm}')
+            #     print(f'Line search nnorm is {nnorm}')
 
             
-            prev_err = nnorm
+            # prev_err = nnorm
             
             nonlin_iter+= 1
             if rank == root:
@@ -525,7 +514,7 @@ class Trapezoidal(BaseStdStepper):
         # r0 = Un+1 = r2
         add(0.0, r0, 1.0, r2)
 
-        print("Step completed")
+        # print("Step completed")
 
         return r0
 
@@ -762,7 +751,6 @@ class StdRK4Stepper(BaseStdStepper):
 
         # Get the bank indices for each register
         r0, r1, r2 = self._regidx
-        import pdb;pdb.set_trace()
         # Ensure r0 references the bank containing u(t)
         if r0 != self._idxcurr:
             r0, r1 = r1, r0
@@ -793,11 +781,10 @@ class StdRK4Stepper(BaseStdStepper):
         # r2 = -∇·f(r2)
         add(dt, r2, 1.0, r0)
         rhs_with_postproc(t + dt, r2, r2)
-        print(f't is {t}, idxcurr is {self._idxcurr}')
+
         # Final accumulation r1 = r1 + dt/6*r2 = u(t + dt)
         add(1.0, r1, dt/6.0, r2)
-        if t == 0.004:
-            import pdb;pdb.set_trace()
+
         # Return the index of the bank containing u(t + dt)
         return r1
 

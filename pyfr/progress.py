@@ -103,7 +103,7 @@ class ProgressBar:
         # Render the progress bar
         s = self._dispfmt.format(frac, '+'*nps, '='*neq, ' '*nsp, cu, en, wela,
                                  wrem, dps=self.dps)
-
+        print("HI")
         # Erase any existing bar and write the new bar
         sys.stderr.write(f'\x1b[{self._last_len}D\x1b[0K{s}')
         sys.stderr.flush()

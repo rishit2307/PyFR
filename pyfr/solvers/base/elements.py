@@ -1,9 +1,10 @@
 from functools import cached_property
-
+from collections import defaultdict
 import numpy as np
-
+from pyfr.nputil import addEdge, greedyColoring
 from pyfr.nputil import npeval, fuzzysort
 from pyfr.util import memoize
+
 
 
 class BaseElements:
@@ -91,6 +92,30 @@ class BaseElements:
         # Apply and reshape
         self.scal_upts = interp @ solnmat.reshape(solnb.nupts, -1)
         self.scal_upts = self.scal_upts.reshape(nupts, nvars, neles)
+        import pdb;pdb.set_trace()
+
+    def color_mesh(self, mesh):
+        for m in mesh:
+            lhs, rhs = m['con_p0']['f1'].tolist()
+
+        nbele = defaultdict(list)
+        elec = dict()
+        
+        for el, er in zip(lhs, rhs):
+            nbele[el].append(er)
+
+        for er, el in zip(rhs, lhs):
+            nbele[er].append(el)
+
+        g1 = [[] for i in range(self.neles)]
+        for k in nbele.keys():
+            for j in nbele[k]:
+                if not j in g1[k]:
+                    g1 = addEdge(g1, k, j)
+        
+
+        celes = greedyColoring(g1,self.neles)
+        return celes
 
     @cached_property
     def plocfpts(self):
@@ -190,8 +215,8 @@ class BaseElements:
                                          self.scal_upts, tags={'align'})
                           for i in range(nscalupts)]
         
-        self.scal_upts[3] = backend.matrix(np.zeros(self.scal_upts[0].get().shape).shape, 
-                                            np.zeros(self.scal_upts[0].get().shape), tags={'align'})
+        # self.scal_upts[3] = backend.matrix(np.zeros(self.scal_upts[0].get().shape).shape, 
+        #                                     np.zeros(self.scal_upts[0].get().shape), tags={'align'})
         
         
 
