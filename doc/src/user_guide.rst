@@ -790,7 +790,7 @@ Sphere ``sphere(x0, r)``
 All region shapes also support rotation.  In 2D this is accomplished by
 passing a trailing `rot=angle` argument where `angle` is a rotation
 angle in degrees; for example ``box((-5, 2), (2, 0), rot=30)``.
-In 3D the syntax is `rot=(phi, theta, phi)` and corresponds to a
+In 3D the syntax is `rot=(phi, theta, psi)` and corresponds to a
 sequence of Euler angles in the so-called *ZYX convention*.  Region
 expressions can also be added and subtracted together  arbitrarily.
 For example
