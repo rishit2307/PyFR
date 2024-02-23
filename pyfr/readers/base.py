@@ -4,7 +4,7 @@ from uuid import UUID
 
 import numpy as np
 
-from pyfr.nputil import fuzzysort, addEdge, greedyColoring
+from pyfr.nputil import greedyColoring, fuzzysort
 from pyfr.polys import get_polybasis
 from pyfr.progress import NullProgressSpinner
 from pyfr.shapes import BaseShape
@@ -103,6 +103,7 @@ class NodalMeshAssembler:
 
         # Nodes
         nodes = np.sort(foeles[:, fnmap]).reshape(len(con), -1)
+        nodes = nodes.view([('', nodes.dtype)]*nodes.shape[-1]).squeeze()
 
         return con, nodes
     
@@ -153,7 +154,6 @@ class NodalMeshAssembler:
         for pftype, faces in ffofaces.items():
             for f, n in chain.from_iterable(zip(f, n) for f, n in faces):
                 sn = tuple(n)
-
                 # See if the nodes are in resid
                 if sn in resid:
                     lele = resid.pop(sn)
@@ -163,7 +163,7 @@ class NodalMeshAssembler:
 
                 # Otherwise add them to the unpaired dict
                 else:
-                    resid[sn] = f
+                    resid[n] = f
 
         return pairs, resid, nbele
 
