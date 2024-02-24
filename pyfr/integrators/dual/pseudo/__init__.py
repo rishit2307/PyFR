@@ -24,6 +24,7 @@ def get_pseudo_integrator(backend, systemcls, rallocs, mesh,
                           initsoln, cfg, stepnregs, stagenregs, dt):
     # A new type of integrator allowing multip convergence acceleration
     if 'solver-dual-time-integrator-multip' in cfg.sections():
+
         return DualMultiPIntegrator(backend, systemcls, rallocs, mesh,
                                     initsoln, cfg, stepnregs, stagenregs, dt)
     else:

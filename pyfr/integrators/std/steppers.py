@@ -3,7 +3,7 @@ import copy
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.util import memoize
 from pyfr.mpiutil import get_comm_rank_root, mpi
-
+from collections import defaultdict
 class BaseStdStepper(BaseStdIntegrator):
     def collect_stats(self, stats):
         super().collect_stats(stats)
@@ -11,14 +11,58 @@ class BaseStdStepper(BaseStdIntegrator):
         # Total number of RHS evaluations
         stats.set('solver-time-integrator', 'nfevals', self._stepper_nfevals)
 
-    def _init_gmres(self):
-        self.m = 200
+    # def _init_loworder(self):
+    #     r0, r1, r2, r3, *r4 = self._regidx
+    #     r5 = r4[1]
+
+    #     for i in range(len(self.system.ele_types)):
+    #         proj = self.system.projmat[i]
+    #         b = self.system.ele_banks[i][0]
+    #         c = self.system.lele_banks[i][0]
+    #         self.backend.run_kernels([self.backend.kernel('mul', proj, b, out=c)])
+
+    # def eval_jac(self, t):
+    #     add, rhs = self._add, self.system.rhs
+    #     nupts = self.system.ele_shapes[0][0]
+    #     jac = defaultdict(list)
+
+    #     for col in self.system.celes.keys():
+    #         for v in range(self.system.nvars):
+    #             for npt in range(nupts):
+    #                 eidx = self.system.celes[col]
+    #                 ur0 = self.system.lele_banks[0][0].get()
+    #                 eps = np.zeros_like(ur0)
+    #                 eps[npt, v, eidx] = 1e-8
+
+    #                 ur = ur0+eps
+    #                 self.system.lele_banks[0][1].set(ur)
+    #                 rhs(t, 0, 0)
+    #                 rhs(t, 1, 1)
+
+    #                 dr1 = self.system.lele_banks[0][0].get()
+    #                 dr0 = self.system.lele_banks[0][1].get()
+
+    #                 dr = (dr1-dr0)/eps
+
+    #                 for e in eidx:
+    #                     jac[e].append(dr[..., e])
+                        
+
+    #     for e in range(len(self.system.neles)):
+    #         jac[e] = np.array(jac[e])
+
+                         
+                
+
+    def _init_gmres(self,t, dt, dtfac=1, lclass=None):
+        self.m = 400
         self.rnorm= dict()
 
         self.ltol = 1e-13
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
+
         self.eletype = set(comm.allreduce(self.system.ele_types, op=mpi.SUM))
         self.eletype = comm.bcast(self.eletype, root=root)
         prec = self.cfg.get('backend', 'precision')
@@ -43,8 +87,11 @@ class BaseStdStepper(BaseStdIntegrator):
         
         self.y = [[] for _ in range(len(self.system.ele_types))]
 
+        if lclass:
+            self._init_loworder(lclass)
+            self._eval_jac(lclass, t, dt, dtfac)
     
-    def solve_gmres(self, t, dt, x, dtfac=1.0):
+    def solve_gmres(self, t, dt, x, dtfac=1.0, lclass=None):
         comm, rank, root = get_comm_rank_root()
         y = self.y
         cs, sn = self.cs, self.sn
@@ -74,14 +121,12 @@ class BaseStdStepper(BaseStdIntegrator):
         H = np.zeros((m+1, m))
         beta = rnorm*self.e1
 
-
         for k in range(m):
-            H[:k+2, k], q = self.arnoldi(Q, k, t, dt, dtfac)
+            H[:k+2, k], q = self.arnoldi(Q, k, t, dt, dtfac, lclass=lclass)
 
             for i in range(len(self.system.ele_types)):
                 Q[i][..., k+1] = q[i]
 
-            
             H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
                                                     cs, sn ,k)
 
@@ -89,22 +134,35 @@ class BaseStdStepper(BaseStdIntegrator):
             beta[k] = cs[k] * beta[k]
 
             err = abs(beta[k+1]) / rnorm
-
+            
             if err < ltol:
                 if rank == root:
                     print(f'GMRES converged in {k} iterations, error is {err}')
                     
                 break
-
+        
         if k == m-1 and err > ltol:
             if rank == root:
 
                 print(f'GMRES did not converge in {m} iterations, error is {err}')
-
+        
         y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-    
+
+        # import pdb;pdb.set_trace()
         for i in range(len(self.system.ele_types)):
-            x[i] += Q[i][..., :k+1] @ y
+            
+            
+            if lclass:
+                if rank == root:
+                    print('Hi, inside lclass')
+                self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
+                self.restrict(lclass, r3)
+                self.jac_mult(lclass)
+                self.prolongate(lclass, r3)
+                x[i] += self.system.ele_banks[i][r3].get()
+            else:
+                x[i] += Q[i][..., :k+1] @ y
+
             self.system.ele_banks[i][r3].set(x[i])
 
         # y = np.linalg.lstsq(H[:m+1, :m], beta, rcond=None)[0]
@@ -113,7 +171,7 @@ class BaseStdStepper(BaseStdIntegrator):
         #     self.system.ele_banks[i][r3].set(x[i])
        
 
-    def arnoldi(self, Q, k, t, dt, dtfac):
+    def arnoldi(self, Q, k, t, dt, dtfac, lclass=None):
         add, rhs_with_postproc = self._add, self.system.rhs
         # h, qnorm = dict(), dict()
         h = np.zeros(k+2)
@@ -141,6 +199,12 @@ class BaseStdStepper(BaseStdIntegrator):
         
         eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
+        if lclass:
+            self.restrict(lclass, r3)
+            self.jac_mult(lclass)
+            self.prolongate(lclass, r3)
+
+        
         # r1 = Un+1,k + eps*Q
         add(0.0, r1, eps, r3, 1.0, r2)
 
@@ -213,7 +277,6 @@ class StdEulerStepper(BaseStdStepper):
     def step(self, t, dt):
         add, rhs_with_postproc = self._add, self.system.rhs
         ut, f = self._regidx
-
         rhs_with_postproc(t, ut, f)
         add(1.0, ut, dt, f)
 
@@ -341,16 +404,12 @@ class Euler(BaseStdStepper):
         print("Step completed")
 
         return r0
-            
-
-
-
 
 
 class Trapezoidal(BaseStdStepper):
     stepper_name = 'trapezium'
     stepper_has_errest = False
-    stepper_nregs = 5
+    stepper_nregs = 6
     stepper_order = 1
 
     @property
@@ -458,28 +517,32 @@ class Trapezoidal(BaseStdStepper):
         return self.normele/self._get_gndofs()
         # return self.normele
 
-    def step(self, t, dt):
+    def step(self, t, dt, lclass=None):
         r0, r1, r2, r3, *r4 = self._regidx
         r4 = r4[0]
         add = self._add
         nnorm = np.inf
         s = 1.0
-        ntol = self.ntol = 1e-4
+        ntol = self.ntol = 0.1
         comm, rank, root = get_comm_rank_root()
 
         nonlin_iter = 0
-        print(f't is {t}, dt is {dt}')
+        
+       
         # prev_err = self.newton_res(t, dt, tp=1)
-        
-        
+
         while nnorm > ntol:
-            self._init_gmres()
+            
+            self._init_gmres(t, dt, dtfac=2.0, lclass=lclass)
+
+
             # print(f'Prev err is {prev_err}')
             x = copy.deepcopy(self.system.ele_scal_upts(r3))
             
             self._res(t, dt, dtfac=2.0)
+
             
-            self.solve_gmres(t, dt, x, dtfac=2.0)
+            self.solve_gmres(t, dt, x, dtfac=2.0, lclass=lclass)
 
             y = copy.deepcopy(self.system.ele_scal_upts(r2))
 
@@ -513,8 +576,8 @@ class Trapezoidal(BaseStdStepper):
         # print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
         # r0 = Un+1 = r2
         add(0.0, r0, 1.0, r2)
-
-        # print("Step completed")
+        if rank == root:
+            print("Step completed")
 
         return r0
 

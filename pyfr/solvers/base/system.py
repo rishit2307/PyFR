@@ -5,7 +5,7 @@ import re
 import statistics
 
 import numpy as np
-
+from pyfr.nputil import addEdge, greedyColoring
 from pyfr.backends.base import NullKernel
 from pyfr.inifile import Inifile
 from pyfr.shapes import BaseShape
@@ -31,6 +31,7 @@ class BaseSystem:
         nonce = str(next(self._nonce_seq))
 
         # Load the elements
+        
         eles, elemap = self._load_eles(rallocs, mesh, initsoln, nregs, nonce)
         backend.commit()
 
@@ -39,9 +40,12 @@ class BaseSystem:
 
         # Get the banks, types, num DOFs and shapes of the elements
         self.ele_banks = [e.scal_upts for e in eles]
+        self.lele_banks = [e.low_upts for e in eles]
         self.ele_types = list(elemap)
         self.ele_ndofs = [e.neles*e.nupts*e.nvars for e in eles]
         self.ele_shapes = [(e.nupts, e.nvars, e.neles) for e in eles]
+
+        self.ubasis = [e.basis.ubasis for e in eles]
 
         # Get all the solution point locations for the elements
         self.ele_ploc_upts = [e.ploc_at_np('upts') for e in eles]
@@ -54,11 +58,23 @@ class BaseSystem:
         # Save the number of dimensions and field variables
         self.ndims = eles[0].ndims
         self.nvars = eles[0].nvars
+        self.neles = eles[0].neles
+        self.celes = self.color_mesh(mesh, rallocs)
 
         # Load the interfaces
         self._int_inters = self._load_int_inters(rallocs, mesh, elemap)
         self._mpi_inters = self._load_mpi_inters(rallocs, mesh, elemap)
         self._bc_inters = self._load_bc_inters(rallocs, mesh, elemap)
+
+        # self.lbasis = [e.lowbasis for e in eles]
+        # self.projmat = defaultdict(list)
+        
+        
+        # cmat = lambda m: self.backend.const_matrix(m, tags={'align'}) 
+        # for i, etp in enumerate(self.ele_types):
+        #     self.projmat[i] = cmat(self.ele_map[etp].basis.ubasis.
+        #                       proj_to(self.lbasis[i].ubasis))
+
         backend.commit()
 
     def commit(self):
@@ -134,6 +150,23 @@ class BaseSystem:
                                        self.cfg)
 
         return [int_inters]
+    
+    def color_mesh(self, mesh, rallocs):
+        
+        lhs, rhs = mesh[f'con_p{rallocs.prank}'][['f1', 'f4']]
+
+        celes = defaultdict(list)
+
+        for lele, lcol in np.unique(lhs):
+            celes[lcol].append(lele)
+        
+        for rele, rcol in np.unique(rhs):
+            celes[rcol].append(rele)
+        
+        for col in celes.keys():
+            celes[col] = list(set(celes[col]))
+        
+        return celes
 
     def _load_mpi_inters(self, rallocs, mesh, elemap):
         lhsprank = rallocs.prank

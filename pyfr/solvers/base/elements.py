@@ -1,10 +1,10 @@
 from functools import cached_property, wraps
-
+from collections import defaultdict
 import numpy as np
 from pyfr.nputil import addEdge, greedyColoring
 from pyfr.nputil import npeval, fuzzysort
 from pyfr.util import memoize
-
+from pyfr.inifile import Inifile
 
 def inters_map(meth):
     @wraps(meth)
@@ -46,6 +46,12 @@ class BaseElements:
 
         # Instantiate the basis class
         self.basis = basis = basiscls(nspts, cfg)
+
+        lcf = Inifile(self.cfg.tostr())
+        lcf.set('solver', 'order', 1)
+
+        self.lowbasis = basiscls(nspts, lcf)
+        self.lnupts = self.lowbasis.nupts
 
         # See what kind of projection the basis is using
         self.antialias = basis.antialias
@@ -116,30 +122,6 @@ class BaseElements:
         # Apply and reshape
         self.scal_upts = interp @ solnmat.reshape(solnb.nupts, -1)
         self.scal_upts = self.scal_upts.reshape(nupts, nvars, neles)
-        import pdb;pdb.set_trace()
-
-    def color_mesh(self, mesh):
-        for m in mesh:
-            lhs, rhs = m['con_p0']['f1'].tolist()
-
-        nbele = defaultdict(list)
-        elec = dict()
-        
-        for el, er in zip(lhs, rhs):
-            nbele[el].append(er)
-
-        for er, el in zip(rhs, lhs):
-            nbele[er].append(el)
-
-        g1 = [[] for i in range(self.neles)]
-        for k in nbele.keys():
-            for j in nbele[k]:
-                if not j in g1[k]:
-                    g1 = addEdge(g1, k, j)
-        
-
-        celes = greedyColoring(g1,self.neles)
-        return celes
 
     @cached_property
     def plocfpts(self):
@@ -257,6 +239,10 @@ class BaseElements:
         self.scal_upts = [backend.matrix(self.scal_upts.shape,
                                          self.scal_upts, tags={'align'})
                           for i in range(nscalupts)]
+        
+        self.low_upts = [backend.matrix(np.zeros((self.lnupts, self.nvars, self.neles)).shape, 
+                                        np.zeros((self.lnupts, self.nvars, self.neles)), tags={'align'})
+                         for i in range(2)]
         
         # self.scal_upts[3] = backend.matrix(np.zeros(self.scal_upts[0].get().shape).shape, 
         #                                     np.zeros(self.scal_upts[0].get().shape), tags={'align'})

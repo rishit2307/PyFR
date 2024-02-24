@@ -241,6 +241,7 @@ class DualRKVdH2RPseudoStepper(DualEmbeddedPairPseudoStepper):
         # Evaluate the stages in the scheme
         for i in range(self._nstages):
             # Compute -∇·f - dQ/dt
+
             rhs(t, r2 if i > 0 else rold, r2)
 
             # Fetch the appropriate RK accumulation kernels

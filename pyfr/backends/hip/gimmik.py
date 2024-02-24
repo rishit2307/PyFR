@@ -21,6 +21,8 @@ class HIPGiMMiKKernels(HIPKernelProvider):
     def mul(self, a, b, out, alpha=1.0, beta=0.0):
         # Ensure the matrices are compatible
         if a.nrow != out.nrow or a.ncol != b.nrow or b.ncol != out.ncol:
+            print(f'a.nrow is {a.nrow}, out.nrow is {out.nrow}, a.ncol is {a.ncol}, b.nrow is {b.nrow},b.ncol is {b.ncol}, out.ncol is {out.ncol} ')
+
             raise ValueError('Incompatible matrices for out = a*b')
 
         # Check that A is constant

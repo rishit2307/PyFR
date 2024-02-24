@@ -169,7 +169,6 @@ class DualMultiPIntegrator(BaseDualPseudoIntegrator):
     def _init_proj_mats(self):
         self.projmats = defaultdict(list)
         cmat = lambda m: self.backend.const_matrix(m, tags={'align'})
-
         for l in self.levels[1:]:
             for etype in self.pintg.system.ele_types:
                 b1 = self.pintgs[l].system.ele_map[etype].basis.ubasis

@@ -2,6 +2,7 @@ import ctypes as ct
 import functools as ft
 import itertools as it
 import re
+from collections import defaultdict
 
 import numpy as np
 
@@ -180,12 +181,10 @@ def greedyColoring(adj, V):
 				available[result[i]] = False
 
 	# Print the result
-	for u in range(V):
-		print("Vertex", u, " ---> Color", result[u])
 	
-	fn = dict()
+	fn = defaultdict(list)
 	for u in range(V):
-		fn[u] = result[u]
+		fn[result[u]].append(u)
 	
 	return fn
 

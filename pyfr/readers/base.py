@@ -4,7 +4,7 @@ from uuid import UUID
 
 import numpy as np
 
-from pyfr.nputil import fuzzysort
+from pyfr.nputil import fuzzysort, addEdge, greedyColoring
 from pyfr.polys import get_polybasis
 from pyfr.progress import NullProgressSpinner
 from pyfr.shapes import BaseShape
@@ -67,13 +67,14 @@ class NodalMeshAssembler:
 
     def _to_first_order(self, elemap):
         foelemap = {}
+
         for (etype, epent), eles in elemap.items():
             # PyFR element type ('hex', 'tri', &c)
             petype = self._etype_map[etype][0]
 
             # Number of nodes in the first-order representation
             focount = self._petype_focount[petype]
-
+            
             foelemap[petype, epent] = eles[:, :focount]
 
             # Check if pyramids have a parallelogram base or not
@@ -104,12 +105,43 @@ class NodalMeshAssembler:
         nodes = np.sort(foeles[:, fnmap]).reshape(len(con), -1)
 
         return con, nodes
+    
+    def color_mesh(self, con):
+        
+        l, r = zip(*con)
+
+        nbele = defaultdict(list)
+        elec = dict()
+
+        etp, lele, *info = zip(*l)
+        etp, rele, *info = zip(*r)
+
+        neles = len(set(lele).union(set(rele)))
+
+        for el, er in zip(l, r):
+            nbele[el[1]].append(er[1])
+
+        for er, el in zip(r, l):
+            nbele[er[1]].append(el[1])
+
+        g1 = [[] for i in range(neles)]
+
+        for k in nbele.keys():
+            for j in nbele[k]:
+                if not j in g1[k]:
+                    g1 = addEdge(g1, k, j)
+        
+
+        celes = greedyColoring(g1, neles)
+
+        return celes
 
     def _extract_faces(self, foeles):
         fofaces = defaultdict(list)
 
         for petype, eles in foeles.items():
             for pftype in self._petype_fnums[petype]:
+
                 fofinf = self._foface_info(petype, pftype, eles)
                 fofaces[pftype].append(fofinf)
 
@@ -170,6 +202,7 @@ class NodalMeshAssembler:
     def get_connectivity(self, spinner=NullProgressSpinner()):
         # For connectivity a first-order representation is sufficient
         eles = self._to_first_order(self._elenodes)
+
         spinner()
 
         # Split into fluid and boundary parts
@@ -191,7 +224,7 @@ class NodalMeshAssembler:
         # Identify the fixed boundary faces
         bf = self._ident_boundary_faces(bpart, resid)
         spinner()
-        import pdb;pdb.set_trace()
+
         if any(resid.values()):
             raise ValueError('Unpaired faces in mesh')
 
@@ -202,6 +235,23 @@ class NodalMeshAssembler:
         # Generate the internal connectivity array
         con = list(pairs)
 
+        celes = self.color_mesh(con)
+        import pdb;pdb.set_trace()
+
+        for i, (l, r) in enumerate(con):
+            lcol = 'r' if l[1] in celes[0] else 'b'
+            rcol = 'r' if r[1] in celes[0] else 'b'
+            con[i][0] = (l[0], l[1], l[2], l[3], lcol)
+            con[i][1]  = (r[0], r[1], r[2], r[3], rcol)
+        
+ 
+        # for col, eles in celes.items():
+        #     for l, r 
+
+
+
+        
+        
         # Extract the names of periodic interfaces
         con_pnames = defaultdict(list)
         for i, (l, r) in enumerate(con):
@@ -216,7 +266,7 @@ class NodalMeshAssembler:
         spinner()
 
         # Output
-        ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2').T}
+        ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2,S1').T}
 
         for k, v in con_pnames.items():
             ret['con_p0', f'periodic_{k}'] = np.array(v, dtype=np.int64)
