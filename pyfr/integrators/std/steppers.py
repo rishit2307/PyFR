@@ -55,7 +55,7 @@ class BaseStdStepper(BaseStdIntegrator):
                 
 
     def _init_gmres(self,t, dt, dtfac=1, lclass=None):
-        self.m = 400
+        self.m = 200
         self.rnorm= dict()
 
         self.ltol = 1e-13
@@ -156,8 +156,8 @@ class BaseStdStepper(BaseStdIntegrator):
                 if rank == root:
                     print('Hi, inside lclass')
                 self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
-                self.restrict(lclass, r3)
-                self.jac_mult(lclass)
+                self.restrict(lclass, r2, r3)
+                self.jac_mult(lclass, t, dt)
                 self.prolongate(lclass, r3)
                 x[i] += self.system.ele_banks[i][r3].get()
             else:
@@ -200,8 +200,8 @@ class BaseStdStepper(BaseStdIntegrator):
         eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
         if lclass:
-            self.restrict(lclass, r3)
-            self.jac_mult(lclass)
+            self.restrict(lclass, r2, r3)
+            self.jac_mult(lclass, t, dt)
             self.prolongate(lclass, r3)
 
         
