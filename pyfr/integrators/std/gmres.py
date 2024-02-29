@@ -24,7 +24,7 @@ class GMRESmultip(BaseStdIntegrator):
 		bases = [cc, pc]
 
 		self._order = order = self.level = cfg.getint('solver', 'order')
-		self._lorder = lorder = cfg.getint('solver', 'low-order', 1)
+		self._lorder = lorder = cfg.getint('solver', 'low-order', 2)
 		print(f'self._lorder is {lorder}')
 		self.levels = [order, lorder]
 		self.pintgs = dict()
@@ -41,8 +41,9 @@ class GMRESmultip(BaseStdIntegrator):
 
 				def _eval_jac(self, lclass, t, dt, dtfac):
 					add, rhs = lclass._add, lclass.system.rhs
-					
+					comm, rank, root = get_comm_rank_root()
 					r0, r1, r2, r3, *r4 = lclass._regidx
+					r4 = r4[0]
 
 					lclass.jac = jac = defaultdict(list)
 					for i in range(len(self.system.ele_types)):
@@ -50,25 +51,26 @@ class GMRESmultip(BaseStdIntegrator):
 						vtp = lclass.system.ele_banks[i][r1].get()
 						wtp = lclass.system.ele_banks[i][r2].get()
 						xtp = lclass.system.ele_banks[i][r3].get()
+						ytp = lclass.system.ele_banks[i][r4].get()
 
 						nupts = lclass.system.ele_shapes[i][0]
-						for col in lclass.system.celes.keys():
+						for col in sorted(lclass.system.celes.keys()):
 							for v in range(lclass.system.nvars):
 								for npt in range(nupts):
 									eidx = lclass.system.celes[col]
-									ur0 = lclass.system.ele_banks[i][r0].get()
+									ur0 = lclass.system.ele_banks[i][r2].get()
 									eps = np.zeros_like(ur0)
 									eps[npt, v, eidx] = 1e-8
 
 									ur = ur0+eps
 									lclass.system.ele_banks[i][r1].set(ur)
 
-									rhs(t, r0, r2)
+									rhs(t+dt, r2, r4)
 									lclass.backend.wait()
-									rhs(t, r1, r3)
+									rhs(t+dt, r1, r3)
 									lclass.backend.wait()
 				
-									dr1 = lclass.system.ele_banks[i][r2].get()
+									dr1 = lclass.system.ele_banks[i][r4].get()
 									dr2 = lclass.system.ele_banks[i][r3].get()
 
 									dr = (dr1 - dr2)/1e-8
@@ -80,26 +82,38 @@ class GMRESmultip(BaseStdIntegrator):
 						lclass.system.ele_banks[i][r1].set(vtp)	
 						lclass.system.ele_banks[i][r2].set(wtp)	
 						lclass.system.ele_banks[i][r3].set(xtp)	
+						lclass.system.ele_banks[i][r4].set(ytp)	
 									
 					cond = []
 
 					for e in range(lclass.system.neles):
 						shape = len(jac[e])
+
 						jac[e] = np.array(jac[e]).T + (dtfac/dt)*np.eye(shape)
 						cond.append(np.linalg.cond(jac[e]))
 						
 						jac[e] = np.linalg.inv(jac[e])
-						
-					
-					comm, rank, root = get_comm_rank_root()
+
 					cond = comm.allreduce(cond, op=mpi.MAX)
 					if rank == root:
 						print(f'rank is {rank} cond number is {np.amax(cond)}')
-				
 
-				def restrict(self, lclass, ri1, ri2):
+				def jac_mult(self, lclass, t, dt, ri1, ri2, dtfac):
 					r0, r1, r2, r3, *r4 = lclass._regidx
 					r4, r5 = r4[0], r4[1]
+					epsmc = np.sqrt(np.finfo(float).eps)
+					rhs, add = lclass.system.rhs, lclass._add
+					comm, rank, root = get_comm_rank_root()
+					netype = len(lclass.system.ele_types)
+					nsmooth = 10
+
+					for i in range(len(self.system.ele_types)):
+						utp = lclass.system.ele_banks[i][r0].get()
+						vtp = lclass.system.ele_banks[i][r2].get()
+						wtp = lclass.system.ele_banks[i][r1].get()
+						xtp = lclass.system.ele_banks[i][r4].get()
+						ytp = lclass.system.ele_banks[i][r5].get()
+
 					l1 = int(self.system.cfg.get('solver', 'order'))
 					l2 = int(lclass.system.cfg.get('solver', 'order'))
 					kern = []
@@ -114,15 +128,7 @@ class GMRESmultip(BaseStdIntegrator):
 					
 					self.backend.run_kernels(kern, wait=True)
 
-
-				def jac_mult(self, lclass, t, dt):
-					r0, r1, r2, r3, *r4 = lclass._regidx
-					r4, r5 = r4[0], r4[1]
-					epsmc = np.sqrt(np.finfo(float).eps)
-					rhs, add = lclass.system.rhs, lclass._add
-					comm, rank, root = get_comm_rank_root()
-					netype = len(lclass.system.ele_types)
-					nsmooth = 5
+					
 
 					Un = sum([np.linalg.norm(lclass.system.ele_scal_upts(r4)[i])**2
 												for i in range(netype)])
@@ -140,10 +146,10 @@ class GMRESmultip(BaseStdIntegrator):
 				  								for i in range(netype)])
 
 						Qn = comm.allreduce(Qn, op=mpi.SUM)
-						eps = epsmc*np.sqrt(Un + 1)/(np.sqrt(Qn) + self.epsmc**2)
+						eps = epsmc*np.sqrt(Un + 1)/(np.sqrt(Qn) + epsmc**2)
 
 						# r2 = x/dt
-						add(1.0, r2, 1.0/dt, r3)
+						add(0.0, r2, dtfac/dt, r3)
 
 						# r3 = u + eps*x
 						add(eps, r3, 1.0, r4)
@@ -152,12 +158,12 @@ class GMRESmultip(BaseStdIntegrator):
 						rhs(t+dt, r3, r3)
 
 						# r3 = rhs(u+eps*x)/eps + x/dt
-						add(-1.0/eps, r3, 1.0 ,r2)
+						add(-1.0/eps, r3, 1.0, r2)
 
 						# r2 = rhs(u)
 						rhs(t+dt, r4, r2)
 
-						# r3 = rhs(u+eps*x)/eps + x/dt - rhs(u)
+						# r3 = rhs(u+eps*x)/eps + x/dt - rhs(u)/eps
 						add(1.0, r3, 1.0/eps, r2)
 
 						Axi = lclass.system.ele_scal_upts(r3)
@@ -166,13 +172,29 @@ class GMRESmultip(BaseStdIntegrator):
 							nupts, nvars, neles = lclass.system.ele_shapes[i]
 							b = lclass.system.ele_scal_upts(r5)[i]
 							for e in range(lclass.system.neles):
-								tmp = lclass.jac[e] @ Axi[i][..., e].T.reshape(-1)
+								tmp = (2/3)*lclass.jac[e] @ Axi[i][..., e].T.reshape(-1)
 								x0[i][..., e] -= tmp.reshape(nvars, nupts).T
-								tmp2 = lclass.jac[e] @ b[..., e].T.reshape(-1)
+								tmp2 = (2/3)*lclass.jac[e] @ b[..., e].T.reshape(-1)
 								x0[i][..., e] += tmp2.reshape(nvars, nupts).T 
 
 							lclass.system.ele_banks[i][r3].set(x0[i])
-							
+
+					for i in range(len(self.system.ele_types)):
+						qin = lclass.system.ele_banks[i][r3]
+						proj = self.projmat[i, l2, l1]
+						qout = self.system.ele_banks[i][ri2]
+						kern.append(self.backend.kernel('mul', proj, qin, out=qout))
+					
+					self.backend.run_kernels(kern, wait=True)
+
+
+					for i in range(netype):
+						lclass.system.ele_banks[i][r0].set(utp)	
+						lclass.system.ele_banks[i][r2].set(vtp)	
+						lclass.system.ele_banks[i][r1].set(wtp)	
+						lclass.system.ele_banks[i][r4].set(xtp)	
+						lclass.system.ele_banks[i][r5].set(ytp)	
+		
 				def _init_loworder(self, lclass):
 					r0, r1, *r2 = lclass._regidx
 					r2 = r2[0]
@@ -180,12 +202,19 @@ class GMRESmultip(BaseStdIntegrator):
 					l2 = int(lclass.system.cfg.get('solver', 'order'))
 
 					for i in range(len(self.system.ele_types)):
-						
+						utp = lclass.system.ele_banks[i][r0].get()
+						vtp = lclass.system.ele_banks[i][r2].get()
+
+					for i in range(len(self.system.ele_types)):
 						proj = self.projmat[i, l1, l2]
 						b = self.system.ele_banks[i][r2]
 						c = lclass.system.ele_banks[i][r0]
 						kern = [self.backend.kernel('mul', proj, b, out=c)]
 						self.backend.run_kernels(kern, wait=True)
+
+					for i in range(len(self.system.ele_types)):
+						lclass.system.ele_banks[i][r0].set(utp)	
+						lclass.system.ele_banks[i][r2].set(vtp)	
 
 				# def jac_mult(self, lclass):
 				# 	r0, r1, r2, r3, *r4 = lclass._regidx
@@ -203,20 +232,7 @@ class GMRESmultip(BaseStdIntegrator):
 						
 				# 		self.system.ele_banks[i][r3].set(qout)
 
-				def prolongate(self, lclass, ridx):
-					r0, r1, r2, r3, *r4 = lclass._regidx
-					r4, r5 = r4[0], r4[1]
-					l1 = int(self.system.cfg.get('solver', 'order'))
-					l2 = int(lclass.system.cfg.get('solver', 'order'))
-					kern = []
-					for i in range(len(self.system.ele_types)):
-						qin = lclass.system.ele_banks[i][r5]
-						proj = self.projmat[i, l2, l1]
-						qout = self.system.ele_banks[i][ridx]
-						kern.append(self.backend.kernel('mul', proj, qin, out=qout))
-					
-					self.backend.run_kernels(kern, wait=True)
-
+				
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
 									mesh, initsoln, mcfg)
 		

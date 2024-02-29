@@ -58,7 +58,7 @@ class BaseStdStepper(BaseStdIntegrator):
         self.m = 200
         self.rnorm= dict()
 
-        self.ltol = 1e-13
+        self.ltol = 1e-6
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
@@ -88,7 +88,7 @@ class BaseStdStepper(BaseStdIntegrator):
         self.y = [[] for _ in range(len(self.system.ele_types))]
 
         if lclass:
-            self._init_loworder(lclass)
+            # self._init_loworder(lclass)
             self._eval_jac(lclass, t, dt, dtfac)
     
     def solve_gmres(self, t, dt, x, dtfac=1.0, lclass=None):
@@ -156,9 +156,7 @@ class BaseStdStepper(BaseStdIntegrator):
                 if rank == root:
                     print('Hi, inside lclass')
                 self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
-                self.restrict(lclass, r2, r3)
-                self.jac_mult(lclass, t, dt)
-                self.prolongate(lclass, r3)
+                self.jac_mult(lclass, t, dt, r2, r3, dtfac)
                 x[i] += self.system.ele_banks[i][r3].get()
             else:
                 x[i] += Q[i][..., :k+1] @ y
@@ -200,9 +198,8 @@ class BaseStdStepper(BaseStdIntegrator):
         eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
         if lclass:
-            self.restrict(lclass, r2, r3)
-            self.jac_mult(lclass, t, dt)
-            self.prolongate(lclass, r3)
+            self.jac_mult(lclass, t, dt, r2, r3, dtfac)
+
 
         
         # r1 = Un+1,k + eps*Q
@@ -523,7 +520,7 @@ class Trapezoidal(BaseStdStepper):
         add = self._add
         nnorm = np.inf
         s = 1.0
-        ntol = self.ntol = 0.1
+        ntol = self.ntol = 1e-4
         comm, rank, root = get_comm_rank_root()
 
         nonlin_iter = 0
