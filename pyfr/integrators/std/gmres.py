@@ -249,4 +249,4 @@ class GMRESmultip(BaseStdIntegrator):
 
 	def advance_to(self, t):
 		# print(f'rank is {rank}, self.pintgs[self._lordr] is {self.pintgs[self._lorder]}')
-		self.pintgs[self._order].advance_to(t, lvl=self.pintgs[self._lorder
+		self.pintgs[self._order].advance_to(t, lvl=self.pintgs[self._lorder])
