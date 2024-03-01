@@ -88,7 +88,7 @@ class BaseStdStepper(BaseStdIntegrator):
         self.y = [[] for _ in range(len(self.system.ele_types))]
 
         if lclass:
-            # self._init_loworder(lclass)
+            self._init_loworder(lclass)
             self._eval_jac(lclass, t, dt, dtfac)
     
     def solve_gmres(self, t, dt, x, dtfac=1.0, lclass=None):
@@ -156,7 +156,7 @@ class BaseStdStepper(BaseStdIntegrator):
                 if rank == root:
                     print('Hi, inside lclass')
                 self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
-                self.jac_mult(lclass, t, dt, r2, r3, dtfac)
+                self.jac_mult(lclass, t, dt, r3, dtfac)
                 x[i] += self.system.ele_banks[i][r3].get()
             else:
                 x[i] += Q[i][..., :k+1] @ y
@@ -198,7 +198,7 @@ class BaseStdStepper(BaseStdIntegrator):
         eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
         if lclass:
-            self.jac_mult(lclass, t, dt, r2, r3, dtfac)
+            self.jac_mult(lclass, t, dt, r3, dtfac)
 
 
         
@@ -470,7 +470,6 @@ class Trapezoidal(BaseStdStepper):
         add(-1.0, r1, 1.0, r3)
 
 
-
     def newton_res(self, t, dt, tp=0):
         add, rhs_with_postproc = self._add, self.system.rhs
         self.normele = dict()
@@ -720,14 +719,6 @@ class BDF2(Trapezoidal):
         add(0.0, r5, 1.0, r2)
 
         return r2
-
-
-
-
-        
-
-
-
 
 class StdTVDRK3Stepper(BaseStdStepper):
     stepper_name = 'tvd-rk3'

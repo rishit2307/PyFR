@@ -43,62 +43,54 @@ class GMRESmultip(BaseStdIntegrator):
 					add, rhs = lclass._add, lclass.system.rhs
 					comm, rank, root = get_comm_rank_root()
 					r0, r1, r2, r3, *r4 = lclass._regidx
-					r4 = r4[0]
 
 					lclass.jac = jac = defaultdict(list)
 					for i in range(len(self.system.ele_types)):
-						utp = lclass.system.ele_banks[i][r0].get()
-						vtp = lclass.system.ele_banks[i][r1].get()
-						wtp = lclass.system.ele_banks[i][r2].get()
-						xtp = lclass.system.ele_banks[i][r3].get()
-						ytp = lclass.system.ele_banks[i][r4].get()
-
+						
 						nupts = lclass.system.ele_shapes[i][0]
 						for col in sorted(lclass.system.celes.keys()):
 							for v in range(lclass.system.nvars):
 								for npt in range(nupts):
 									eidx = lclass.system.celes[col]
-									ur0 = lclass.system.ele_banks[i][r2].get()
+									ur0 = lclass.system.ele_banks[i][r0].get()
 									eps = np.zeros_like(ur0)
+
 									eps[npt, v, eidx] = 1e-8
 
 									ur = ur0+eps
 									lclass.system.ele_banks[i][r1].set(ur)
 
-									rhs(t+dt, r2, r4)
+									rhs(t+dt, r0, r2)
 									lclass.backend.wait()
 									rhs(t+dt, r1, r3)
 									lclass.backend.wait()
 				
-									dr1 = lclass.system.ele_banks[i][r4].get()
+									dr1 = lclass.system.ele_banks[i][r2].get()
 									dr2 = lclass.system.ele_banks[i][r3].get()
 
 									dr = (dr1 - dr2)/1e-8
 
 									for e in eidx:
 										jac[e].append(dr[..., e].T.reshape(-1))
-
-						lclass.system.ele_banks[i][r0].set(utp)	
-						lclass.system.ele_banks[i][r1].set(vtp)	
-						lclass.system.ele_banks[i][r2].set(wtp)	
-						lclass.system.ele_banks[i][r3].set(xtp)	
-						lclass.system.ele_banks[i][r4].set(ytp)	
-									
 					cond = []
-
+					
 					for e in range(lclass.system.neles):
 						shape = len(jac[e])
 
 						jac[e] = np.array(jac[e]).T + (dtfac/dt)*np.eye(shape)
 						cond.append(np.linalg.cond(jac[e]))
-						
+					# import pdb;pdb.set_trace()
+					for e in range(lclass.system.neles):
 						jac[e] = np.linalg.inv(jac[e])
-
+						
+					
+					
 					cond = comm.allreduce(cond, op=mpi.MAX)
 					if rank == root:
 						print(f'rank is {rank} cond number is {np.amax(cond)}')
+				
 
-				def jac_mult(self, lclass, t, dt, ri1, ri2, dtfac):
+				def jac_mult(self, lclass, t, dt, ri, dtfac):
 					r0, r1, r2, r3, *r4 = lclass._regidx
 					r4, r5 = r4[0], r4[1]
 					epsmc = np.sqrt(np.finfo(float).eps)
@@ -107,30 +99,20 @@ class GMRESmultip(BaseStdIntegrator):
 					netype = len(lclass.system.ele_types)
 					nsmooth = 10
 
-					for i in range(len(self.system.ele_types)):
-						utp = lclass.system.ele_banks[i][r0].get()
-						vtp = lclass.system.ele_banks[i][r2].get()
-						wtp = lclass.system.ele_banks[i][r1].get()
-						xtp = lclass.system.ele_banks[i][r4].get()
-						ytp = lclass.system.ele_banks[i][r5].get()
-
 					l1 = int(self.system.cfg.get('solver', 'order'))
 					l2 = int(lclass.system.cfg.get('solver', 'order'))
 					kern = []
 					for i in range(len(self.system.ele_types)):
 						proj = self.projmat[i, l1,  l2]
-						q1 = self.system.ele_banks[i][ri1]
-						q2 = self.system.ele_banks[i][ri2]
-						qout1 = lclass.system.ele_banks[i][r4]
-						qout2 = lclass.system.ele_banks[i][r5]
-						kern.append(self.backend.kernel('mul', proj, q1, out=qout1))
-						kern.append(self.backend.kernel('mul', proj, q2, out=qout2))
+						q = self.system.ele_banks[i][ri]
+						qout = lclass.system.ele_banks[i][r4]
+						kern.append(self.backend.kernel('mul', proj, q, out=qout))
 					
 					self.backend.run_kernels(kern, wait=True)
 
 					
 
-					Un = sum([np.linalg.norm(lclass.system.ele_scal_upts(r4)[i])**2
+					Un = sum([np.linalg.norm(lclass.system.ele_scal_upts(r0)[i])**2
 												for i in range(netype)])
 	   				
 					Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
@@ -152,16 +134,16 @@ class GMRESmultip(BaseStdIntegrator):
 						add(0.0, r2, dtfac/dt, r3)
 
 						# r3 = u + eps*x
-						add(eps, r3, 1.0, r4)
+						add(eps, r3, 1.0, r0)
 
 						# r3 = rhs(u+eps*x)
 						rhs(t+dt, r3, r3)
 
 						# r3 = rhs(u+eps*x)/eps + x/dt
-						add(-1.0/eps, r3, 1.0, r2)
+						add(-1.0/eps, r3, 1.0 ,r2)
 
 						# r2 = rhs(u)
-						rhs(t+dt, r4, r2)
+						rhs(t+dt, r0, r2)
 
 						# r3 = rhs(u+eps*x)/eps + x/dt - rhs(u)/eps
 						add(1.0, r3, 1.0/eps, r2)
@@ -170,7 +152,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 						for i in range(netype):
 							nupts, nvars, neles = lclass.system.ele_shapes[i]
-							b = lclass.system.ele_scal_upts(r5)[i]
+							b = lclass.system.ele_scal_upts(r4)[i]
 							for e in range(lclass.system.neles):
 								tmp = (2/3)*lclass.jac[e] @ Axi[i][..., e].T.reshape(-1)
 								x0[i][..., e] -= tmp.reshape(nvars, nupts).T
@@ -182,18 +164,10 @@ class GMRESmultip(BaseStdIntegrator):
 					for i in range(len(self.system.ele_types)):
 						qin = lclass.system.ele_banks[i][r3]
 						proj = self.projmat[i, l2, l1]
-						qout = self.system.ele_banks[i][ri2]
+						qout = self.system.ele_banks[i][ri]
 						kern.append(self.backend.kernel('mul', proj, qin, out=qout))
 					
 					self.backend.run_kernels(kern, wait=True)
-
-
-					for i in range(netype):
-						lclass.system.ele_banks[i][r0].set(utp)	
-						lclass.system.ele_banks[i][r2].set(vtp)	
-						lclass.system.ele_banks[i][r1].set(wtp)	
-						lclass.system.ele_banks[i][r4].set(xtp)	
-						lclass.system.ele_banks[i][r5].set(ytp)	
 		
 				def _init_loworder(self, lclass):
 					r0, r1, *r2 = lclass._regidx
@@ -202,19 +176,12 @@ class GMRESmultip(BaseStdIntegrator):
 					l2 = int(lclass.system.cfg.get('solver', 'order'))
 
 					for i in range(len(self.system.ele_types)):
-						utp = lclass.system.ele_banks[i][r0].get()
-						vtp = lclass.system.ele_banks[i][r2].get()
-
-					for i in range(len(self.system.ele_types)):
 						proj = self.projmat[i, l1, l2]
 						b = self.system.ele_banks[i][r2]
 						c = lclass.system.ele_banks[i][r0]
 						kern = [self.backend.kernel('mul', proj, b, out=c)]
 						self.backend.run_kernels(kern, wait=True)
 
-					for i in range(len(self.system.ele_types)):
-						lclass.system.ele_banks[i][r0].set(utp)	
-						lclass.system.ele_banks[i][r2].set(vtp)	
 
 				# def jac_mult(self, lclass):
 				# 	r0, r1, r2, r3, *r4 = lclass._regidx
@@ -282,7 +249,4 @@ class GMRESmultip(BaseStdIntegrator):
 
 	def advance_to(self, t):
 		# print(f'rank is {rank}, self.pintgs[self._lordr] is {self.pintgs[self._lorder]}')
-		self.pintgs[self._order].advance_to(t, lvl=self.pintgs[self._lorder])
-
-	
-				
+		self.pintgs[self._order].advance_to(t, lvl=self.pintgs[self._lorder
