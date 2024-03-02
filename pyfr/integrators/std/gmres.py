@@ -46,13 +46,17 @@ class GMRESmultip(BaseStdIntegrator):
 
 					lclass.jac = jac = defaultdict(list)
 					for i in range(len(self.system.ele_types)):
+						ur0 = lclass.system.ele_banks[i][r0].get()
+						rhs(t+dt, r0, r2)
+						lclass.backend.wait()
+						dr1 = lclass.system.ele_banks[i][r2].get()
 						
 						nupts = lclass.system.ele_shapes[i][0]
 						for col in sorted(lclass.system.celes.keys()):
 							for v in range(lclass.system.nvars):
 								for npt in range(nupts):
 									eidx = lclass.system.celes[col]
-									ur0 = lclass.system.ele_banks[i][r0].get()
+									
 									eps = np.zeros_like(ur0)
 
 									eps[npt, v, eidx] = 1e-8
@@ -60,12 +64,9 @@ class GMRESmultip(BaseStdIntegrator):
 									ur = ur0+eps
 									lclass.system.ele_banks[i][r1].set(ur)
 
-									rhs(t+dt, r0, r2)
-									lclass.backend.wait()
 									rhs(t+dt, r1, r3)
 									lclass.backend.wait()
-				
-									dr1 = lclass.system.ele_banks[i][r2].get()
+							
 									dr2 = lclass.system.ele_banks[i][r3].get()
 
 									dr = (dr1 - dr2)/1e-8
@@ -79,8 +80,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 						jac[e] = np.array(jac[e]).T + (dtfac/dt)*np.eye(shape)
 						cond.append(np.linalg.cond(jac[e]))
-					# import pdb;pdb.set_trace()
-					for e in range(lclass.system.neles):
+
 						jac[e] = np.linalg.inv(jac[e])
 						
 					
@@ -109,8 +109,6 @@ class GMRESmultip(BaseStdIntegrator):
 						kern.append(self.backend.kernel('mul', proj, q, out=qout))
 					
 					self.backend.run_kernels(kern, wait=True)
-
-					
 
 					Un = sum([np.linalg.norm(lclass.system.ele_scal_upts(r0)[i])**2
 												for i in range(netype)])
@@ -181,7 +179,6 @@ class GMRESmultip(BaseStdIntegrator):
 						c = lclass.system.ele_banks[i][r0]
 						kern = [self.backend.kernel('mul', proj, b, out=c)]
 						self.backend.run_kernels(kern, wait=True)
-
 
 				# def jac_mult(self, lclass):
 				# 	r0, r1, r2, r3, *r4 = lclass._regidx

@@ -197,6 +197,7 @@ class BaseStdStepper(BaseStdIntegrator):
         
         eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
+        import pdb;pdb.set_trace()
         if lclass:
             self.jac_mult(lclass, t, dt, r3, dtfac)
 
