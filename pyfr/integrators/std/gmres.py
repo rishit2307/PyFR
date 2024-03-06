@@ -121,8 +121,41 @@ class GMRESmultip(BaseStdIntegrator):
 					add(1.0, r1, -tau/eps, r5)
 
 
-				def jacobi(self, tau):
-					pass
+				def jacobi(self, eps, tau, t, dt, dtfac, nsmooth):
+					r0, r1, r2, r3, r4, r5 =  self._regidx
+					rhs, add = self.system.rhs, self._add
+
+					# r5 = Un+1,k+1 = Un+1,k+eps*x
+					add(0.0, r5, 1.0, r2, eps, r1)
+
+					# r5 = rhs(Un+1, k+1)
+					rhs(t+dt, r5, r5)
+
+					# r5 = rhs(Un+1,k+eps*x)/eps + x/dt
+					add(-1.0/eps, r5, dtfac/dt, r1)
+
+					# r4 = rhs(Un+1, k)
+					rhs(t+dt, r2, r4)
+
+					# r5 = -Axi = rhs(Un+1,k+eps*x)/eps + x/dt - rhs(Un+1, k)/eps
+					add(-1.0, r5, -1.0/eps, r4)
+					
+					Axi = [self.system.ele_scal_upts(r5)[i]
+							for i in range(len(self.system.ele_types))]
+					
+					xi = [np.zeros_like(Axi[i]) 
+		   				for i in range(len(self.system.ele_types))]
+					
+					for _ in range(nsmooth):
+						for i in range(len(self.system.ele_types)):
+							nupts = self.system.ele_shapes[i][0]
+							nvars = self.system.nvars
+							b = self.system.ele_scal_upts(r3)[i]
+							for e in range(len(self.system.neles)):
+								tmp = self.jac[e] @ Axi[i][..., e].T.reshape(-1)
+								xi[i][..., e] +=(2/3)*tmp.reshape(nvars, nupts).T
+								tmp2 = self.jac[e] @ b[..., e].T.reshape(-1)
+								xi[i][... ,e] += (2/3)*tmp2.reshape(nvars, nupts).T 
 
 				def jac_mult(self, t, dt, dtfac, tau, nsmooth):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
