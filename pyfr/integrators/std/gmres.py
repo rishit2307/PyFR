@@ -144,6 +144,8 @@ class GMRESmultip(BaseStdIntegrator):
 					xn = comm.allreduce(xn, op=mpi.SUM)
 		
 					eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+					xi = [np.zeros_like(self.system.ele_banks[i][r2].get()) 
+							for i in range(len(self.system.ele_types))]
 
 					for _ in range(nsmooth):
 
@@ -165,18 +167,14 @@ class GMRESmultip(BaseStdIntegrator):
 						
 						Axi = [self.system.ele_scal_upts(r5)[i]
 							   for i in range(len(self.system.ele_types))]
-						
-						xi = [np.zeros_like(Axi[i]) 
-							for i in range(len(self.system.ele_types))]
-					
-					
+
 						for i in range(len(self.system.ele_types)):
 							nupts = self.system.ele_shapes[i][0]
 							nvars = self.system.nvars
 							b = self.system.ele_scal_upts(r3)[i]
 							for e in range(self.system.neles):
 								tmp = self.jac[e] @ Axi[i][..., e].T.reshape(-1)
-								xi[i][..., e] +=(2/3)*tmp.reshape(nvars, nupts).T
+								xi[i][..., e] += (2/3)*tmp.reshape(nvars, nupts).T
 								tmp2 = self.jac[e] @ b[..., e].T.reshape(-1)
 								xi[i][... ,e] += (2/3)*tmp2.reshape(nvars, nupts).T 
 							
