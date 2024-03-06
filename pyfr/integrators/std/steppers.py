@@ -55,7 +55,7 @@ class BaseStdStepper(BaseStdIntegrator):
                 
 
     def _init_gmres(self,t, dt, dtfac=1):
-        self.m = 100
+        self.m = 10
         self.rnorm= dict()
 
         self.ltol = 1e-13
