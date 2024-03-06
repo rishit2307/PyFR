@@ -320,7 +320,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 			self.level = l
-			tau = 5e-10
+			tau = 0.01
 
 			self.pintg.jac_mult(t, dt, dtfac, tau, n)
 			if m is not None and l > m:
