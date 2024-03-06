@@ -48,13 +48,14 @@ class GMRESmultip(BaseStdIntegrator):
 					add, rhs = self._add, self.system.rhs
 					comm, rank, root = get_comm_rank_root()
 					r0, r1, r2, r3, *r4 = self._regidx
+					r5 = r4[-1]
 
 					self.jac = jac = defaultdict(list)
 					for i in range(len(self.system.ele_types)):
-						ur0 = self.system.ele_banks[i][r0].get()
-						rhs(t+dt, r0, r2)
+						ur0 = self.system.ele_banks[i][r2].get()
+						rhs(t+dt, r2, r1)
 						self.backend.wait()
-						dr1 = self.system.ele_banks[i][r2].get()
+						dr1 = self.system.ele_banks[i][r1].get()
 						
 						nupts = self.system.ele_shapes[i][0]
 						for col in sorted(self.system.celes.keys()):
@@ -67,12 +68,12 @@ class GMRESmultip(BaseStdIntegrator):
 									eps[npt, v, eidx] = 1e-8
 
 									ur = ur0+eps
-									self.system.ele_banks[i][r1].set(ur)
+									self.system.ele_banks[i][r5].set(ur)
 
-									rhs(t+dt, r1, r3)
+									rhs(t+dt, r5, r5)
 									self.backend.wait()
 							
-									dr2 = self.system.ele_banks[i][r3].get()
+									dr2 = self.system.ele_banks[i][r5].get()
 
 									dr = (dr1 - dr2)/1e-8
 
@@ -94,40 +95,56 @@ class GMRESmultip(BaseStdIntegrator):
 					if rank == root:
 						print(f'rank is {rank} cond number is {np.amax(cond)}')
 				
+				def richardson(self, eps, tau, t, dt, dtfac):
+					r0, r1, r2, r3, r4, r5 =  self._regidx
+					rhs, add = self.system.rhs, self._add
+
+					# r5 = Un+1,k+1 = Un+1,k+eps*x
+					add(0.0, r5, 1.0, r2, eps, r1)
+
+					# r5 = rhs(Un+1, k+1)
+					rhs(t+dt, r5, r5)
+
+					# r5 = rhs(Un+1,k+eps*x)/eps + x/dt
+					add(-1.0/eps, r5, dtfac/dt, r1)
+
+					# r5 = b - Ax
+					add(-1.0, r5, 1.0, r3)
+
+					# r1 = x + tau*(b - Ax)
+					add(1.0, r1, tau, r5)
+
+					# r5 = rhs(Un+1,k)
+					rhs(t+dt, r2, r5)
+
+					# r1 = x + tau*(b-Ax)
+					add(1.0, r1, -tau/eps, r5)
+
+
+				def jacobi(self, tau):
+					pass
 
 				def jac_mult(self, t, dt, dtfac, tau, nsmooth):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
 					rhs, add = self.system.rhs, self._add
 					comm, rank, root = get_comm_rank_root()
 
-					eps = 1e-8
-
 					netype = len(self.system.ele_types)
 
+					Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
+								for i in range(netype)])
+					
+					Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
+					epsmc =  np.sqrt(np.finfo(float).eps)
 
 					for _ in range(nsmooth):
+						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
+				 										 for i in range(netype)])
+						xn = comm.allreduce(xn, op=mpi.SUM)
+		
+						eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 
-						# r5 = Un+1,k+1 = Un+1,k+eps*x
-						add(0.0, r5, 1.0, r2, eps, r1)
-
-						# r5 = rhs(Un+1, k+1)
-						rhs(t+dt, r5, r5)
-
-						# r5 = rhs(Un+1,k+eps*x)/eps + x/dt
-						add(-1.0/eps, r5, dtfac/dt, r1)
-
-						# r5 = b - Ax
-						add(-1.0, r5, 1.0, r3)
-
-						# r1 = x + tau*(b - Ax)
-						add(1.0, r1, tau, r5)
-
-						# r5 = rhs(Un+1,k)
-						rhs(t+dt, r2, r5)
-
-						# r1 = x + tau*(b-Ax)
-						add(1.0, r1, -tau/eps, r5)
-
+						self._richardson(eps, tau, t, dt, dtfac)
 				# def jac_mult(self, lclass):
 				# 	r0, r1, r2, r3, *r4 = lclass._regidx
 				# 	r4, r5 = r4[0], r4[1]
@@ -206,7 +223,19 @@ class GMRESmultip(BaseStdIntegrator):
 		r0, r1, r2, r3, r4, r5 = self.pintgs[l1]._regidx
 		rl0, rl1, rl2, rl3, rl4, rl5 = self.pintgs[l2]._regidx
 		add, rhs = self.pintgs[l1]._add, self.pintgs[l1].system.rhs
-		eps = 1e-8
+		comm, rank, root = get_comm_rank_root()
+		netype = len(self.system.ele_types)
+		epsmc = np.sqrt(np.finfo(float).eps)
+		
+		Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
+								for i in range(netype)])
+		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
+
+		xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
+				 			for i in range(netype)])
+		xn = comm.allreduce(xn, op=mpi.SUM)
+		
+		eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 		
 
 		# r5 = Un+1,k + eps*y
