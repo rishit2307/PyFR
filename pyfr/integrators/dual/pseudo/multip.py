@@ -289,7 +289,7 @@ class DualMultiPIntegrator(BaseDualPseudoIntegrator):
             self.pintgs[l].stepper_coeffs = self.stepper_coeffs
 
         self.tcurr = tcurr
-
+        import pdb;pdb.set_trace()
         for i in range(self._maxniters):
             # Choose either ⌊c⌋ or ⌈c⌉ in a way that the average is c
             csteps = [int(c + (self._fgen.random() < c % 1)) for c in cstepsf]

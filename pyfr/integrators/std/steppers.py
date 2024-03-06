@@ -54,11 +54,11 @@ class BaseStdStepper(BaseStdIntegrator):
                          
                 
 
-    def _init_gmres(self,t, dt, dtfac=1, lclass=None):
-        self.m = 200
+    def _init_gmres(self,t, dt, dtfac=1):
+        self.m = 100
         self.rnorm= dict()
 
-        self.ltol = 1e-6
+        self.ltol = 1e-13
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
@@ -86,10 +86,6 @@ class BaseStdStepper(BaseStdIntegrator):
         self.cs = np.zeros(self.m)
         
         self.y = [[] for _ in range(len(self.system.ele_types))]
-
-        if lclass:
-            self._init_loworder(lclass)
-            self._eval_jac(lclass, t, dt, dtfac)
     
     def solve_gmres(self, t, dt, x, dtfac=1.0, lclass=None):
         comm, rank, root = get_comm_rank_root()
@@ -528,25 +524,20 @@ class Trapezoidal(BaseStdStepper):
        
         # prev_err = self.newton_res(t, dt, tp=1)
 
-        while nnorm > ntol:
+        # while nnorm > ntol:
             
-            self._init_gmres(t, dt, dtfac=2.0, lclass=lclass)
+        #     self._init_gmres(t, dt, dtfac=2.0, lclass=lclass)
 
-
-            # print(f'Prev err is {prev_err}')
-            x = copy.deepcopy(self.system.ele_scal_upts(r3))
+        #     x = copy.deepcopy(self.system.ele_scal_upts(r3))
             
-            self._res(t, dt, dtfac=2.0)
+        #     self._res(t, dt, dtfac=2.0)
 
-            
-            self.solve_gmres(t, dt, x, dtfac=2.0, lclass=lclass)
+        #     self.solve_gmres(t, dt, x, dtfac=2.0, lclass=lclass)
 
-            y = copy.deepcopy(self.system.ele_scal_upts(r2))
 
             # r2 = Un+1,k+1 = Un+1,k + s*dUk
-            add(1.0, r2, s, r3)
 
-            nnorm = self.newton_res(t, dt)
+            # nnorm = self.newton_res(t, dt)
             
 
             # while nnorm >= prev_err:
@@ -565,18 +556,18 @@ class Trapezoidal(BaseStdStepper):
             
             # prev_err = nnorm
             
-            nonlin_iter+= 1
-            if rank == root:
-                print(nnorm)
-                print(nonlin_iter)
+        #     nonlin_iter+= 1
+        #     if rank == root:
+        #         print(nnorm)
+        #         print(nonlin_iter)
 
-        # print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
-        # r0 = Un+1 = r2
-        add(0.0, r0, 1.0, r2)
-        if rank == root:
-            print("Step completed")
+        # # print(f'x is {np.sum(self.system.ele_scal_upts(r3))}')
+        # # r0 = Un+1 = r2
+        # add(0.0, r0, 1.0, r2)
+        # if rank == root:
+        #     print("Step completed")
 
-        return r0
+        # return r0
 
 class BDF2(Trapezoidal):
     stepper_name = 'bdf2'
