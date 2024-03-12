@@ -401,10 +401,12 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
+		# print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
-		self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
+
+		for i in range(len(self.system.ele_types)):
+			self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
 
 		niters = self.mpniters
 		if niters:
@@ -477,7 +479,7 @@ class GMRESmultip(BaseStdIntegrator):
 		niters = self.mpniters
 
 		if niters:
-			
+			import pdb;pdb.set_trace()
 			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
 							for i in range(netype)]
 			for i in range(netype):
@@ -625,12 +627,12 @@ class GMRESmultip(BaseStdIntegrator):
 
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				for l, m in it.zip_longest(self.levels, self.levels[1:]):
-					if m is not None:
-						self._init_loworder(l, m)
+				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
+				# 	if m is not None:
+				# 		self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
-				for l in self.levels:
-					self.pintgs[l]._eval_jac()
+				# for l in self.levels:
+				# 	self.pintgs[l]._eval_jac()
 					
 				# self.pintgs[self._order]._eval_jac()
 

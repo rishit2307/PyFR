@@ -57,7 +57,7 @@ class BaseStdStepper(BaseStdIntegrator):
         stp_class = subclass_where(BaseStdStepper, stepper_name=name)
         self.dtfac = stp_class.dtfac
         self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
-        print(f'tau is {self.tau}')
+        # print(f'tau is {self.tau}')
 
         prec = self.cfg.get('backend', 'precision')
         if prec == 'double':
@@ -70,7 +70,7 @@ class BaseStdStepper(BaseStdIntegrator):
         self.m = 200
         self.rnorm= dict()
 
-        self.ltol = 1e-6
+        self.ltol = 1e-13
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
@@ -480,7 +480,7 @@ class Trapezoidal(BaseStdStepper):
         self.normele = dict()
         comm, rank, root = get_comm_rank_root()
         t, dt = self.t, self.dt
-
+        print(f't is {t}, dt is {dt}')
         r0, r1, r2, r3, *r4 = self._regidx
         r4 = r4[0]
 
