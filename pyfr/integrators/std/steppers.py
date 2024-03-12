@@ -1,9 +1,10 @@
 import numpy as np
 import copy
 from pyfr.integrators.std.base import BaseStdIntegrator
-from pyfr.util import memoize
+from pyfr.util import memoize, subclass_where
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from collections import defaultdict
+
 class BaseStdStepper(BaseStdIntegrator):
     def collect_stats(self, stats):
         super().collect_stats(stats)
@@ -50,35 +51,41 @@ class BaseStdStepper(BaseStdIntegrator):
 
     #     for e in range(len(self.system.neles)):
     #         jac[e] = np.array(jac[e])
+    def _init_step(self, t, dt):
+        self.t, self.dt = t, dt
+        name = self.cfg.get('solver-time-integrator', 'scheme')
+        stp_class = subclass_where(BaseStdStepper, stepper_name=name)
+        self.dtfac = stp_class.dtfac
+        self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
+        print(f'tau is {self.tau}')
 
-                         
-                
+        prec = self.cfg.get('backend', 'precision')
+        if prec == 'double':
+            self.epsmc = np.sqrt(np.finfo(float).eps)
+        else:
+            self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-    def _init_gmres(self,t, dt, dtfac=1):
-        self.m = 10
+
+    def _init_gmres(self):
+        self.m = 200
         self.rnorm= dict()
 
-        self.ltol = 1e-13
+        self.ltol = 1e-6
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()
 
         self.eletype = set(comm.allreduce(self.system.ele_types, op=mpi.SUM))
         self.eletype = comm.bcast(self.eletype, root=root)
-        prec = self.cfg.get('backend', 'precision')
-        if prec == 'double':
-            self.epsmc = np.sqrt(np.finfo(float).eps)
-        else:
-            self.epsmc = np.sqrt(np.finfo(np.float32).eps)
+        
         # for etype in self.eletype:
         #     self.rnorm[etype] = 0.0
         #     self.l2u[etype] = 0.0
         #     self.err[etype] = 0.0
-        
 
         self.e1 = np.zeros(self.m+1)
         self.e1[0] = 1.0
-        
+
         # for i in range(len(self.system.ele_types)):
         #     self.e1[i][0] =  1.0
             
@@ -405,13 +412,14 @@ class Trapezoidal(BaseStdStepper):
     stepper_has_errest = False
     stepper_nregs = 6
     stepper_order = 1
+    dtfac = 2.0
 
     @property
     def _stepper_nfevals(self):
         return self.nsteps
-    
 
-    def _res(self, t, dt, dtfac=1.0):
+    def _res(self):
+        t, dt, dtfac = self.t, self.dt, self.dtfac
 
         add, rhs_with_postproc = self._add, self.system.rhs
         eletype =  self.eletype
@@ -467,10 +475,11 @@ class Trapezoidal(BaseStdStepper):
         add(-1.0, r1, 1.0, r3)
 
 
-    def newton_res(self, t, dt, tp=0):
+    def newton_res(self, tp=0):
         add, rhs_with_postproc = self._add, self.system.rhs
         self.normele = dict()
         comm, rank, root = get_comm_rank_root()
+        t, dt = self.t, self.dt
 
         r0, r1, r2, r3, *r4 = self._regidx
         r4 = r4[0]

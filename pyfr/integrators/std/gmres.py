@@ -32,6 +32,7 @@ class GMRESmultip(BaseStdIntegrator):
 		self._order = order = self.level = cfg.getint('solver', 'order')
 		
 		self.levels = sorted(set(self.cycle), reverse=True)
+		self.mpniters = cfg.getint(sect, 'mpniters', 1)
 		self.pintgs = {}
 		
 		for l in self.levels:
@@ -44,71 +45,85 @@ class GMRESmultip(BaseStdIntegrator):
 			class lpsint(*bases):
 				name = 'GMRES-multip'
 
-				def _eval_jac(self, t, dt, dtfac=2.0):
+				def _eval_jac(self):
 					add, rhs = self._add, self.system.rhs
 					comm, rank, root = get_comm_rank_root()
 					r0, r1, r2, r3, *r4 = self._regidx
-					r5 = r4[-1]
+					r4, r5 = r4[0], r4[-1]
+					t, dt, dtfac = self.t, self.dt, self.dtfac
+
 
 					self.jac = jac = defaultdict(list)
-					for i in range(len(self.system.ele_types)):
+					rhs(t+dt, r2, r1)
+						
+					
+
+					for col, etp in sorted(self.system.celes.keys()):
+						i = self.system.ele_types.index(etp)
 						ur0 = self.system.ele_banks[i][r2].get()
-						rhs(t+dt, r2, r1)
-						self.backend.wait()
 						dr1 = self.system.ele_banks[i][r1].get()
-						
+
+						for j in range(len(self.system.ele_types)):
+							u = self.system.ele_scal_upts(r2)[j]
+							self.system.ele_banks[j][r5].set(u)
+
 						nupts = self.system.ele_shapes[i][0]
-						for col in sorted(self.system.celes.keys()):
-							for v in range(self.system.nvars):
-								for npt in range(nupts):
-									eidx = self.system.celes[col]
-									
-									eps = np.zeros_like(ur0)
+						for v in range(self.system.nvars):
+							for npt in range(nupts):
+								eidx = self.system.celes[col, etp]
+								
+								eps = np.zeros_like(ur0)
 
-									eps[npt, v, eidx] = 1e-8
+								eps[npt, v, eidx] = 1e-8
 
-									ur = ur0+eps
-									self.system.ele_banks[i][r5].set(ur)
+								ur = ur0+eps
 
-									rhs(t+dt, r5, r5)
-									self.backend.wait()
-							
-									dr2 = self.system.ele_banks[i][r5].get()
+								self.system.ele_banks[i][r5].set(ur)
 
-									dr = (dr1 - dr2)/1e-8
-
-									for e in eidx:
-										jac[e].append(dr[..., e].T.reshape(-1))
-					cond = []
-					
-					for e in range(self.system.neles):
-						shape = len(jac[e])
-
-						jac[e] = np.array(jac[e]).T + (dtfac/dt)*np.eye(shape)
-						cond.append(np.linalg.cond(jac[e]))
-
-						jac[e] = np.linalg.inv(jac[e])
+								rhs(t+dt, r5, r4)
+								self.backend.wait()
 						
-					
-					
+								dr2 = self.system.ele_banks[i][r4].get()
+
+								dr = (dr1 - dr2)/1e-8
+
+								for e in eidx:
+									jac[etp, e].append(dr[..., e].T.reshape(-1))
+					cond = []
+					for i, eshape in enumerate(self.system.ele_shapes):
+						nele = eshape[-1]
+						etp = self.system.ele_types[i]
+						for e in range(nele):
+							shape = len(jac[etp, e])
+
+							jac[etp, e] = np.array(jac[etp, e]).T + (dtfac/dt)*np.eye(shape)
+							cond.append(np.linalg.cond(jac[etp, e]))
+
+							jac[etp, e] = np.linalg.inv(jac[etp, e])
+
 					cond = comm.allreduce(cond, op=mpi.MAX)
+
 					if rank == root:
 						print(f'rank is {rank} cond number is {np.amax(cond)}')
 				
-				def richardson(self, Un, tau, t, dt, dtfac, nsmooth):
+				def richardson(self, Un, nsmooth):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
 					rhs, add = self.system.rhs, self._add
 					netype = len(self.system.ele_types)
 					comm, rank, root = get_comm_rank_root()
-					epsmc = np.sqrt(np.finfo(float).eps)
+					epsmc = self.epsmc
+					t, dt, dtfac = self.t, self.dt, self.dtfac
+					tau = self.tau
 
-					xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
-				 										 for i in range(netype)])
-					xn = comm.allreduce(xn, op=mpi.SUM)
-		
-					eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-
+					# r4 = rhs(Un+1, k)
+					rhs(t+dt, r2, r4)
 					for _ in range(nsmooth):
+						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
+				 										 for i in range(netype)])
+						xn = comm.allreduce(xn, op=mpi.SUM)
+		
+						eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+
 						# r5 = Un+1,k+1 = Un+1,k+eps*x
 						add(0.0, r5, 1.0, r2, eps, r1)
 
@@ -118,36 +133,35 @@ class GMRESmultip(BaseStdIntegrator):
 						# r5 = rhs(Un+1,k+eps*x)/eps + x/dt
 						add(-1.0/eps, r5, dtfac/dt, r1)
 
+						# r5 = rhs(Un+1,k+eps*x)/eps + x/dt - rhs(Un+1, k)/eps
+						add(1.0, r5, 1.0/eps, r4)
+
 						# r5 = b - Ax
 						add(-1.0, r5, 1.0, r3)
 
 						# r1 = x + tau*(b - Ax)
 						add(1.0, r1, tau, r5)
 
-						# r5 = rhs(Un+1,k)
-						rhs(t+dt, r2, r5)
-
-						# r1 = x + tau*(b-Ax)
-						add(1.0, r1, -tau/eps, r5)
-
-
-				def jacobi(self, Un, t, dt, dtfac, nsmooth):
+				def jacobi(self, Un, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
 					rhs, add = self.system.rhs, self._add
 
 					netype = len(self.system.ele_types)
 					comm, rank, root = get_comm_rank_root()
-					epsmc = np.sqrt(np.finfo(float).eps)
+					epsmc = self.epsmc
+					t, dt, dtfac = self.t, self.dt, self.dtfac
 
-					xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
-				 										 for i in range(netype)])
-					xn = comm.allreduce(xn, op=mpi.SUM)
-		
-					eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-					xi = [np.zeros_like(self.system.ele_banks[i][r2].get()) 
+					
+					
+					xi = [self.system.ele_banks[i][r1].get()
 							for i in range(len(self.system.ele_types))]
-
+					jac = self.jac
 					for _ in range(nsmooth):
+						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
+				 										 for i in range(netype)])
+						xn = comm.allreduce(xn, op=mpi.SUM)
+		
+						eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 
 						# r5 = Un+1,k+1 = Un+1,k+eps*x
 						add(0.0, r5, 1.0, r2, eps, r1)
@@ -159,8 +173,8 @@ class GMRESmultip(BaseStdIntegrator):
 						add(-1.0/eps, r5, dtfac/dt, r1)
 
 						# tp = self.system.ele_scal_upts(r5)[0]
-						# # r4 = rhs(Un+1, k)
-						# rhs(t+dt, r2, r5)
+						# r4 = rhs(Un+1, k)
+						rhs(t+dt, r2, r4)
 
 						# r5 = -Axi = rhs(Un+1,k+eps*x)/eps + x/dt - rhs(Un+1, k)/eps
 						add(-1.0, r5, -1.0/eps, r4)
@@ -169,21 +183,38 @@ class GMRESmultip(BaseStdIntegrator):
 							   for i in range(len(self.system.ele_types))]
 
 						for i in range(len(self.system.ele_types)):
+							etp = self.system.ele_types[i]
 							nupts = self.system.ele_shapes[i][0]
+							# nhpt = hclass.system.ele_shapes[i][0] 
+							neles = self.system.ele_shapes[i][-1]
 							nvars = self.system.nvars
 							b = self.system.ele_scal_upts(r3)[i]
-							for e in range(self.system.neles):
-								tmp = self.jac[e] @ Axi[i][..., e].T.reshape(-1)
-								xi[i][..., e] += (2/3)*tmp.reshape(nvars, nupts).T
-								tmp2 = self.jac[e] @ b[..., e].T.reshape(-1)
-								xi[i][... ,e] += (2/3)*tmp2.reshape(nvars, nupts).T 
+							
+							# pr = p[i].get()
+							# re = r[i].get()
+
+							# ax = pr @ Axi[i].reshape(nupts, -1)
+							# ax = ax.reshape(nhpt, nvars, neles)
+							# b = pr @ b[i].reshape(nupts, -1)
+							# b = b.reshape(nhpt, nvars, neles)
+
+							
+							for e in range(neles):
+								
+
+								tmp = jac[etp, e] @ Axi[i][..., e].T.reshape(-1)
+								xi[i][..., e] += (2/3) * tmp.reshape(nvars, nupts).T
+
+								tmp2 = jac[etp, e] @ b[..., e].T.reshape(-1)
+								xi[i][... ,e] += (2/3) * tmp2.reshape(nvars, nupts).T 
 							
 							self.system.ele_banks[i][r1].set(xi[i])
 
-				def jac_mult(self, t, dt, dtfac, tau, nsmooth, f=None):
+				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
-					rhs, add = self.system.rhs, self._add
+
 					comm, rank, root = get_comm_rank_root()
+
 
 					netype = len(self.system.ele_types)
 
@@ -193,25 +224,10 @@ class GMRESmultip(BaseStdIntegrator):
 					Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
 
 					if f:
-						self.jacobi(Un, t, dt, dtfac, nsmooth)
+						self.jacobi(Un, nsmooth, hclass=hclass, p=p, r=r)
 					else:
-						self.richardson(Un, tau, t, dt, dtfac, nsmooth)
-				# def jac_mult(self, lclass):
-				# 	r0, r1, r2, r3, *r4 = lclass._regidx
-				# 	r4, r5 = r4[0], r4[1]
-					
-				# 	for i in range(len(self.system.ele_types)):
-				# 		nupts, nvars, neles = lclass.system.ele_shapes[i]
-
-				# 		qin = self.system.ele_banks[i][r3].get()
-				# 		qout = np.zeros_like(qin)
-
-				# 		for e in range(lclass.system.neles):
-				# 			tmp = lclass.jac[e] @ qin[..., e].T.reshape(-1)
-				# 			qout[..., e] = tmp.reshape(nvars, nupts).T
-						
-				# 		self.system.ele_banks[i][r3].set(qout)
-
+						self.richardson(Un, nsmooth)
+			
 				
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
 									mesh, initsoln, mcfg)
@@ -246,7 +262,7 @@ class GMRESmultip(BaseStdIntegrator):
 	def _init_projmats(self):
 		self.projmats = defaultdict(list)
 		cmat = lambda m: self.backend.const_matrix(m, tags={'align'}) 
-		
+
 		for l in self.levels[1:]:
 			for i in range(len(self.pintg.system.ele_types)):
 				b1 = self.pintgs[l].system.ubasis[i]
@@ -254,6 +270,17 @@ class GMRESmultip(BaseStdIntegrator):
 
 				self.projmats[l, l + 1].append(cmat(b1.proj_to(b2)))
 				self.projmats[l + 1, l].append(cmat(b2.proj_to(b1)))
+		
+		for l in self.levels:
+			for i in range(len(self.system.ele_types)):
+				b1 = self.pintgs[self._order].system.ubasis[i]
+				b2 = self.pintgs[l].system.ubasis[i]
+				if not self.projmats[self._order, l]:
+					self.projmats[self._order, l].append(cmat(b1.proj_to(b2)))
+					self.projmats[l, self._order].append(cmat(b2.proj_to(b1)))
+
+
+				
 
 	def _init_loworder(self, l1, l2):
 		rl0, rl1, *rl2 = self.pintgs[l2]._regidx
@@ -295,20 +322,8 @@ class GMRESmultip(BaseStdIntegrator):
 		# r5 = rhs(Un+1, k + eps*y)
 		rhs(t+dt, r5, r5)
 
-		# r5 = rhs(Un+1, k + eps*y)/eps + x/dt
-		add(-1.0/eps, r5, dtfac/dt, r1)
-
-		y = [self.pintgs[l1].system.ele_scal_upts(r1)[i]
-	   			for i in range(len(self.pintgs[l1].system.ele_types))]
-		
-		# r1 = rhs(Un+1, k)
-		rhs(t+dt, r2, r1)
-
-		# r5 =  rhs(Un+1, k + eps*y)/eps + x/dt - rhs(Un+1,k)/eps
-		add(1.0, r5, 1.0/eps, r1)
-
-		for i in range(len(self.system.ele_types)):
-			self.pintgs[l1].system.ele_banks[i][r1].set(y[i])
+		# r5 = rhs(Un+1, k + eps*y)/eps + x/dt - rhs(Un+1, k)/eps
+		add(-1.0/eps, r5, dtfac/dt, r1, 1.0/eps, r4)
 
 		# r5 = b  - Ax
 		add(-1.0, r5, 1.0, r3)
@@ -323,21 +338,22 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels(self.mgproject(l1, r1, l2, rf5))
 
 		add = self.pintgs[l2]._add
-		
 		# r1 = ys + e
 		add(1.0, rf1, 1.0, rf5)
 
 
-	def solve_gmres(self, t, dt, x, dtfac=1.0):
+	def solve_gmres(self,x):
 		comm, rank, root = get_comm_rank_root()
 		self.level = self._order
 		y = self.pintg.y
 		cs, sn = self.pintg.cs, self.pintg.sn
 		ltol = self.pintg.ltol
 		rnorm, m = self.pintg.rnorm, self.pintg.m
-		add, rhs_with_postproc = self.pintg._add, self.pintg.system.rhs
-		l2u, eletype = self.pintg.l2u, self.pintg.eletype
+		add = self.pintg._add
+
 		r0, r1, r2, r3, *r4 = self.pintg._regidx
+		
+		t, dt, dtfac = self.pintg.t, self.pintg.dt, self.pintg.dtfac
 
 		# for i, etype in enumerate(self.system.ele_types):
 		#         rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
@@ -360,7 +376,7 @@ class GMRESmultip(BaseStdIntegrator):
 		beta = rnorm*self.pintg.e1
 
 		for k in range(m):
-			H[:k+2, k], q = self.arnoldi(Q, k, t, dt, dtfac)
+			H[:k+2, k], q = self.arnoldi(Q, k)
 
 			for i in range(len(self.system.ele_types)):
 				Q[i][..., k+1] = q[i]
@@ -385,36 +401,47 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-
+		print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 		self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
 
-		for l in self.levels:
-			self.level = l
-			x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
-		   					for i in range(netype)]
+		niters = self.mpniters
+		if niters:
+			
+
+			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
+				  for i in range(netype)]
 			for i in range(netype):
+				self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
+			
+			for _ in range(niters):
+				for l in self.levels[1:]:
+					self.level = l
+					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
+						  for i in range(netype)]
+					
+					for i in range(netype):
 						self.pintg.system.ele_banks[i][r1].set(x0[i])
-		
-		tau= 0.01
-		n=5
-		self.pintg.jac_mult(t, dt, dtfac, tau, n, f='jacobi')
-		# for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
-		# 	self.level = l
-		# 	tau = 0.01
 
-		# 	if l == min(cycle):
-		# 		self.pintg.jac_mult(t, dt, dtfac, tau, n, f='jacobi')
-		# 	else:
-		# 		self.pintg.jac_mult(t, dt, dtfac, tau, n)
+				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
+					self.level = l
 
-		# 	if m is not None and l > m:
-		# 		self.restrict(l, m, t, dt, dtfac=2.0)
-		# 	elif m is not None and l < m:
-		# 		self.prolongate(l, m)
+					pr1 = self.projmats[l, self._order]
+					pr2 = self.projmats[self._order, l]
+					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# if l == self._order:
+					# 	self.pintg.jac_mult(n)
+					# else:
+					# 	self.pintg.jac_mult(n, f='jacobi')
 
-		add(0.0, r3, 1.0, r1)
+					if m is not None and l > m:
+						self.restrict(l, m, t, dt, dtfac=2.0)
+					elif m is not None and l < m:
+						self.prolongate(l, m)
+
+			add(0.0, r3, 1.0, r1)
 
 		# import pdb;pdb.set_trace()
 		for i in range(len(self.system.ele_types)):
@@ -422,9 +449,11 @@ class GMRESmultip(BaseStdIntegrator):
 			x[i] += self.system.ele_banks[i][r3].get()
 			self.system.ele_banks[i][r3].set(x[i])
 
-	def arnoldi(self, Q, k, t, dt, dtfac):
+	def arnoldi(self, Q, k):
 		self.level = self._order
 		add, rhs_with_postproc = self.pintg._add, self.system.rhs
+
+		t, dt, dtfac= self.pintg.t, self.pintg.dt, self.pintg.dtfac
 
 		h = np.zeros(k+2)
 		netype = len(self.system.ele_types)
@@ -444,59 +473,71 @@ class GMRESmultip(BaseStdIntegrator):
 		Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
 				for i in range(netype)])
 		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
+		
+		niters = self.mpniters
+
+		if niters:
+			
+			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
+							for i in range(netype)]
+			for i in range(netype):
+						self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
+			
+
+			for _ in range(niters):
+				for l in self.levels[1:]:
+					self.level = l
+					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
+							for i in range(netype)]
+
+					for i in range(netype):
+						self.pintg.system.ele_banks[i][r1].set(x0[i])
+
+				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
+					self.level = l
+
+					pr1 = self.projmats[l, self._order]
+					pr2 = self.projmats[self._order, l]
+
+					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
+
+					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# if l == self._orders:
+					# 	self.pintg.jac_mult(n)
+					# else:
+					# 	self.pintg.jac_mult(n, f='jacobi')
+					# print(f'After Jac_mult for l is {l}')
+					# for r in range(6):
+					# 	print(f'isnan {r} is {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
+
+					if m is not None and l > m:
+						self.restrict(l, m, t, dt, dtfac=2.0)
+						# print(f'After restrict for l is {l}, m is {m}')
+						# for r in range(6):
+						# 	print(f'isnan {r} is , l is {l}, {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
+						# 	print(f'isnan {r} is , m is {m}, {np.isnan(self.pintgs[m].system.ele_scal_upts(r)[0]).any()}')
+						
+					elif m is not None and l < m:
+						self.prolongate(l, m)
+						# print(f'After prolongate for l is {l}, m is {m}')
+						# for r in range(6):
+						# 	print(f'isnan {r} is , l is {l}, {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
+						# 	print(f'isnan {r} is , m is {m}, {np.isnan(self.pintgs[m].system.ele_scal_upts(r)[0]).any()}')
+						
+
+			add(0.0, r3, 1.0, r1)
 
 		Qn = sum([np.linalg.norm(self.system.ele_scal_upts(r3)[i])**2
 				  for i in range(netype)])
 		Qn = comm.allreduce(Qn, op=mpi.SUM)
 		
 		eps =  self.pintg.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
-
-		
-		for l in self.levels:
-			self.level = l
-			x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
-		   					for i in range(netype)]
-			for i in range(netype):
-						self.pintg.system.ele_banks[i][r1].set(x0[i])
-					
-		tau= 0.01
-		n=5
-		self.pintg.jac_mult(t, dt, dtfac, tau, n, f='jacobi')
-		# for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
-		# 	self.level = l
-		# 	tau = 0.01
-		# 	import pdb;pdb.set_trace()
-		# 	if l == min(cycle):
-		# 		self.pintg.jac_mult(t, dt, dtfac, tau, n, f='jacobi')
-		# 	else:
-		# 		self.pintg.jac_mult(t, dt, dtfac, tau, n)
-		# 	# print(f'After Jac_mult for l is {l}')
-		# 	# for r in range(6):
-		# 	# 	print(f'isnan {r} is {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
-
-		# 	if m is not None and l > m:
-		# 		self.restrict(l, m, t, dt, dtfac=2.0)
-		# 		# print(f'After restrict for l is {l}, m is {m}')
-		# 		# for r in range(6):
-		# 		# 	print(f'isnan {r} is , l is {l}, {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
-		# 		# 	print(f'isnan {r} is , m is {m}, {np.isnan(self.pintgs[m].system.ele_scal_upts(r)[0]).any()}')
-				
-		# 	elif m is not None and l < m:
-		# 		self.prolongate(l, m)
-		# 		# print(f'After prolongate for l is {l}, m is {m}')
-		# 		# for r in range(6):
-		# 		# 	print(f'isnan {r} is , l is {l}, {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
-		# 		# 	print(f'isnan {r} is , m is {m}, {np.isnan(self.pintgs[m].system.ele_scal_upts(r)[0]).any()}')
-				
-
-		
-		add(0.0, r3, 1.0, r1)
 		
 		# r1 = Un+1,k + eps*Q
 		add(0.0, r1, eps, r3, 1.0, r2)
 
 		# r1 = R(Un+eps*Q)
-		rhs_with_postproc(t+dt, r1, r1)      
+		rhs_with_postproc(t+dt, r1, r1)     
 
 		# r1 = R(Un+eps*Q)/eps + Q/dt
 		add(-1.0/eps, r1, dtfac/dt, r3)
@@ -572,24 +613,35 @@ class GMRESmultip(BaseStdIntegrator):
 			nonlin_iter = 0
 
 			while nnorm > ntol:
-				self.pintg._init_gmres(self.tcurr, dt, dtfac=2.0)
+
+
+				for l in self.levels:
+					self.level = l
+					self.pintg._init_step(self.tcurr, dt)
+				
+				self.level = self._order
+				self.pintg._init_gmres()
 				x = copy.deepcopy(self.system.ele_scal_upts(r3))
 
 				# Init the low order systems
-				nl = len(self.levels) - 1
-				for l, m in it.zip_longest([self._order]*nl, self.levels[1:]):
-					self._init_loworder(l, m)
+				# nl = len(self.levels) - 1
+				for l, m in it.zip_longest(self.levels, self.levels[1:]):
+					if m is not None:
+						self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
-				self.pintgs[min(self.levels)]._eval_jac(self.tcurr, dt, dtfac=2.0)
+				for l in self.levels:
+					self.pintgs[l]._eval_jac()
+					
+				# self.pintgs[self._order]._eval_jac()
 
 				
-				self.pintg._res(self.tcurr, dt, dtfac=2.0)				
-				self.solve_gmres(self.tcurr, dt, x, dtfac=2.0)
+				self.pintg._res()				
+				self.solve_gmres(x) 
 
 				# r2 = Un+1,k+1 = Un+1,k + s*dUk
 				add(1.0, r2, s, r3)
 
-				nnorm = self.pintg.newton_res(self.tcurr, dt)
+				nnorm = self.pintg.newton_res()
 
 				nonlin_iter += 1
 				if rank == root:

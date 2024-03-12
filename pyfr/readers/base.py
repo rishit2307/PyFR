@@ -130,7 +130,6 @@ class NodalMeshAssembler:
             for j in nbele[k]:
                 if not j in g1[k]:
                     g1 = addEdge(g1, k, j)
-        
 
         celes = greedyColoring(g1, neles)
 

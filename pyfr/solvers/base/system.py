@@ -153,18 +153,18 @@ class BaseSystem:
     
     def color_mesh(self, mesh, rallocs):
         
-        lhs, rhs = mesh[f'con_p{rallocs.prank}'][['f1', 'f4']]
+        lhs, rhs = mesh[f'con_p{rallocs.prank}'][['f0', 'f1', 'f4']]
 
         celes = defaultdict(list)
 
-        for lele, lcol in np.unique(lhs):
-            celes[lcol].append(lele)
+        for etp, lele, lcol in np.unique(lhs):
+            celes[lcol, etp].append(lele)
         
-        for rele, rcol in np.unique(rhs):
-            celes[rcol].append(rele)
+        for etp, rele, rcol in np.unique(rhs):
+            celes[rcol, etp].append(rele)
         
-        for col in celes.keys():
-            celes[col] = list(set(celes[col]))
+        for col, etp in celes.keys():
+            celes[col, etp] = list(set(celes[col, etp]))
         
         return celes
 
