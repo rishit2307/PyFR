@@ -410,13 +410,32 @@ class Euler(BaseStdStepper):
 class Trapezoidal(BaseStdStepper):
     stepper_name = 'trapezium'
     stepper_has_errest = False
-    stepper_nregs = 6
+    stepper_nregs = 9
     stepper_order = 1
     dtfac = 2.0
 
     @property
     def _stepper_nfevals(self):
         return self.nsteps
+    
+    def _eval_mat_vec(self, rU, rdU, rrhs, rrU, eps, ev_rru=False):
+
+        add, rhs = self._add, self.system.rhs
+        t, dt, dtfac = self.t, self.dt, self.dtfac
+        
+        # rrhs = rU + eps*rdU
+        add(0.0, rrhs, 1.0, rU, eps, rdU)
+
+        # rrhs = rhs(rU + eps*rdU)
+        rhs(t+dt, rrhs, rrhs)
+
+        if ev_rru: 
+            # rrU = rhs(t+dt, rU, rrU)
+            rhs(t+dt, rU, rrU)
+        
+        # rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
+        add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
+
 
     def _res(self):
         t, dt, dtfac = self.t, self.dt, self.dtfac
@@ -447,23 +466,10 @@ class Trapezoidal(BaseStdStepper):
         # max_etp = max(l2u, key=l2u.get)
         eps = self.epsmc*np.sqrt(self.l2u+1)/(dUn + self.epsmc**2)
 
-        # r1 = Un+1,k + eps*DUn+1,k
-        add(0.0, r1, eps, r3, 1.0, r2)
-
-        # r1 = R(Un+1,k+1)
-        rhs_with_postproc(t+dt, r1, r1)
-
-        # r1 = R(Un+1,k+1)/eps + dUnk/dt
-        add(-1.0/eps, r1, dtfac/dt, r3)
+        self._eval_mat_vec(r2, r3, r1, r4, eps, ev_rru=True)
 
         # r3 = R(Un)
         rhs_with_postproc(t, r0, r3)
-
-        # r4 = R(Un+1, k)
-        rhs_with_postproc(t+dt, r2, r4)
-
-        # r1 = R(Un+1,k+1)/eps + dUnk/dt - R(Un+1,k)/eps
-        add(1.0, r1, 1.0/eps, r4)
 
         # r3 = R(Un)/2 + R(Un+1,k)/2 
         add(dtfac/2., r3, dtfac/2., r4)
@@ -587,6 +593,8 @@ class BDF2(Trapezoidal):
     @property
     def _stepper_nfvals(self):
         return 4*self.nsteps
+    
+
     
     def _res(self, t, dt, dtfac=1.0):
         add, rhs_with_postproc = self._add, self.system.rhs

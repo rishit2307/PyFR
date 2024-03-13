@@ -107,7 +107,8 @@ class GMRESmultip(BaseStdIntegrator):
 						print(f'rank is {rank} cond number is {np.amax(cond)}')
 				
 				def richardson(self, Un, nsmooth):
-					r0, r1, r2, r3, r4, r5 =  self._regidx
+					r0, r1, r2, r3, r4, *r5 =  self._regidx
+					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3], r5[4]
 					rhs, add = self.system.rhs, self._add
 					netype = len(self.system.ele_types)
 					comm, rank, root = get_comm_rank_root()
@@ -115,8 +116,6 @@ class GMRESmultip(BaseStdIntegrator):
 					t, dt, dtfac = self.t, self.dt, self.dtfac
 					tau = self.tau
 
-					# r4 = rhs(Un+1, k)
-					rhs(t+dt, r2, r4)
 					for _ in range(nsmooth):
 						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
 				 										 for i in range(netype)])
@@ -124,23 +123,49 @@ class GMRESmultip(BaseStdIntegrator):
 		
 						eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 
-						# r5 = Un+1,k+1 = Un+1,k+eps*x
-						add(0.0, r5, 1.0, r2, eps, r1)
+						## First stage
+						# r5 = A*r1
+						self._eval_mat_vec(r2, r1, r5, r4, eps)
+						# r5 = A*r1 - b
+						add(1.0, r5, -1.0, r3)
+						
+						## Second stage
+						# r6 = r5*dtau/2 + r1
+						add(0.0, r6, 1.0, r1, tau/2.0, r5)
+						# r7 = A*r6
+						self._eval_mat_vec(r2, r6, r7, r4, eps)
+						# r7 = r7 - b
+						add(1.0, r7, -1.0, r3)
+						
+						## Accumulate
+						# r5 = r1 + dtau/6(r5  + 2*r7)
+						add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
+						
+						## Third Stage
+						# r6 = r7*dtau/2 + r1
+						add(0.0, r6, tau/2, r7, 1.0, r1)
+						# r7 = A*r6
+						self._eval_mat_vec(r2, r6, r7, r4, eps)
+						# r7 = r7 - b
+						add(1.0, r7, -1.0, r3)
 
-						# r5 = rhs(Un+1, k+1)
-						rhs(t+dt, r5, r5)
+						## Accumulate
+						# r5 = r5 + dtau*r7/3
+						add(1.0, r5, tau/3, r7)
 
-						# r5 = rhs(Un+1,k+eps*x)/eps + x/dt
-						add(-1.0/eps, r5, dtfac/dt, r1)
+						# r6 = dtau*r7 + r1
+						add(0.0, r6, tau, r7, 1.0, r1)
+						# r7 = A*r6
+						self._eval_mat_vec(r2, r6, r7, r4, eps)
+						# r7 = A*r7 - b
+						add(1.0, r7, -1.0, r3)
 
-						# r5 = rhs(Un+1,k+eps*x)/eps + x/dt - rhs(Un+1, k)/eps
-						add(1.0, r5, 1.0/eps, r4)
+						# r5 = r5 + dtau*r7/6
+						add(1.0, r5, tau/6, r7)
 
-						# r5 = b - Ax
-						add(-1.0, r5, 1.0, r3)
+						# r1 = r5
+						add(0.0, r1, 1.0, r5)
 
-						# r1 = x + tau*(b - Ax)
-						add(1.0, r1, tau, r5)
 
 				def jacobi(self, Un, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
@@ -211,7 +236,7 @@ class GMRESmultip(BaseStdIntegrator):
 							self.system.ele_banks[i][r1].set(xi[i])
 
 				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
-					r0, r1, r2, r3, r4, r5 =  self._regidx
+					r0, r1, r2, r3, r4, *r5 =  self._regidx
 
 					comm, rank, root = get_comm_rank_root()
 
@@ -283,10 +308,19 @@ class GMRESmultip(BaseStdIntegrator):
 				
 
 	def _init_loworder(self, l1, l2):
-		rl0, rl1, *rl2 = self.pintgs[l2]._regidx
-		rl2 = rl2[0]
-		r0, r1, r2, *r3 = self.pintgs[l1]._regidx
+		rl0, rl1, rl2, rl3, *rl4 = self.pintgs[l2]._regidx
+		rl4 = rl4[0]
+		
+		r0, r1, r2, r3, *r4 = self.pintgs[l1]._regidx
 		self.backend.run_kernels(self.mgproject(l1, r2 ,l2, rl2))
+
+
+		t, dt = self.t, self.dt
+
+		# r4 = R(Un+1, k)
+		rhs = self.pintgs[l2].system.rhs
+		rhs(t+dt, rl2, rl4)
+		
 	
 	def mgproject(self, l1, l1reg, l2, l2reg):
 		projk = []
@@ -298,8 +332,10 @@ class GMRESmultip(BaseStdIntegrator):
 		return projk
 
 	def restrict(self, l1, l2, t, dt, dtfac=2.0):
-		r0, r1, r2, r3, r4, r5 = self.pintgs[l1]._regidx
-		rl0, rl1, rl2, rl3, rl4, rl5 = self.pintgs[l2]._regidx
+		r0, r1, r2, r3, r4, *r5 = self.pintgs[l1]._regidx
+		r5 = r5[0]
+		rl0, rl1, rl2, rl3, rl4, *rl5 = self.pintgs[l2]._regidx
+		rl5, rl8, rl7= rl5[0], rl5[-1], rl5[-2]
 		add, rhs = self.pintgs[l1]._add, self.pintgs[l1].system.rhs
 		comm, rank, root = get_comm_rank_root()
 		netype = len(self.system.ele_types)
@@ -315,34 +351,39 @@ class GMRESmultip(BaseStdIntegrator):
 		
 		eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 		
-
-		# r5 = Un+1,k + eps*y
-		add(0.0, r5, 1.0, r2, eps, r1)
-
-		# r5 = rhs(Un+1, k + eps*y)
-		rhs(t+dt, r5, r5)
-
-		# r5 = rhs(Un+1, k + eps*y)/eps + x/dt - rhs(Un+1, k)/eps
-		add(-1.0/eps, r5, dtfac/dt, r1, 1.0/eps, r4)
-
-		# r5 = b  - Ax
+		# r5 = A*r1
+		self.pintgs[l1]._eval_mat_vec(r2, r1, r5, r4, eps)
+		# r5 = b - A*r1
 		add(-1.0, r5, 1.0, r3)
 
 		self.backend.run_kernels(self.mgproject(l1, r5, l2, rl3))
+		self.backend.run_kernels(self.mgproject(l1, r1, l2, rl8))
+
+		self.level = l2
+		add = self.pintg._add
+
+		# rl7 = A*rl8
+		self.pintg._eval_mat_vec(rl2, rl8, rl7, rl4, eps)
+
+		# rl3 = rl3 + rl7
+		add(1.0, rl3, 1.0, rl7)
 
 	def prolongate(self, l1, l2):
 		r0, r1, *r2 = self.pintgs[l1]._regidx
+		r8 = r2[-1]
 		rf0, rf1, *rf5 = self.pintgs[l2]._regidx
-		rf5 = rf5[-1]
+		rf8 = rf5[-1]
 
-		self.backend.run_kernels(self.mgproject(l1, r1, l2, rf5))
+		# r8 = e = y^s - y^ns
+		add(-1.0, r8, 1.0, r1)
+		self.backend.run_kernels(self.mgproject(l1, r8, l2, rf8))
 
 		add = self.pintgs[l2]._add
 		# r1 = ys + e
-		add(1.0, rf1, 1.0, rf5)
+		add(1.0, rf1, 1.0, rf8)
 
 
-	def solve_gmres(self,x):
+	def solve_gmres(self, x):
 		comm, rank, root = get_comm_rank_root()
 		self.level = self._order
 		y = self.pintg.y
@@ -418,14 +459,6 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
 			
 			for _ in range(niters):
-				for l in self.levels[1:]:
-					self.level = l
-					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
-						  for i in range(netype)]
-					
-					for i in range(netype):
-						self.pintg.system.ele_banks[i][r1].set(x0[i])
-
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 					self.level = l
 
@@ -487,14 +520,6 @@ class GMRESmultip(BaseStdIntegrator):
 			
 
 			for _ in range(niters):
-				for l in self.levels[1:]:
-					self.level = l
-					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
-							for i in range(netype)]
-
-					for i in range(netype):
-						self.pintg.system.ele_banks[i][r1].set(x0[i])
-
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 					self.level = l
 
@@ -534,19 +559,9 @@ class GMRESmultip(BaseStdIntegrator):
 		Qn = comm.allreduce(Qn, op=mpi.SUM)
 		
 		eps =  self.pintg.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
-		
-		# r1 = Un+1,k + eps*Q
-		add(0.0, r1, eps, r3, 1.0, r2)
 
-		# r1 = R(Un+eps*Q)
-		rhs_with_postproc(t+dt, r1, r1)     
+		self.pintg._eval_mat_vec(r2, r3, r1, r4, eps)
 
-		# r1 = R(Un+eps*Q)/eps + Q/dt
-		add(-1.0/eps, r1, dtfac/dt, r3)
-
-		# r1 = R(Un+eps*Q)/eps + Q/dt  - R(Un)/eps 
-		add(1.0, r1, 1.0/eps, r4)
-		
 		q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
 
 		for j in range(k+1):
