@@ -106,24 +106,14 @@ class GMRESmultip(BaseStdIntegrator):
 					if rank == root:
 						print(f'rank is {rank} cond number is {np.amax(cond)}')
 				
-				def richardson(self, Un, nsmooth):
+				def richardson(self, nsmooth):
 					r0, r1, r2, r3, r4, *r5 =  self._regidx
 					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3]
-					rhs, add = self.system.rhs, self._add
-					netype = len(self.system.ele_types)
-					comm, rank, root = get_comm_rank_root()
-					epsmc = self.epsmc
-					t, dt, dtfac = self.t, self.dt, self.dtfac
+					add = self._add
 					tau = self.tau
-
 					for _ in range(nsmooth):
-						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
-				 										 for i in range(netype)])
-						xn = comm.allreduce(xn, op=mpi.SUM)
-						eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-
 						# r5 = A*r1
-						self._eval_mat_vec(r2, r1, r5, r4, eps)
+						self._eval_mat_vec(r2, r1, r5, r4)
 
 						# r5 = b - A*r1
 						add(-1.0, r5, 1.0, r3)
@@ -132,31 +122,19 @@ class GMRESmultip(BaseStdIntegrator):
 						add(1.0, r1, tau, r5)
 
 					# for _ in range(nsmooth):
-					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
-				 	# 									 for i in range(netype)])
-					# 	xn = comm.allreduce(xn, op=mpi.SUM)
-		
-					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-					# 	# eps = 1e-8
-
 					# 	## First stage
 					# 	# r5 = A*r1
-					# 	self._eval_mat_vec(r2, r1, r5, r4, eps)
-					# 	# r5 = A*r1 - b
-					# 	add(1.0, r5, -1.0, r3)
+					# 	self._eval_mat_vec(r2, r1, r5, r4)
+					# 	# r5 = b - A*r1
+					# 	add(-1.0, r5, 1.0, r3)
 						
 					# 	## Second stage
 					# 	# r6 = r5*dtau/2 + r1
 					# 	add(0.0, r6, 1.0, r1, tau/2.0, r5)
-					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r6)[i])**2
-				 	# 									 for i in range(netype)])
-					# 	xn = comm.allreduce(xn, op=mpi.SUM)
-		
-					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4, eps)
-					# 	# r7 = r7 - b
-					# 	add(1.0, r7, -1.0, r3)
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r6
+					# 	add(-1.0, r7, 1.0, r3)
 						
 					# 	## Accumulate
 					# 	# r5 = r1 + dtau/6(r5  + 2*r7)
@@ -165,15 +143,10 @@ class GMRESmultip(BaseStdIntegrator):
 					# 	## Third Stage
 					# 	# r6 = r7*dtau/2 + r1
 					# 	add(0.0, r6, tau/2, r7, 1.0, r1)
-					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r6)[i])**2
-				 	# 									 for i in range(netype)])
-					# 	xn = comm.allreduce(xn, op=mpi.SUM)
-		
-					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4, eps)
-					# 	# r7 = r7 - b
-					# 	add(1.0, r7, -1.0, r3)
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r6
+					# 	add(-1.0, r7, 1.0, r3)
 
 					# 	## Accumulate
 					# 	# r5 = r5 + dtau*r7/3
@@ -181,15 +154,10 @@ class GMRESmultip(BaseStdIntegrator):
 
 					# 	# r6 = dtau*r7 + r1
 					# 	add(0.0, r6, tau, r7, 1.0, r1)
-					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r6)[i])**2
-				 	# 									 for i in range(netype)])
-					# 	xn = comm.allreduce(xn, op=mpi.SUM)
-		
-					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4, eps)
-					# 	# r7 = A*r7 - b
-					# 	add(1.0, r7, -1.0, r3)
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r7
+					# 	add(-1.0, r7, 1.0, r3)
 
 					# 	# r5 = r5 + dtau*r7/6
 					# 	add(1.0, r5, tau/6, r7)
@@ -198,13 +166,9 @@ class GMRESmultip(BaseStdIntegrator):
 					# 	add(0.0, r1, 1.0, r5)
 
 
-				def jacobi(self, Un, nsmooth, hclass=None,r=None,p=None):
+				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
 					rhs, add = self.system.rhs, self._add
-
-					netype = len(self.system.ele_types)
-					comm, rank, root = get_comm_rank_root()
-					epsmc = self.epsmc
 					t, dt, dtfac = self.t, self.dt, self.dtfac
 
 					
@@ -213,27 +177,8 @@ class GMRESmultip(BaseStdIntegrator):
 							for i in range(len(self.system.ele_types))]
 					jac = self.jac
 					for _ in range(nsmooth):
-						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
-				 										 for i in range(netype)])
-						xn = comm.allreduce(xn, op=mpi.SUM)
-		
-						eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 
-						# r5 = Un+1,k+1 = Un+1,k+eps*x
-						add(0.0, r5, 1.0, r2, eps, r1)
-
-						# r5 = rhs(Un+1, k+1)
-						rhs(t+dt, r5, r5)
-
-						# r5 = rhs(Un+1,k+eps*x)/eps + x/dt
-						add(-1.0/eps, r5, dtfac/dt, r1)
-
-						# tp = self.system.ele_scal_upts(r5)[0]
-						# r4 = rhs(Un+1, k)
-						rhs(t+dt, r2, r4)
-
-						# r5 = -Axi = rhs(Un+1,k+eps*x)/eps + x/dt - rhs(Un+1, k)/eps
-						add(-1.0, r5, -1.0/eps, r4)
+						self._eval_mat_vec(r2, r1, r5, r4)
 						
 						Axi = [self.system.ele_scal_upts(r5)[i]
 							   for i in range(len(self.system.ele_types))]
@@ -259,30 +204,17 @@ class GMRESmultip(BaseStdIntegrator):
 								
 
 								tmp = jac[etp, e] @ Axi[i][..., e].T.reshape(-1)
-								xi[i][..., e] += (2/3) * tmp.reshape(nvars, nupts).T
+								xi[i][..., e] -= (2/3) * tmp.reshape(nvars, nupts).T
 
 								tmp2 = jac[etp, e] @ b[..., e].T.reshape(-1)
 								xi[i][... ,e] += (2/3) * tmp2.reshape(nvars, nupts).T 
-							
 							self.system.ele_banks[i][r1].set(xi[i])
 
 				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
-					r0, r1, r2, r3, r4, *r5 =  self._regidx
-
-					comm, rank, root = get_comm_rank_root()
-
-
-					netype = len(self.system.ele_types)
-
-					Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
-								for i in range(netype)])
-					
-					Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
-
 					if f:
-						self.jacobi(Un, nsmooth, hclass=hclass, p=p, r=r)
+						self.jacobi(nsmooth, hclass=hclass, p=p, r=r)
 					else:
-						self.richardson(Un, nsmooth)
+						self.richardson(nsmooth)
 			
 				
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
@@ -367,23 +299,10 @@ class GMRESmultip(BaseStdIntegrator):
 		r5 = r5[0]
 		rl0, rl1, rl2, rl3, rl4, *rl5 = self.pintgs[l2]._regidx
 		rl5, rl8, rl7= rl5[0], rl5[-1], rl5[-2]
-		add, rhs = self.pintgs[l1]._add, self.pintgs[l1].system.rhs
-		comm, rank, root = get_comm_rank_root()
-		netype = len(self.system.ele_types)
-		epsmc = np.sqrt(np.finfo(float).eps)
-		
-		Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
-								for i in range(netype)])
-		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
-
-		xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
-				 			for i in range(netype)])
-		xn = comm.allreduce(xn, op=mpi.SUM)
-		
-		eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-		
+		add = self.pintgs[l1]._add
+	
 		# r5 = A*r1
-		self.pintgs[l1]._eval_mat_vec(r2, r1, r5, r4, eps)
+		self.pintgs[l1]._eval_mat_vec(r2, r1, r5, r4)
 		# r5 = b - A*r1
 		add(-1.0, r5, 1.0, r3)
 
@@ -394,7 +313,7 @@ class GMRESmultip(BaseStdIntegrator):
 		add = self.pintg._add
 
 		# rl7 = A*rl8
-		self.pintg._eval_mat_vec(rl2, rl8, rl7, rl4, eps)
+		self.pintg._eval_mat_vec(rl2, rl8, rl7, rl4)
 
 		# rl3 = rl3 + rl7
 		add(1.0, rl3, 1.0, rl7)
@@ -426,7 +345,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		r0, r1, r2, r3, *r4 = self.pintg._regidx
 		
-		t, dt, dtfac = self.pintg.t, self.pintg.dt, self.pintg.dtfac
+		t, dt = self.pintg.t, self.pintg.dt
 
 		# for i, etype in enumerate(self.system.ele_types):
 		#         rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
@@ -537,10 +456,6 @@ class GMRESmultip(BaseStdIntegrator):
 		for i in range(netype):
 			self.system.ele_banks[i][r3].set(Q[i][..., k])
 		
-		Un = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2
-				for i in range(netype)])
-		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
-		
 		niters = self.mpniters
 
 		if niters:
@@ -586,14 +501,7 @@ class GMRESmultip(BaseStdIntegrator):
 						
 
 			add(0.0, r3, 1.0, r1)
-
-		Qn = sum([np.linalg.norm(self.system.ele_scal_upts(r3)[i])**2
-				  for i in range(netype)])
-		Qn = comm.allreduce(Qn, op=mpi.SUM)
-		
-		eps =  self.pintg.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
-
-		self.pintg._eval_mat_vec(r2, r3, r1, r4, eps)
+		self.pintg._eval_mat_vec(r2, r3, r1, r4)
 
 		q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
 
