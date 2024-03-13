@@ -57,7 +57,7 @@ class BaseStdStepper(BaseStdIntegrator):
         stp_class = subclass_where(BaseStdStepper, stepper_name=name)
         self.dtfac = stp_class.dtfac
         self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
-        # print(f'tau is {self.tau}')
+        print(f'tau is {self.tau}')
 
         prec = self.cfg.get('backend', 'precision')
         if prec == 'double':
@@ -67,10 +67,10 @@ class BaseStdStepper(BaseStdIntegrator):
 
 
     def _init_gmres(self):
-        self.m = 200
+        self.m = 300
         self.rnorm= dict()
 
-        self.ltol = 1e-13
+        self.ltol = 1e-6
         self.eletype = dict()
 
         comm, rank, root = get_comm_rank_root()

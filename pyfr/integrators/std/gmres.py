@@ -108,7 +108,7 @@ class GMRESmultip(BaseStdIntegrator):
 				
 				def richardson(self, Un, nsmooth):
 					r0, r1, r2, r3, r4, *r5 =  self._regidx
-					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3], r5[4]
+					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3]
 					rhs, add = self.system.rhs, self._add
 					netype = len(self.system.ele_types)
 					comm, rank, root = get_comm_rank_root()
@@ -120,51 +120,82 @@ class GMRESmultip(BaseStdIntegrator):
 						xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
 				 										 for i in range(netype)])
 						xn = comm.allreduce(xn, op=mpi.SUM)
-		
-						eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+						eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 
-						## First stage
 						# r5 = A*r1
 						self._eval_mat_vec(r2, r1, r5, r4, eps)
-						# r5 = A*r1 - b
-						add(1.0, r5, -1.0, r3)
+
+						# r5 = b - A*r1
+						add(-1.0, r5, 1.0, r3)
+
+						# r1 = x + tau(b - A*r1)
+						add(1.0, r1, tau, r5)
+
+					# for _ in range(nsmooth):
+					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r1)[i])**2
+				 	# 									 for i in range(netype)])
+					# 	xn = comm.allreduce(xn, op=mpi.SUM)
+		
+					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+					# 	# eps = 1e-8
+
+					# 	## First stage
+					# 	# r5 = A*r1
+					# 	self._eval_mat_vec(r2, r1, r5, r4, eps)
+					# 	# r5 = A*r1 - b
+					# 	add(1.0, r5, -1.0, r3)
 						
-						## Second stage
-						# r6 = r5*dtau/2 + r1
-						add(0.0, r6, 1.0, r1, tau/2.0, r5)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4, eps)
-						# r7 = r7 - b
-						add(1.0, r7, -1.0, r3)
+					# 	## Second stage
+					# 	# r6 = r5*dtau/2 + r1
+					# 	add(0.0, r6, 1.0, r1, tau/2.0, r5)
+					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r6)[i])**2
+				 	# 									 for i in range(netype)])
+					# 	xn = comm.allreduce(xn, op=mpi.SUM)
+		
+					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4, eps)
+					# 	# r7 = r7 - b
+					# 	add(1.0, r7, -1.0, r3)
 						
-						## Accumulate
-						# r5 = r1 + dtau/6(r5  + 2*r7)
-						add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
+					# 	## Accumulate
+					# 	# r5 = r1 + dtau/6(r5  + 2*r7)
+					# 	add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
 						
-						## Third Stage
-						# r6 = r7*dtau/2 + r1
-						add(0.0, r6, tau/2, r7, 1.0, r1)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4, eps)
-						# r7 = r7 - b
-						add(1.0, r7, -1.0, r3)
+					# 	## Third Stage
+					# 	# r6 = r7*dtau/2 + r1
+					# 	add(0.0, r6, tau/2, r7, 1.0, r1)
+					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r6)[i])**2
+				 	# 									 for i in range(netype)])
+					# 	xn = comm.allreduce(xn, op=mpi.SUM)
+		
+					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4, eps)
+					# 	# r7 = r7 - b
+					# 	add(1.0, r7, -1.0, r3)
 
-						## Accumulate
-						# r5 = r5 + dtau*r7/3
-						add(1.0, r5, tau/3, r7)
+					# 	## Accumulate
+					# 	# r5 = r5 + dtau*r7/3
+					# 	add(1.0, r5, tau/3, r7)
 
-						# r6 = dtau*r7 + r1
-						add(0.0, r6, tau, r7, 1.0, r1)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4, eps)
-						# r7 = A*r7 - b
-						add(1.0, r7, -1.0, r3)
+					# 	# r6 = dtau*r7 + r1
+					# 	add(0.0, r6, tau, r7, 1.0, r1)
+					# 	xn = sum([np.linalg.norm(self.system.ele_scal_upts(r6)[i])**2
+				 	# 									 for i in range(netype)])
+					# 	xn = comm.allreduce(xn, op=mpi.SUM)
+		
+					# 	eps =  epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4, eps)
+					# 	# r7 = A*r7 - b
+					# 	add(1.0, r7, -1.0, r3)
 
-						# r5 = r5 + dtau*r7/6
-						add(1.0, r5, tau/6, r7)
+					# 	# r5 = r5 + dtau*r7/6
+					# 	add(1.0, r5, tau/6, r7)
 
-						# r1 = r5
-						add(0.0, r1, 1.0, r5)
+					# 	# r1 = r5
+					# 	add(0.0, r1, 1.0, r5)
 
 
 				def jacobi(self, Un, nsmooth, hclass=None,r=None,p=None):
@@ -373,6 +404,7 @@ class GMRESmultip(BaseStdIntegrator):
 		r8 = r2[-1]
 		rf0, rf1, *rf5 = self.pintgs[l2]._regidx
 		rf8 = rf5[-1]
+		add = self.pintgs[l1]._add
 
 		# r8 = e = y^s - y^ns
 		add(-1.0, r8, 1.0, r1)
@@ -442,7 +474,7 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		# print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
+		print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
@@ -452,11 +484,11 @@ class GMRESmultip(BaseStdIntegrator):
 		niters = self.mpniters
 		if niters:
 			
-
-			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
-				  for i in range(netype)]
 			for i in range(netype):
-				self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
+				for l in self.levels:
+					x0 = [np.zeros_like(self.pintgs[l].system.ele_scal_upts(r2)[i])
+							for i in range(netype)]
+					self.pintgs[l].system.ele_banks[i][r1].set(x0[i])
 			
 			for _ in range(niters):
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
@@ -512,12 +544,13 @@ class GMRESmultip(BaseStdIntegrator):
 		niters = self.mpniters
 
 		if niters:
-			import pdb;pdb.set_trace()
-			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
-							for i in range(netype)]
-			for i in range(netype):
-						self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
+
 			
+			for i in range(netype):
+				for l in self.levels:
+					x0 = [np.zeros_like(self.pintgs[l].system.ele_scal_upts(r2)[i])
+							for i in range(netype)]
+					self.pintgs[l].system.ele_banks[i][r1].set(x0[i])
 
 			for _ in range(niters):
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
@@ -525,7 +558,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 					pr1 = self.projmats[l, self._order]
 					pr2 = self.projmats[self._order, l]
-
+					
 					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 
 					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
