@@ -111,67 +111,63 @@ class GMRESmultip(BaseStdIntegrator):
 					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3]
 					add = self._add
 					tau = self.tau
-					# for _ in range(nsmooth):
-					# 	# r5 = A*r1
-					# 	self._eval_mat_vec(r2, r1, r5, r4)
-
-					# 	# r5 = b - A*r1
-					# 	add(-1.0, r5, 1.0, r3)
-
-					# 	# r1 = x + tau(b - A*r1)
-					# 	add(1.0, r1, tau, r5)
-
 					for _ in range(nsmooth):
-						## First stage
 						# r5 = A*r1
 						self._eval_mat_vec(r2, r1, r5, r4)
+
 						# r5 = b - A*r1
 						add(-1.0, r5, 1.0, r3)
+
+						# r1 = x + tau(b - A*r1)
+						add(1.0, r1, tau, r5)
+
+					# for _ in range(nsmooth):
+					# 	## First stage
+					# 	# r5 = A*r1
+					# 	self._eval_mat_vec(r2, r1, r5, r4)
+					# 	# r5 = b - A*r1
+					# 	add(-1.0, r5, 1.0, r3)
 						
-						## Second stage
-						# r6 = r5*dtau/2 + r1
-						add(0.0, r6, 1.0, r1, tau/2.0, r5)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4)
-						# r7 = b - A*r6
-						add(-1.0, r7, 1.0, r3)
+					# 	## Second stage
+					# 	# r6 = r5*dtau/2 + r1
+					# 	add(0.0, r6, 1.0, r1, tau/2.0, r5)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r6
+					# 	add(-1.0, r7, 1.0, r3)
 						
-						## Accumulate
-						# r5 = r1 + dtau/6(r5  + 2*r7)
-						add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
+					# 	## Accumulate
+					# 	# r5 = r1 + dtau/6(r5  + 2*r7)
+					# 	add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
 						
-						## Third Stage
-						# r6 = r7*dtau/2 + r1
-						add(0.0, r6, tau/2, r7, 1.0, r1)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4)
-						# r7 = b - A*r6
-						add(-1.0, r7, 1.0, r3)
+					# 	## Third Stage
+					# 	# r6 = r7*dtau/2 + r1
+					# 	add(0.0, r6, tau/2, r7, 1.0, r1)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r6
+					# 	add(-1.0, r7, 1.0, r3)
 
-						## Accumulate
-						# r5 = r5 + dtau*r7/3
-						add(1.0, r5, tau/3, r7)
+					# 	## Accumulate
+					# 	# r5 = r5 + dtau*r7/3
+					# 	add(1.0, r5, tau/3, r7)
 
-						# r6 = dtau*r7 + r1
-						add(0.0, r6, tau, r7, 1.0, r1)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4)
-						# r7 = b - A*r7
-						add(-1.0, r7, 1.0, r3)
+					# 	# r6 = dtau*r7 + r1
+					# 	add(0.0, r6, tau, r7, 1.0, r1)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r7
+					# 	add(-1.0, r7, 1.0, r3)
 
-						# r5 = r5 + dtau*r7/6
-						add(1.0, r5, tau/6, r7)
+					# 	# r5 = r5 + dtau*r7/6
+					# 	add(1.0, r5, tau/6, r7)
 
-						# r1 = r5
-						add(0.0, r1, 1.0, r5)
+					# 	# r1 = r5
+					# 	add(0.0, r1, 1.0, r5)
 
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, r2, r3, r4, r5 =  self._regidx
-					rhs, add = self.system.rhs, self._add
-					t, dt, dtfac = self.t, self.dt, self.dtfac
-
-					
 					
 					xi = [self.system.ele_banks[i][r1].get()
 							for i in range(len(self.system.ele_types))]
