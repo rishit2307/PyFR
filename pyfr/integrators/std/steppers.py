@@ -56,7 +56,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		name = self.cfg.get('solver-time-integrator', 'scheme')
 		stp_class = subclass_where(BaseStdStepper, stepper_name=name)
 		self.dtfac = stp_class.dtfac
-		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.02)
+		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.018)
 		print(f'tau is {self.tau}')
 
 		prec = self.cfg.get('backend', 'precision')

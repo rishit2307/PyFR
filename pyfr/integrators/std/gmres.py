@@ -393,7 +393,7 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
+		# print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
