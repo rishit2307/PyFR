@@ -278,11 +278,12 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels(self.mgproject(l1, r2 ,l2, rl2))
 
 
-		t, dt = self.t, self.dt
+		t, dt = self.pintg.t, self.pintg.dt
 
 		# r4 = R(Un+1, k)
 		rhs = self.pintgs[l2].system.rhs
 		rhs(t+dt, rl2, rl4)
+		self.pintgs[l2].nfeval += 1
 		
 	
 	def mgproject(self, l1, l1reg, l2, l2reg):
@@ -300,7 +301,7 @@ class GMRESmultip(BaseStdIntegrator):
 		rl0, rl1, rl2, rl3, rl4, *rl5 = self.pintgs[l2]._regidx
 		rl5, rl8, rl7= rl5[0], rl5[-1], rl5[-2]
 		add = self.pintgs[l1]._add
-	
+
 		# r5 = A*r1
 		self.pintgs[l1]._eval_mat_vec(r2, r1, r5, r4)
 		# r5 = b - A*r1
@@ -578,9 +579,9 @@ class GMRESmultip(BaseStdIntegrator):
 
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
-				# 	if m is not None:
-				# 		self._init_loworder(l, m)
+				for l, m in it.zip_longest(self.levels, self.levels[1:]):
+					if m is not None:
+						self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
 				# for l in self.levels:
 				# 	self.pintgs[l]._eval_jac()
@@ -588,7 +589,8 @@ class GMRESmultip(BaseStdIntegrator):
 				# self.pintgs[self._order]._eval_jac()
 
 				
-				self.pintg._res()				
+				self.pintg._res()
+	
 				self.solve_gmres(x) 
 
 				# r2 = Un+1,k+1 = Un+1,k + s*dUk
@@ -605,6 +607,9 @@ class GMRESmultip(BaseStdIntegrator):
 			add(0.0, r0, 1.0, r2)
 			if rank == root:
 				print("Step completed")
+			
+			for l in self.levels:
+				print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
 
 			idxcurr = r0
 			self.pintg._accept_step(dt, idxcurr)

@@ -56,8 +56,9 @@ class BaseStdStepper(BaseStdIntegrator):
 		name = self.cfg.get('solver-time-integrator', 'scheme')
 		stp_class = subclass_where(BaseStdStepper, stepper_name=name)
 		self.dtfac = stp_class.dtfac
-		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.016)
+		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
 		print(f'tau is {self.tau}')
+		self.nfeval = 0
 
 		prec = self.cfg.get('backend', 'precision')
 		if prec == 'double':
@@ -444,9 +445,12 @@ class Trapezoidal(BaseStdStepper):
 		# rrhs = rhs(rU + eps*rdU)
 		rhs(t+dt, rrhs, rrhs)
 
+		self.nfeval += 1
+
 		if ev_rru: 
 			# rrU = rhs(t+dt, rU, rrU)
 			rhs(t+dt, rU, rrU)
+			self.nfeval += 1
 		
 		# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
 		add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
