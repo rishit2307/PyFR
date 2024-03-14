@@ -67,6 +67,43 @@ class BaseStdStepper(BaseStdIntegrator):
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
 
+	def _eval_mat_vec(self, rU, rdU, rrhs, rrU, ev_rru=False):
+
+		add, rhs = self._add, self.system.rhs
+		epsmc = self.epsmc
+		comm, rank, root = get_comm_rank_root()
+		t, dt, dtfac = self.t, self.dt, self.dtfac
+		netp = len(self.system.ele_types)
+
+		# Calculate eps
+		xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
+				  for i in range(netp)])
+		xn = comm.allreduce(xn, op=mpi.SUM)
+
+		Un = sum([np.linalg.norm(self.system.ele_scal_upts(rU)[i])**2
+								for i in range(netp)])				
+		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
+
+		eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+
+		
+		# rrhs = rU + eps*rdU
+		add(0.0, rrhs, 1.0, rU, eps, rdU)
+
+		# rrhs = rhs(rU + eps*rdU)
+		rhs(t+dt, rrhs, rrhs)
+
+		self.nfeval += 1
+
+		if ev_rru: 
+			# rrU = rhs(t+dt, rU, rrU)
+			rhs(t+dt, rU, rrU)
+			self.nfeval += 1
+		
+		# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
+		add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
+
+
 	def _init_gmres(self):
 		self.m = 300
 		self.rnorm= dict()
@@ -419,43 +456,6 @@ class Trapezoidal(BaseStdStepper):
 	def _stepper_nfevals(self):
 		return self.nsteps
 	
-	def _eval_mat_vec(self, rU, rdU, rrhs, rrU, ev_rru=False):
-
-		add, rhs = self._add, self.system.rhs
-		epsmc = self.epsmc
-		comm, rank, root = get_comm_rank_root()
-		t, dt, dtfac = self.t, self.dt, self.dtfac
-		netp = len(self.system.ele_types)
-
-		# Calculate eps
-		xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
-				  for i in range(netp)])
-		xn = comm.allreduce(xn, op=mpi.SUM)
-
-		Un = sum([np.linalg.norm(self.system.ele_scal_upts(rU)[i])**2
-								for i in range(netp)])				
-		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
-
-		eps= epsmc*np.sqrt(xn + 1)/(np.sqrt(xn) + epsmc**2)
-
-		
-		# rrhs = rU + eps*rdU
-		add(0.0, rrhs, 1.0, rU, eps, rdU)
-
-		# rrhs = rhs(rU + eps*rdU)
-		rhs(t+dt, rrhs, rrhs)
-
-		self.nfeval += 1
-
-		if ev_rru: 
-			# rrU = rhs(t+dt, rU, rrU)
-			rhs(t+dt, rU, rrU)
-			self.nfeval += 1
-		
-		# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
-		add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
-
-
 	def _res(self):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
