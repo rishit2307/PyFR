@@ -111,59 +111,59 @@ class GMRESmultip(BaseStdIntegrator):
 					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3]
 					add = self._add
 					tau = self.tau
-					for _ in range(nsmooth):
-						# r5 = A*r1
-						self._eval_mat_vec(r2, r1, r5, r4)
-
-						# r5 = b - A*r1
-						add(-1.0, r5, 1.0, r3)
-
-						# r1 = x + tau(b - A*r1)
-						add(1.0, r1, tau, r5)
-
 					# for _ in range(nsmooth):
-					# 	## First stage
 					# 	# r5 = A*r1
 					# 	self._eval_mat_vec(r2, r1, r5, r4)
+
 					# 	# r5 = b - A*r1
 					# 	add(-1.0, r5, 1.0, r3)
+
+					# 	# r1 = x + tau(b - A*r1)
+					# 	add(1.0, r1, tau, r5)
+
+					for _ in range(nsmooth):
+						## First stage
+						# r5 = A*r1
+						self._eval_mat_vec(r2, r1, r5, r4)
+						# r5 = b - A*r1
+						add(-1.0, r5, 1.0, r3)
 						
-					# 	## Second stage
-					# 	# r6 = r5*dtau/2 + r1
-					# 	add(0.0, r6, 1.0, r1, tau/2.0, r5)
-					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4)
-					# 	# r7 = b - A*r6
-					# 	add(-1.0, r7, 1.0, r3)
+						## Second stage
+						# r6 = r5*dtau/2 + r1
+						add(0.0, r6, 1.0, r1, tau/2.0, r5)
+						# r7 = A*r6
+						self._eval_mat_vec(r2, r6, r7, r4)
+						# r7 = b - A*r6
+						add(-1.0, r7, 1.0, r3)
 						
-					# 	## Accumulate
-					# 	# r5 = r1 + dtau/6(r5  + 2*r7)
-					# 	add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
+						## Accumulate
+						# r5 = r1 + dtau/6(r5  + 2*r7)
+						add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
 						
-					# 	## Third Stage
-					# 	# r6 = r7*dtau/2 + r1
-					# 	add(0.0, r6, tau/2, r7, 1.0, r1)
-					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4)
-					# 	# r7 = b - A*r6
-					# 	add(-1.0, r7, 1.0, r3)
+						## Third Stage
+						# r6 = r7*dtau/2 + r1
+						add(0.0, r6, tau/2, r7, 1.0, r1)
+						# r7 = A*r6
+						self._eval_mat_vec(r2, r6, r7, r4)
+						# r7 = b - A*r6
+						add(-1.0, r7, 1.0, r3)
 
-					# 	## Accumulate
-					# 	# r5 = r5 + dtau*r7/3
-					# 	add(1.0, r5, tau/3, r7)
+						## Accumulate
+						# r5 = r5 + dtau*r7/3
+						add(1.0, r5, tau/3, r7)
 
-					# 	# r6 = dtau*r7 + r1
-					# 	add(0.0, r6, tau, r7, 1.0, r1)
-					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4)
-					# 	# r7 = b - A*r7
-					# 	add(-1.0, r7, 1.0, r3)
+						# r6 = dtau*r7 + r1
+						add(0.0, r6, tau, r7, 1.0, r1)
+						# r7 = A*r6
+						self._eval_mat_vec(r2, r6, r7, r4)
+						# r7 = b - A*r7
+						add(-1.0, r7, 1.0, r3)
 
-					# 	# r5 = r5 + dtau*r7/6
-					# 	add(1.0, r5, tau/6, r7)
+						# r5 = r5 + dtau*r7/6
+						add(1.0, r5, tau/6, r7)
 
-					# 	# r1 = r5
-					# 	add(0.0, r1, 1.0, r5)
+						# r1 = r5
+						add(0.0, r1, 1.0, r5)
 
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
@@ -387,7 +387,8 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		# print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
+		if rank == root:
+			print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
@@ -419,7 +420,7 @@ class GMRESmultip(BaseStdIntegrator):
 					pr2 = self.projmats[self._order, l]
 					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					if l == self._order:
+					if l == min(self.levels):
 						self.pintg.jac_mult(n)
 					else:
 						self.pintg.jac_mult(n, f='jacobi')
@@ -484,7 +485,7 @@ class GMRESmultip(BaseStdIntegrator):
 					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 
 					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					if l == self._order:
+					if l == min(self.cycle):
 						self.pintg.jac_mult(n)
 					else:
 						self.pintg.jac_mult(n, f='jacobi')
@@ -591,12 +592,12 @@ class GMRESmultip(BaseStdIntegrator):
 
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				for l, m in it.zip_longest(self.levels, self.levels[1:]):
-					if m is not None:
-						self._init_loworder(l, m)
+				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
+				# 	if m is not None:
+				# 		self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
-				for l in self.levels:
-					self.pintgs[l]._eval_jac()
+				# for l in self.levels:
+				# 	self.pintgs[l]._eval_jac()
 					
 				# self.pintgs[self._order]._eval_jac()
 
@@ -621,7 +622,8 @@ class GMRESmultip(BaseStdIntegrator):
 				print("Step completed")
 			
 			for l in self.levels:
-				print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
+				if rank == root:
+					print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
 
 			idxcurr = r0
 			self.pintg._accept_step(dt, idxcurr)

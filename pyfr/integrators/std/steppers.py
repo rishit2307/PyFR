@@ -12,52 +12,13 @@ class BaseStdStepper(BaseStdIntegrator):
 		# Total number of RHS evaluations
 		stats.set('solver-time-integrator', 'nfevals', self._stepper_nfevals)
 
-	# def _init_loworder(self):
-	#     r0, r1, r2, r3, *r4 = self._regidx
-	#     r5 = r4[1]
-
-	#     for i in range(len(self.system.ele_types)):
-	#         proj = self.system.projmat[i]
-	#         b = self.system.ele_banks[i][0]
-	#         c = self.system.lele_banks[i][0]
-	#         self.backend.run_kernels([self.backend.kernel('mul', proj, b, out=c)])
-
-	# def eval_jac(self, t):
-	#     add, rhs = self._add, self.system.rhs
-	#     nupts = self.system.ele_shapes[0][0]
-	#     jac = defaultdict(list)
-
-	#     for col in self.system.celes.keys():
-	#         for v in range(self.system.nvars):
-	#             for npt in range(nupts):
-	#                 eidx = self.system.celes[col]
-	#                 ur0 = self.system.lele_banks[0][0].get()
-	#                 eps = np.zeros_like(ur0)
-	#                 eps[npt, v, eidx] = 1e-8
-
-	#                 ur = ur0+eps
-	#                 self.system.lele_banks[0][1].set(ur)
-	#                 rhs(t, 0, 0)
-	#                 rhs(t, 1, 1)
-
-	#                 dr1 = self.system.lele_banks[0][0].get()
-	#                 dr0 = self.system.lele_banks[0][1].get()
-
-	#                 dr = (dr1-dr0)/eps
-
-	#                 for e in eidx:
-	#                     jac[e].append(dr[..., e])
-						
-
-	#     for e in range(len(self.system.neles)):
-	#         jac[e] = np.array(jac[e])
 	def _init_step(self, t, dt):
 		self.t, self.dt = t, dt
 		name = self.cfg.get('solver-time-integrator', 'scheme')
 		stp_class = subclass_where(BaseStdStepper, stepper_name=name)
 		self.dtfac = stp_class.dtfac
-		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
-		print(f'tau is {self.tau}')
+		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.016)
+
 		self.nfeval = 0
 
 		prec = self.cfg.get('backend', 'precision')
@@ -108,7 +69,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.m = 300
 		self.rnorm= dict()
 
-		self.ltol = 1e-6
+		self.ltol = 1e-13
 		self.eletype = dict()
 
 		comm, rank, root = get_comm_rank_root()
@@ -488,7 +449,6 @@ class Trapezoidal(BaseStdStepper):
 		self.normele = dict()
 		comm, rank, root = get_comm_rank_root()
 		t, dt = self.t, self.dt
-		print(f't is {t}, dt is {dt}')
 		r0, r1, r2, r3, *r4 = self._regidx
 		r4 = r4[0]
 
