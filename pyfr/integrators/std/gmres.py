@@ -80,10 +80,10 @@ class GMRESmultip(BaseStdIntegrator):
 
 								self.system.ele_banks[i][r5].set(ur)
 
-								rhs(t+dt, r5, r4)
+								rhs(t+dt, r5, r5)
 								self.backend.wait()
 						
-								dr2 = self.system.ele_banks[i][r4].get()
+								dr2 = self.system.ele_banks[i][r5].get()
 
 								dr = (dr1 - dr2)/1e-8
 
