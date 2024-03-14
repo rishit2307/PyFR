@@ -304,16 +304,16 @@ class GMRESmultip(BaseStdIntegrator):
 		add(-1.0, r5, 1.0, r3)
 
 		self.backend.run_kernels(self.mgproject(l1, r5, l2, rl3))
-		self.backend.run_kernels(self.mgproject(l1, r1, l2, rl8))
+		# self.backend.run_kernels(self.mgproject(l1, r1, l2, rl8))
 
-		self.level = l2
-		add = self.pintg._add
+		# self.level = l2
+		# add = self.pintg._add
 
-		# rl7 = A*rl8
-		self.pintg._eval_mat_vec(rl2, rl8, rl7, rl4)
+		# # rl7 = A*rl8
+		# self.pintg._eval_mat_vec(rl2, rl8, rl7, rl4)
 
-		# rl3 = rl3 + rl7
-		add(1.0, rl3, 1.0, rl7)
+		# # rl3 = rl3 + rl7
+		# add(1.0, rl3, 1.0, rl7)
 
 	def prolongate(self, l1, l2):
 		r0, r1, *r2 = self.pintgs[l1]._regidx
@@ -322,14 +322,13 @@ class GMRESmultip(BaseStdIntegrator):
 		rf8 = rf5[-1]
 		add = self.pintgs[l1]._add
 
-		# r8 = e = y^s - y^ns
-		add(-1.0, r8, 1.0, r1)
-		self.backend.run_kernels(self.mgproject(l1, r8, l2, rf8))
+		# # r8 = e = y^s - y^ns
+		# add(-1.0, r8, 1.0, r1)
+		self.backend.run_kernels(self.mgproject(l1, r1, l2, rf8))
 
 		add = self.pintgs[l2]._add
 		# r1 = ys + e
 		add(1.0, rf1, 1.0, rf8)
-
 
 	def solve_gmres(self, x):
 		comm, rank, root = get_comm_rank_root()
