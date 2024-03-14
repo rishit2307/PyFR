@@ -397,13 +397,21 @@ class GMRESmultip(BaseStdIntegrator):
 		niters = self.mpniters
 		if niters:
 			
-			for i in range(netype):
-				for l in self.levels:
-					x0 = [np.zeros_like(self.pintgs[l].system.ele_scal_upts(r2)[i])
+			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
 							for i in range(netype)]
-					self.pintgs[l].system.ele_banks[i][r1].set(x0[i])
+			for i in range(netype):
+						self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
 			
+
 			for _ in range(niters):
+				for l in self.levels[1:]:
+					self.level = l
+					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
+							for i in range(netype)]
+
+					for i in range(netype):
+						self.pintg.system.ele_banks[i][r1].set(x0[i])
+
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 					self.level = l
 
@@ -452,13 +460,21 @@ class GMRESmultip(BaseStdIntegrator):
 		if niters:
 
 			
-			for i in range(netype):
-				for l in self.levels:
-					x0 = [np.zeros_like(self.pintgs[l].system.ele_scal_upts(r2)[i])
+			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
 							for i in range(netype)]
-					self.pintgs[l].system.ele_banks[i][r1].set(x0[i])
+			for i in range(netype):
+						self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
+			
 
 			for _ in range(niters):
+				for l in self.levels[1:]:
+					self.level = l
+					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
+							for i in range(netype)]
+
+					for i in range(netype):
+						self.pintg.system.ele_banks[i][r1].set(x0[i])
+
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 					self.level = l
 
