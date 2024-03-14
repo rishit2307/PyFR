@@ -418,11 +418,11 @@ class GMRESmultip(BaseStdIntegrator):
 					pr1 = self.projmats[l, self._order]
 					pr2 = self.projmats[self._order, l]
 					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					if l == self._order:
-						self.pintg.jac_mult(n)
-					else:
-						self.pintg.jac_mult(n, f='jacobi')
+					self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# if l == self._order:
+					# 	self.pintg.jac_mult(n)
+					# else:
+					# 	self.pintg.jac_mult(n, f='jacobi')
 
 					if m is not None and l > m:
 						self.restrict(l, m)
@@ -483,11 +483,11 @@ class GMRESmultip(BaseStdIntegrator):
 					
 					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 
-					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					if l == self._order:
-						self.pintg.jac_mult(n)
-					else:
-						self.pintg.jac_mult(n, f='jacobi')
+					self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# if l == self._order:
+					# 	self.pintg.jac_mult(n)
+					# else:
+					# 	self.pintg.jac_mult(n, f='jacobi')
 					# print(f'After Jac_mult for l is {l}')
 					# for r in range(6):
 					# 	print(f'isnan {r} is {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
