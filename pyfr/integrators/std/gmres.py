@@ -49,7 +49,7 @@ class GMRESmultip(BaseStdIntegrator):
 					add, rhs = self._add, self.system.rhs
 					comm, rank, root = get_comm_rank_root()
 					r0, r1, r2, r3, *r4 = self._regidx
-					r4, r5 = r4[0], r4[-1]
+					r4, r5 = r4[0], r4[1]
 					t, dt, dtfac = self.t, self.dt, self.dtfac
 
 
@@ -167,7 +167,8 @@ class GMRESmultip(BaseStdIntegrator):
 
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
-					r0, r1, r2, r3, r4, r5 =  self._regidx
+					r0, r1, r2, r3, r4, *r5 =  self._regidx
+					r5 = r5[0]
 					
 					xi = [self.system.ele_banks[i][r1].get()
 							for i in range(len(self.system.ele_types))]
@@ -416,8 +417,8 @@ class GMRESmultip(BaseStdIntegrator):
 
 					pr1 = self.projmats[l, self._order]
 					pr2 = self.projmats[self._order, l]
-					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
 					# if l == self._order:
 					# 	self.pintg.jac_mult(n)
 					# else:
@@ -480,10 +481,10 @@ class GMRESmultip(BaseStdIntegrator):
 					pr1 = self.projmats[l, self._order]
 					pr2 = self.projmats[self._order, l]
 					
-					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 
-					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					# if l == self._orders:
+					self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					# if l == self._order:
 					# 	self.pintg.jac_mult(n)
 					# else:
 					# 	self.pintg.jac_mult(n, f='jacobi')
@@ -594,8 +595,8 @@ class GMRESmultip(BaseStdIntegrator):
 					if m is not None:
 						self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
-				# for l in self.levels:
-				# 	self.pintgs[l]._eval_jac()
+				for l in self.levels:
+					self.pintgs[l]._eval_jac()
 					
 				# self.pintgs[self._order]._eval_jac()
 
