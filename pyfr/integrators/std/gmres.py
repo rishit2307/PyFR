@@ -111,59 +111,59 @@ class GMRESmultip(BaseStdIntegrator):
 					r5, r6, r7, r8 = r5[0], r5[1], r5[2], r5[3]
 					add = self._add
 					tau = self.tau
-					# for _ in range(nsmooth):
-					# 	# r5 = A*r1
-					# 	self._eval_mat_vec(r2, r1, r5, r4)
-
-					# 	# r5 = b - A*r1
-					# 	add(-1.0, r5, 1.0, r3)
-
-					# 	# r1 = x + tau(b - A*r1)
-					# 	add(1.0, r1, tau, r5)
-
 					for _ in range(nsmooth):
-						## First stage
 						# r5 = A*r1
 						self._eval_mat_vec(r2, r1, r5, r4)
+
 						# r5 = b - A*r1
 						add(-1.0, r5, 1.0, r3)
+
+						# r1 = x + tau(b - A*r1)
+						add(1.0, r1, tau, r5)
+
+					# for _ in range(nsmooth):
+					# 	## First stage
+					# 	# r5 = A*r1
+					# 	self._eval_mat_vec(r2, r1, r5, r4)
+					# 	# r5 = b - A*r1
+					# 	add(-1.0, r5, 1.0, r3)
 						
-						## Second stage
-						# r6 = r5*dtau/2 + r1
-						add(0.0, r6, 1.0, r1, tau/2.0, r5)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4)
-						# r7 = b - A*r6
-						add(-1.0, r7, 1.0, r3)
+					# 	## Second stage
+					# 	# r6 = r5*dtau/2 + r1
+					# 	add(0.0, r6, 1.0, r1, tau/2.0, r5)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r6
+					# 	add(-1.0, r7, 1.0, r3)
 						
-						## Accumulate
-						# r5 = r1 + dtau/6(r5  + 2*r7)
-						add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
+					# 	## Accumulate
+					# 	# r5 = r1 + dtau/6(r5  + 2*r7)
+					# 	add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
 						
-						## Third Stage
-						# r6 = r7*dtau/2 + r1
-						add(0.0, r6, tau/2, r7, 1.0, r1)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4)
-						# r7 = b - A*r6
-						add(-1.0, r7, 1.0, r3)
+					# 	## Third Stage
+					# 	# r6 = r7*dtau/2 + r1
+					# 	add(0.0, r6, tau/2, r7, 1.0, r1)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r6
+					# 	add(-1.0, r7, 1.0, r3)
 
-						## Accumulate
-						# r5 = r5 + dtau*r7/3
-						add(1.0, r5, tau/3, r7)
+					# 	## Accumulate
+					# 	# r5 = r5 + dtau*r7/3
+					# 	add(1.0, r5, tau/3, r7)
 
-						# r6 = dtau*r7 + r1
-						add(0.0, r6, tau, r7, 1.0, r1)
-						# r7 = A*r6
-						self._eval_mat_vec(r2, r6, r7, r4)
-						# r7 = b - A*r7
-						add(-1.0, r7, 1.0, r3)
+					# 	# r6 = dtau*r7 + r1
+					# 	add(0.0, r6, tau, r7, 1.0, r1)
+					# 	# r7 = A*r6
+					# 	self._eval_mat_vec(r2, r6, r7, r4)
+					# 	# r7 = b - A*r7
+					# 	add(-1.0, r7, 1.0, r3)
 
-						# r5 = r5 + dtau*r7/6
-						add(1.0, r5, tau/6, r7)
+					# 	# r5 = r5 + dtau*r7/6
+					# 	add(1.0, r5, tau/6, r7)
 
-						# r1 = r5
-						add(0.0, r1, 1.0, r5)
+					# 	# r1 = r5
+					# 	add(0.0, r1, 1.0, r5)
 
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
@@ -294,7 +294,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		return projk
 
-	def restrict(self, l1, l2, t, dt, dtfac=2.0):
+	def restrict(self, l1, l2):
 		r0, r1, r2, r3, r4, *r5 = self.pintgs[l1]._regidx
 		r5 = r5[0]
 		rl0, rl1, rl2, rl3, rl4, *rl5 = self.pintgs[l2]._regidx
@@ -344,8 +344,6 @@ class GMRESmultip(BaseStdIntegrator):
 		add = self.pintg._add
 
 		r0, r1, r2, r3, *r4 = self.pintg._regidx
-		
-		t, dt = self.pintg.t, self.pintg.dt
 
 		# for i, etype in enumerate(self.system.ele_types):
 		#         rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
@@ -389,7 +387,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 		if k == m-1 and err > ltol:
 			if rank == root:
-
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
@@ -423,7 +420,7 @@ class GMRESmultip(BaseStdIntegrator):
 					# 	self.pintg.jac_mult(n, f='jacobi')
 
 					if m is not None and l > m:
-						self.restrict(l, m, t, dt, dtfac=2.0)
+						self.restrict(l, m)
 					elif m is not None and l < m:
 						self.prolongate(l, m)
 
@@ -431,19 +428,16 @@ class GMRESmultip(BaseStdIntegrator):
 
 		# import pdb;pdb.set_trace()
 		for i in range(len(self.system.ele_types)):
-
 			x[i] += self.system.ele_banks[i][r3].get()
 			self.system.ele_banks[i][r3].set(x[i])
 
 	def arnoldi(self, Q, k):
 		self.level = self._order
-		add, rhs_with_postproc = self.pintg._add, self.system.rhs
-
-		t, dt, dtfac= self.pintg.t, self.pintg.dt, self.pintg.dtfac
+		add = self.pintg._add
 
 		h = np.zeros(k+2)
 		netype = len(self.system.ele_types)
-		eletype = self.pintg.eletype
+
 		cycle, csteps = self.cycle, self.csteps
 		
 
@@ -486,7 +480,7 @@ class GMRESmultip(BaseStdIntegrator):
 					# 	print(f'isnan {r} is {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
 
 					if m is not None and l > m:
-						self.restrict(l, m, t, dt, dtfac=2.0)
+						self.restrict(l, m)
 						# print(f'After restrict for l is {l}, m is {m}')
 						# for r in range(6):
 						# 	print(f'isnan {r} is , l is {l}, {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
@@ -501,6 +495,7 @@ class GMRESmultip(BaseStdIntegrator):
 						
 
 			add(0.0, r3, 1.0, r1)
+
 		self.pintg._eval_mat_vec(r2, r3, r1, r4)
 
 		q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
