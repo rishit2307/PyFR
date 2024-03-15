@@ -41,6 +41,7 @@ class GMRESmultip(BaseStdIntegrator):
 			else:
 				mcfg = Inifile(cfg.tostr())
 				mcfg.set('solver', 'order', l)
+				mcfg.set('solver-time-integrator', 'gmresniter', 0)
 			
 			class lpsint(*bases):
 				name = 'GMRES-multip'
@@ -347,9 +348,13 @@ class GMRESmultip(BaseStdIntegrator):
 			
 		# for etype in eletype:
 		#         rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
-		rnorm = sum([np.linalg.norm(self.system.ele_banks[i][r1].get())**2
-							  for i in range(len(self.system.ele_types))])
-		rnorm = np.sqrt(comm.allreduce(rnorm, op=mpi.SUM))
+
+		kern = self._get_reduction_kerns(r1, method='gmresnorm', norm='l2')
+		self.backend.run_kernels(kern, wait=True)
+		rnorm = np.array([sum(v for k in kern for v in k.retval)])
+
+		comm.Allreduce(mpi.IN_PLACE, rnorm, op=mpi.SUM)
+		rnorm = np.sqrt(float(rnorm))
 
 		Q = [[] for i in range(len(self.system.ele_types))]
 			
@@ -458,22 +463,12 @@ class GMRESmultip(BaseStdIntegrator):
 		niters = self.mpniters
 
 		if niters:
-
 			
-			x0 = [np.zeros_like(self.pintgs[self._order].system.ele_scal_upts(r2)[i])
-							for i in range(netype)]
-			for i in range(netype):
-						self.pintgs[self._order].system.ele_banks[i][r1].set(x0[i])
-			
-
+			self.pintgs[self._order]._add(0.0, r1, 0.0, r1)
 			for _ in range(niters):
 				for l in self.levels[1:]:
 					self.level = l
-					x0 = [np.zeros_like(self.pintg.system.ele_scal_upts(r2)[i])
-							for i in range(netype)]
-
-					for i in range(netype):
-						self.pintg.system.ele_banks[i][r1].set(x0[i])
+					self.pintg._add(0.0, r1, 0.0, r1)
 
 				for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 					self.level = l

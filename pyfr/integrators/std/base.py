@@ -11,9 +11,10 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
         # Sanity checks
         if self.controller_needs_errest and not self.stepper_has_errest:
             raise TypeError('Incompatible stepper/controller combination')
-
+        
+        self.gmresniter = self.cfg.getint('solver-time-integrator', 'gmresniter')
         # Determine the amount of temp storage required by this method
-        self.nregs = self.stepper_nregs
+        self.nregs = self.stepper_nregs + self.gmresniter
 
         # Construct the relevant system
         self.system = systemcls(backend, rallocs, mesh, initsoln,
@@ -35,6 +36,14 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
 
         # Global degree of freedom count
         self._gndofs = self._get_gndofs()
+
+    def _du_regidx(self, k):
+        return self.nregs[k]
+    
+    @property
+    def _u_ru_regidx(self):
+        return self.nregs[self.gmresniter + ]
+        
 
     @property
     def soln(self):

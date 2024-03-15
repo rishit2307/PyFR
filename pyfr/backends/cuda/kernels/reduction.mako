@@ -20,7 +20,7 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
 
     __shared__ fpdtype_t sdata[32];
     fpdtype_t r, acc = 0;
-
+    printf("%ixdtype_t", nrow)
     if (i < ncolb)
     {
         for (ixdtype_t j = 0; j < nrow; j++)
