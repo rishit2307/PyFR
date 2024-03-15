@@ -4,13 +4,15 @@
 __global__ void
 reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
           fpdtype_t *__restrict__ reduced,
-          fpdtype_t *__restrict__ rcurr, fpdtype_t *__restrict__ rold,
+          fpdtype_t *__restrict__ rcurr 
 % if method == 'errest':
-          fpdtype_t *__restrict__ rerr, fpdtype_t atol, fpdtype_t rtol)
+          , fpdtype_t *__restrict__ rold, fpdtype_t *__restrict__ rerr, fpdtype_t atol, fpdtype_t rtol)
 % elif method == 'resid' and dt_type == 'matrix':
-          fpdtype_t *__restrict__ dt_mat, fpdtype_t dt_fac)
+          , fpdtype_t *__restrict__ rold, fpdtype_t *__restrict__ dt_mat, fpdtype_t dt_fac)
 % elif method == 'resid':
-          fpdtype_t dt_fac)
+          , fpdtype_t *__restrict__ rold, fpdtype_t dt_fac)
+% elif method == 'gmresnorm':
+          )
 % endif
 {
     int tid = threadIdx.x;
@@ -28,6 +30,8 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
             r = rerr[idx]/(atol + rtol*max(fabs(rcurr[idx]), fabs(rold[idx])));
         % elif method == 'resid':
             r = (rcurr[idx] - rold[idx])/(dt_fac${'*dt_mat[idx]' if dt_type == 'matrix' else ''});
+        % elif method == 'gmresnorm':
+            r = rcurr[idx];
         % endif
 
         % if norm == 'uniform':

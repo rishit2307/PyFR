@@ -77,7 +77,6 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         reduced_host = cuda.pagelocked_empty((ncola, grid[0]), fpdtype)
 
         tplargs = dict(norm=norm, method=method)
-
         if method == 'resid':
             tplargs['dt_type'] = 'matrix' if dt_mat else 'scalar'
 
@@ -91,6 +90,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
             argt = [ixdtype]*3 + [np.uintp]*4 + [fpdtype]*2
         elif method == 'resid' and dt_mat:
             argt = [ixdtype]*3 + [np.uintp]*4 + [fpdtype]
+        elif method == 'gmresnorm':
+            argt = [ixdtype]*3 + [np.uintp]*2
         else:
             argt = [ixdtype]*3 + [np.uintp]*3 + [fpdtype]
 
@@ -102,7 +103,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         params.set_args(nrow, ncolb, ldim, reduced_dev, *regs)
 
         # Runtime argument offset
-        facoff = argt.index(fpdtype)
+        if fpdtype in argt:
+            facoff = argt.index(fpdtype)
 
         # Norm type
         reducer = np.max if norm == 'uniform' else np.sum

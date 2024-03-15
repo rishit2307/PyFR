@@ -347,7 +347,6 @@ class GMRESmultip(BaseStdIntegrator):
 			
 		# for etype in eletype:
 		#         rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
-
 		rnorm = sum([np.linalg.norm(self.system.ele_banks[i][r1].get())**2
 							  for i in range(len(self.system.ele_types))])
 		rnorm = np.sqrt(comm.allreduce(rnorm, op=mpi.SUM))
@@ -387,8 +386,8 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		if rank == root:
-			print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
+		# if rank == root:
+		# 	print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
@@ -418,12 +417,12 @@ class GMRESmultip(BaseStdIntegrator):
 
 					pr1 = self.projmats[l, self._order]
 					pr2 = self.projmats[self._order, l]
-					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					if l == min(self.levels):
-						self.pintg.jac_mult(n)
-					else:
-						self.pintg.jac_mult(n, f='jacobi')
+					# if l == min(self.levels):
+					# 	self.pintg.jac_mult(n)
+					# else:
+					# 	self.pintg.jac_mult(n, f='jacobi')
 
 					if m is not None and l > m:
 						self.restrict(l, m)
@@ -482,13 +481,13 @@ class GMRESmultip(BaseStdIntegrator):
 					pr1 = self.projmats[l, self._order]
 					pr2 = self.projmats[self._order, l]
 					
-					# self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
+					self.pintg.jac_mult(n, hclass=self.pintgs[self._order], p=pr1, r=pr2)
 
 					# self.pintg.jac_mult(n, f='jacobi', hclass=self.pintgs[self._order], p=pr1, r=pr2)
-					if l == min(self.cycle):
-						self.pintg.jac_mult(n)
-					else:
-						self.pintg.jac_mult(n, f='jacobi')
+					# if l == min(self.cycle):
+					# 	self.pintg.jac_mult(n)
+					# else:
+					# 	self.pintg.jac_mult(n, f='jacobi')
 					# print(f'After Jac_mult for l is {l}')
 					# for r in range(6):
 					# 	print(f'isnan {r} is {np.isnan(self.pintgs[l].system.ele_scal_upts(r)[0]).any()}')
@@ -592,9 +591,9 @@ class GMRESmultip(BaseStdIntegrator):
 
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
-				# 	if m is not None:
-				# 		self._init_loworder(l, m)
+				for l, m in it.zip_longest(self.levels, self.levels[1:]):
+					if m is not None:
+						self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
 				# for l in self.levels:
 				# 	self.pintgs[l]._eval_jac()
