@@ -556,6 +556,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		while self.tcurr < t:
 			self.level = self._order
+
 			# Decide on the time step
 			dt = max(min(t - self.pintg.tcurr, self.pintg._dt), self.pintg.dtmin)
 			
@@ -572,29 +573,26 @@ class GMRESmultip(BaseStdIntegrator):
 
 			while nnorm > ntol:
 
-
 				for l in self.levels:
 					self.level = l
 					self.pintg._init_step(self.tcurr, dt)
 				
 				self.level = self._order
-				self.pintg._init_gmres()
 
-				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
+				self.pintg._res()
+				self.pintg._init_gmres()
+	
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				for l, m in it.zip_longest(self.levels, self.levels[1:]):
-					if m is not None:
-						self._init_loworder(l, m)
+				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
+				# 	if m is not None:
+				# 		self._init_loworder(l, m)
 				# # Eval the coarsest grid jacobians
 				# for l in self.levels:
 				# 	self.pintgs[l]._eval_jac()
 					
 				# self.pintgs[self._order]._eval_jac()
 
-				
-				self.pintg._res()
-	
 				self.solve_gmres() 
 
 				# rU = Un+1,k+1 = Un+1,k + s*dUk
@@ -602,6 +600,7 @@ class GMRESmultip(BaseStdIntegrator):
 				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx
 				rdU = self.pintgs[self._order]._du_regidx
 				add(1.0, rUp, s, rdU)
+				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 
 				nnorm = self.pintg.newton_res()
 

@@ -31,8 +31,6 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-		self.k = 0
-
 	def _eval_mat_vec(self, ev_rru=False):
 
 		add, rhs = self._add, self.system.rhs
@@ -43,7 +41,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		rrhs = self._mvec_regidx
 		rU, rrU = self._up_rup_regidx
-		rdU = self._du_regidx
+		rdU = self._duold_regidx if ev_rru else self._du_regidx
 
 		# Calculate eps
 		xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
@@ -90,7 +88,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		self.sn = np.zeros(self.m)
 		self.cs = np.zeros(self.m)
-		
+		self.k = 0
 		self.y = [[] for _ in range(len(self.system.ele_types))]
 	
 	def solve_gmres(self, t, dt, x, dtfac=1.0, lclass=None):
@@ -199,7 +197,6 @@ class BaseStdStepper(BaseStdIntegrator):
 		
 		eps =  self.epsmc*np.sqrt(Un + 1)/np.sqrt(Qn)
 
-		import pdb;pdb.set_trace()
 		if lclass:
 			self.jac_mult(lclass, t, dt, r3, dtfac)
 
@@ -426,7 +423,7 @@ class Trapezoidal(BaseStdStepper):
 		
 		ru, rru = self._u_ru_regidx
 		rup, rrup = self._up_rup_regidx
-		rdu = self._du_regidx
+		rdu = self._gmres_j_regidx(0)
 		rmv = self._mvec_regidx
 
 		# rru = R(Un)
@@ -456,7 +453,7 @@ class Trapezoidal(BaseStdStepper):
 		rv = self._mvec_regidx
 		add(0.0, rv, -1/2, rrU, 1/dt, rUp, -1/dt, rU)
 
-		add(-1/2, rv, 1/dt, rUp, -1/dt, rU)
+		# add(-1/2, rv, 1/dt, rUp, -1/dt, rU)
 
 		rhs_with_postproc(t+dt, rUp, rrUp)
 		add(1.0, rv, -1/2, rrUp)
