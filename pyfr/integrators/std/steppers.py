@@ -31,14 +31,19 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
+		self.k = 0
 
-	def _eval_mat_vec(self, rU, rdU, rrhs, rrU, ev_rru=False):
+	def _eval_mat_vec(self, ev_rru=False):
 
 		add, rhs = self._add, self.system.rhs
 		epsmc = self.epsmc
 		comm, rank, root = get_comm_rank_root()
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 		netp = len(self.system.ele_types)
+
+		rrhs = self._mvec_regidx
+		rU, rrU = self._up_rup_regidx
+		rdU = self._du_regidx
 
 		# Calculate eps
 		xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
@@ -51,7 +56,6 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 
-		
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
 
@@ -70,7 +74,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
 
 	def _init_gmres(self):
-		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter', 100)
+		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
 		self.rnorm= dict()
 
 		self.ltol = 1e-6
@@ -80,18 +84,10 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		self.eletype = set(comm.allreduce(self.system.ele_types, op=mpi.SUM))
 		self.eletype = comm.bcast(self.eletype, root=root)
-		
-		# for etype in self.eletype:
-		#     self.rnorm[etype] = 0.0
-		#     self.l2u[etype] = 0.0
-		#     self.err[etype] = 0.0
 
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
-		# for i in range(len(self.system.ele_types)):
-		#     self.e1[i][0] =  1.0
-			
 		self.sn = np.zeros(self.m)
 		self.cs = np.zeros(self.m)
 		
@@ -413,7 +409,7 @@ class Euler(BaseStdStepper):
 class Trapezoidal(BaseStdStepper):
 	stepper_name = 'trapezium'
 	stepper_has_errest = False
-	stepper_nregs = 9
+	stepper_nregs = 2
 	stepper_order = 1
 	dtfac = 2.0
 
@@ -425,27 +421,25 @@ class Trapezoidal(BaseStdStepper):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
 		add, rhs_with_postproc = self._add, self.system.rhs
-		r0, r1, r2, r3, *r4 = self._regidx
-		r4 = r4[0]
-		# for i, etype in enumerate(self.system.ele_types):
-		#     l2u[etype] = (np.linalg.norm(self.soln[i]))**2
- 
-		# for etype in eletype:
-		#     l2u[etype] = np.sqrt(comm.allreduce(l2u[etype],
-		#                   op=mpi.SUM))
-		self._eval_mat_vec(r2, r3, r1, r4, ev_rru=True)
 
-		# r3 = R(Un)
-		rhs_with_postproc(t, r0, r3)
+		self._eval_mat_vec(ev_rru=True)
+		
+		ru, rru = self._u_ru_regidx
+		rup, rrup = self._up_rup_regidx
+		rdu = self._du_regidx
+		rmv = self._mvec_regidx
 
-		# r3 = R(Un)/2 + R(Un+1,k)/2 
-		add(dtfac/2., r3, dtfac/2., r4)
+		# rru = R(Un)
+		rhs_with_postproc(t, ru, rru)
 
-		# r3 = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
-		add(1.0, r3, -dtfac/dt, r2, dtfac/dt, r0)
+		# rdu0 = R(Un)/2 + R(Un+1,k)/2 
+		add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
 
-		# r1 = b - Ax
-		add(-1.0, r1, 1.0, r3)
+		# rdu0 = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
+		add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
+
+		# rdu0 = b - Ax
+		add(1.0, rdu, -1.0, rmv)
 
 
 	def newton_res(self, tp=0):
@@ -453,23 +447,24 @@ class Trapezoidal(BaseStdStepper):
 		self.normele = dict()
 		comm, rank, root = get_comm_rank_root()
 		t, dt = self.t, self.dt
-		r0, r1, r2, r3, *r4 = self._regidx
-		r4 = r4[0]
 
-		# for etp in self.eletype:
-		#     self.normele[etp] = 0
+		rU, rrU = self._u_ru_regidx
+		rUp, rrUp = self._up_rup_regidx
 
-		# if tp == 1.0:
-		#     rhs_with_postproc(t-dt, r0, r1)
-		# else:
-		#     rhs_with_postproc(t, r0, r1)
-
+		rhs_with_postproc(t, rU, rrU)
 		
+		rv = self._mvec_regidx
+		add(0.0, rv, -1/2, rrU, 1/dt, rUp, -1/dt, rU)
+
+		add(-1/2, rv, 1/dt, rUp, -1/dt, rU)
+
+		rhs_with_postproc(t+dt, rUp, rrUp)
+		add(1.0, rv, -1/2, rrUp)
 		# r1 = R(Un)
-		rhs_with_postproc(t, r0, r1)
+		# rhs_with_postproc(t, r0, r1)
 
 		# r1 = R(Un)/2 + Du/Dt
-		add(-1/2, r1, 1/dt, r2, -1/dt, r0)
+		# add(-1/2, r1, 1/dt, r2, -1/dt, r0)
 		
 		# if tp == 1.0:
 		# # r4 = R(Un+1)
@@ -479,12 +474,12 @@ class Trapezoidal(BaseStdStepper):
 		#     rhs_with_postproc(t, r2, r4)
 
 		# r4 = R(Un+1)
-		rhs_with_postproc(t+dt, r2, r4)
+		# rhs_with_postproc(t+dt, r2, r4)
 
 		# r1 = R(Un)/2 + Du/dt + R(Un+1)/2
-		add(1.0, r1, -1/2, r4)
+		# add(1.0, r1, -1/2, r4)
 
-		self.normele = sum([np.linalg.norm(self.system.ele_banks[i][r1]
+		self.normele = sum([np.linalg.norm(self.system.ele_banks[i][rv]
 							.get())**2 for i in range(len(self.system.ele_types))])
 		
 		self.normele = np.sqrt(comm.allreduce(self.normele, op=mpi.SUM))

@@ -41,10 +41,15 @@ class GMRESmultip(BaseStdIntegrator):
 			else:
 				mcfg = Inifile(cfg.tostr())
 				mcfg.set('solver', 'order', l)
-				mcfg.set('solver-time-integrator', 'gmresniter', 0)
+				mcfg.set('solver-time-integrator', 'gmres-iter', 0)
 			
 			class lpsint(*bases):
 				name = 'GMRES-multip'
+				eval_nreg, pseudo_nregs = 4, 3
+				eval_src = 0 if l == self._order else 1
+				uru_nreg = 2 if l == self._order else 0
+				duold_nreg = 1 if l == self._order else 0
+
 
 				def _eval_jac(self):
 					add, rhs = self._add, self.system.rhs
@@ -214,7 +219,7 @@ class GMRESmultip(BaseStdIntegrator):
 					else:
 						self.richardson(nsmooth)
 			
-				
+
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
 									mesh, initsoln, mcfg)
 		
@@ -332,7 +337,7 @@ class GMRESmultip(BaseStdIntegrator):
 		# r1 = ys + e
 		add(1.0, rf1, 1.0, rf8)
 
-	def solve_gmres(self, x):
+	def solve_gmres(self):
 		comm, rank, root = get_comm_rank_root()
 		self.level = self._order
 		y = self.pintg.y
@@ -341,36 +346,27 @@ class GMRESmultip(BaseStdIntegrator):
 		rnorm, m = self.pintg.rnorm, self.pintg.m
 		add = self.pintg._add
 
-		r0, r1, r2, r3, *r4 = self.pintg._regidx
+		r0 = self.pintg._du_regidx
 
-		# for i, etype in enumerate(self.system.ele_types):
-		#         rnorm[etype] = (np.linalg.norm(self.system.ele_banks[i][r1].get()))**2
-			
-		# for etype in eletype:
-		#         rnorm[etype] = np.sqrt(comm.allreduce(rnorm[etype], op=mpi.SUM))
-
-		kern = self._get_reduction_kerns(r1, method='gmresnorm', norm='l2')
+		kern = self._get_reduction_kerns(r0, method='gmresnorm', norm='l2')
 		self.backend.run_kernels(kern, wait=True)
 		rnorm = np.array([sum(v for k in kern for v in k.retval)])
 
 		comm.Allreduce(mpi.IN_PLACE, rnorm, op=mpi.SUM)
 		rnorm = np.sqrt(float(rnorm))
 
-		Q = [[] for i in range(len(self.system.ele_types))]
-			
-		for i, etype in enumerate(self.system.ele_types):
-			nupts, nvars, neles = self.system.ele_shapes[i]
-			Q[i] = np.zeros((nupts, nvars, neles, m+1))
-			Q[i][..., 0] = self.system.ele_banks[i][r1].get() / rnorm
+		add(0.0, r0, 1/rnorm, r0)
 
 		H = np.zeros((m+1, m))
 		beta = rnorm*self.pintg.e1
 
 		for k in range(m):
-			H[:k+2, k], q = self.arnoldi(Q, k)
+			self.pintg.k = k
+			H[:k+2, k], q = self.arnoldi(k)
+			rkp1 = self.pintg._gmres_j_regidx(k+1)
 
 			for i in range(len(self.system.ele_types)):
-				Q[i][..., k+1] = q[i]
+				self.system.ele_banks[i][rkp1].set(q[i])
 
 			H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
 													cs, sn ,k)
@@ -396,8 +392,21 @@ class GMRESmultip(BaseStdIntegrator):
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
+		rdu = self.pintg._du_regidx
+		
+		Q = [[] for i in range(len(self.system.ele_types))]
+			
+		for i, etype in enumerate(self.system.ele_types):
+			nupts, nvars, neles = self.system.ele_shapes[i]
+			Q[i] = np.zeros((nupts, nvars, neles, m+1))
+		
+		for j in range(m):
+			for i in range(len(self.system.ele_types)):
+				rj = self.pintg._gmres_j_regidx(j)
+				Q[i][..., j] = self.system.ele_scal_upts(rj)[i]
+
 		for i in range(len(self.system.ele_types)):
-			self.system.ele_banks[i][r3].set(Q[i][..., :k+1] @ y)
+			self.system.ele_banks[i][rdu].set(Q[i][..., :k+1] @ y)
 
 		niters = self.mpniters
 		if niters:
@@ -437,11 +446,9 @@ class GMRESmultip(BaseStdIntegrator):
 			add(0.0, r3, 1.0, r1)
 
 		# import pdb;pdb.set_trace()
-		for i in range(len(self.system.ele_types)):
-			x[i] += self.system.ele_banks[i][r3].get()
-			self.system.ele_banks[i][r3].set(x[i])
+		add(1.0, rdu, 1.0, self.pintg._duold_regidx)
 
-	def arnoldi(self, Q, k):
+	def arnoldi(self, k):
 		self.level = self._order
 		add = self.pintg._add
 
@@ -449,17 +456,7 @@ class GMRESmultip(BaseStdIntegrator):
 		netype = len(self.system.ele_types)
 
 		cycle, csteps = self.cycle, self.csteps
-		
-
-
-		r0, r1, r2, r3, *r4 = self.pintg._regidx
-		r4 = r4[0]
-
 		comm, rank, root = get_comm_rank_root()
-
-		for i in range(netype):
-			self.system.ele_banks[i][r3].set(Q[i][..., k])
-		
 		niters = self.mpniters
 
 		if niters:
@@ -504,27 +501,27 @@ class GMRESmultip(BaseStdIntegrator):
 
 			add(0.0, r3, 1.0, r1)
 
-		self.pintg._eval_mat_vec(r2, r3, r1, r4)
 
-		q = [self.system.ele_banks[i][r1].get() for i in range(netype)]
+		self.pintg._eval_mat_vec()
+		q = [self.system.ele_banks[i][self.pintg._mvec_regidx].get() for i in range(netype)]
 
 		for j in range(k+1):
-			h[j] = sum([np.dot(q[i].reshape(-1), Q[i][..., j].reshape(-1))
+			rj = self.pintg._gmres_j_regidx(j)
+			Q = self.system.ele_scal_upts(rj)
+
+			h[j] = sum([np.dot(q[i].reshape(-1), Q[i].reshape(-1))
 						for i in range(len(self.system.ele_types))])
+
 			h[j] = comm.allreduce(h[j], op=mpi.SUM)
 
 			for i in range(netype):
-				q[i] -= h[j] * Q[i][..., j]
+				q[i] -= h[j] * Q[i]
 			
 
 		qnorm = sum([np.linalg.norm(q[i])**2 for i in range(netype)])
 		qnorm = np.sqrt(comm.allreduce(qnorm, op=mpi.SUM))
 		h[k+1] = qnorm
-		# for i, etype in enumerate(self.system.ele_types):
-		#     qnorm[etype] = (np.linalg.norm(q[i]))**2
-		
-		# for etype in eletype:
-		#     qnorm[etype] = np.sqrt(comm.allreduce(qnorm[etype], mpi.SUM))
+
 
 		for i in range(netype):
 			q[i] /= h[k+1]
@@ -582,8 +579,8 @@ class GMRESmultip(BaseStdIntegrator):
 				
 				self.level = self._order
 				self.pintg._init_gmres()
-				x = copy.deepcopy(self.system.ele_scal_upts(r3))
 
+				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 				# Init the low order systems
 				# nl = len(self.levels) - 1
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
@@ -598,10 +595,13 @@ class GMRESmultip(BaseStdIntegrator):
 				
 				self.pintg._res()
 	
-				self.solve_gmres(x) 
+				self.solve_gmres() 
 
-				# r2 = Un+1,k+1 = Un+1,k + s*dUk
-				add(1.0, r2, s, r3)
+				# rU = Un+1,k+1 = Un+1,k + s*dUk
+
+				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx
+				rdU = self.pintgs[self._order]._du_regidx
+				add(1.0, rUp, s, rdU)
 
 				nnorm = self.pintg.newton_res()
 
@@ -610,8 +610,9 @@ class GMRESmultip(BaseStdIntegrator):
 					print(nnorm)
 					print(nonlin_iter)
 			
+			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2
-			add(0.0, r0, 1.0, r2)
+			add(0.0, rU, 1.0, rUp)
 			if rank == root:
 				print("Step completed")
 			

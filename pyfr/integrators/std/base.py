@@ -12,9 +12,10 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
         if self.controller_needs_errest and not self.stepper_has_errest:
             raise TypeError('Incompatible stepper/controller combination')
         
-        self.gmresniter = self.cfg.getint('solver-time-integrator', 'gmresniter')
+        self.gmresniter =  self.cfg.getint('solver-time-integrator', 'gmres-iter')
         # Determine the amount of temp storage required by this method
-        self.nregs = self.stepper_nregs + self.gmresniter
+        self.nregs = (self.gmresniter + self.stepper_nregs + self.eval_nreg
+                      + self.eval_src + self.uru_nreg + self.duold_nreg)
 
         # Construct the relevant system
         self.system = systemcls(backend, rallocs, mesh, initsoln,
@@ -37,13 +38,40 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
         # Global degree of freedom count
         self._gndofs = self._get_gndofs()
 
-    def _du_regidx(self, k):
-        return self.nregs[k]
+    @property
+    def _du_regidx(self):
+        return self.k
+    
+    @property
+    def _mvec_regidx(self):
+        return self.gmresniter + self.stepper_nregs + self.uru_nreg + self.duold_nreg + self.pseudo_nregs
+    
+    @property
+    def _up_rup_regidx(self):
+        st = self.gmresniter + self.uru_nreg
+        ed = st + self.stepper_nregs
+        return range(st, ed)
     
     @property
     def _u_ru_regidx(self):
-        return self.nregs[self.gmresniter + ]
-        
+        return range(self.gmresniter, self.gmresniter+self.uru_nreg)
+    
+    @property
+    def _duold_regidx(self):
+        ngmres = self.gmresniter
+        return ngmres+self.uru_nreg+self.stepper_nregs
+    
+    @property
+    def _pseudo_regidx(self):
+        st = self.gmresniter+self.stepper_nregs+self.uprup_nreg+self.duold_nreg
+        return range(st, st+self.pseudo_nregs)
+    
+    @property
+    def _src_regidx(self):
+        return self.nregs
+
+    def _gmres_j_regidx(self, j):
+        return j
 
     @property
     def soln(self):
