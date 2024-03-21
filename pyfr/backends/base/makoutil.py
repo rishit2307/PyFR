@@ -24,11 +24,11 @@ def npdtype_to_ctype(context, dtype):
 def dot(context, a_, b_=None, /, **kwargs):
     ix, nd = next(iter(kwargs.items()))
     ab = '({})*({})'.format(a_, b_ or a_)
-    import pdb;pdb.set_trace()
+
     # Allow for flexible range arguments
     nd = nd if isinstance(nd, Iterable) else [nd]
     tp = '(' + ' + '.join(ab.format(**{ix: i}) for i in range(*nd)) + ')'
-    print(tp)
+
     return  tp
 
 

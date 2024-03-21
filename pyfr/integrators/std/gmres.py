@@ -508,7 +508,7 @@ class GMRESmultip(BaseStdIntegrator):
 		for j in range(k+1):
 			rj = self.pintg._gmres_j_regidx(j)
 			Q = self.system.ele_scal_upts(rj)
-
+			
 			h[j] = sum([np.dot(q[i].reshape(-1), Q[i].reshape(-1))
 						for i in range(len(self.system.ele_types))])
 
@@ -527,7 +527,7 @@ class GMRESmultip(BaseStdIntegrator):
 			q[i] /= h[k+1]
 
 		return h, q
-	
+
 	def giv_rot(self, h, cs, sn, k):
 		for i in range(k):
 			temp = cs[i] * h[i] + sn[i] * h[i+1]
