@@ -213,6 +213,7 @@ class BaseCommon:
 
     @memoize
     def _get_axnpby_kerns(self, *rs, subdims=None):
+
         kerns = [self.backend.kernel('axnpby', *[em[r] for r in rs],
                                      subdims=subdims)
                  for em in self.system.ele_banks]
