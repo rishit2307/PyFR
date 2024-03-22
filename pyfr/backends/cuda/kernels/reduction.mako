@@ -13,6 +13,8 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
           , fpdtype_t *__restrict__ rold, fpdtype_t dt_fac)
 % elif method == 'gmresnorm':
           )
+% elif method == 'gmresdot':
+           , fpdtype_t *__restrict__ rold)
 % endif
 {
     int tid = threadIdx.x;
@@ -32,10 +34,14 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
             r = (rcurr[idx] - rold[idx])/(dt_fac${'*dt_mat[idx]' if dt_type == 'matrix' else ''});
         % elif method == 'gmresnorm':
             r = rcurr[idx];
+        % elif method == 'gmresdot':
+            r = rcurr[idx]*rold[idx];
         % endif
 
         % if norm == 'uniform':
             acc = max(r*r, acc);
+        % elif method == 'gmresdot':
+            acc += r;
         % else:
             acc += r*r;
         % endif

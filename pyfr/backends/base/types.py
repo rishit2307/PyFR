@@ -64,12 +64,10 @@ class MatrixBase:
             self._initval = np.asanyarray(initval, dtype=self.dtype)
         else:
             self._initval = None
-
         # Alias or allocate ourself
         if aliases:
             if extent is not None:
                 raise ValueError('Aliased matrices can not have an extent')
-
             backend.alias(self, aliases)
         else:
             backend.malloc(self, extent)
@@ -212,6 +210,7 @@ class XchgMatrix(Matrix):
 class View:
     def __init__(self, backend, matmap, rmap, cmap, rstridemap, vshape, tags):
         self.n = len(matmap)
+
         self.nvrow = vshape[-2] if len(vshape) == 2 else 1
         self.nvcol = vshape[-1] if len(vshape) >= 1 else 1
         self.rstrides = None
@@ -253,11 +252,11 @@ class View:
             offset[ix], leaddim[ix] = m.offset // m.itemsize, m.leaddim
             blkdisp[ix] = (cmap[ix]*self.nvcol // m.leaddim)*m.blocksz
 
-        # Row/column displacements
+        # Row/column displacements 
         rowdisp = rmap*leaddim
         cmapmod = cmap % csubsz if backend.blocks else cmap
         coldisp = (cmapmod // k)*k*self.nvcol + cmapmod % k
-
+        
         mapping = (offset + blkdisp + rowdisp + coldisp)[None, :]
         self.mapping = backend.const_matrix(mapping, dtype=ixdtype, tags=tags)
 

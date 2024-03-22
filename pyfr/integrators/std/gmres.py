@@ -358,18 +358,17 @@ class GMRESmultip(BaseStdIntegrator):
 		add(0.0, r0, 1/rnorm, r0)
 
 		H = np.zeros((m+1, m))
-		self.Hb = [self.backend.matrix(H.T.shape, H.T, tags={'align'})
-			 	   for _ in range(len(self.system.ele_types))]
+		# self.Hb = [self.backend.matrix(H.T.shape, H.T, tags={'align'})
+		# 	 	   for _ in range(len(self.system.ele_types))]
 
 		beta = rnorm*self.pintg.e1
 
 		for k in range(m):
 			self.pintg.k = k
-			H[:k+2, k], q = self.arnoldi(k)
-			rkp1 = self.pintg._gmres_j_regidx(k+1)
+			H[:k+2, k] = self.arnoldi(k)
 
-			for i in range(len(self.system.ele_types)):
-				self.system.ele_banks[i][rkp1].set(q[i])
+			# for i in range(len(self.system.ele_types)):
+			# 	self.system.ele_banks[i][rkp1].set(q[i])
 
 			H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
 													cs, sn ,k)
@@ -506,45 +505,42 @@ class GMRESmultip(BaseStdIntegrator):
 
 
 		self.pintg._eval_mat_vec()
-		q = [self.system.ele_banks[i][self.pintg._mvec_regidx].get() for i in range(netype)]
-
+		# q = [self.system.ele_banks[i][self.pintg._mvec_regidx].get() for i in range(netype)]
+		mv = self.pintg._mvec_regidx
 		for j in range(k+1):
 			rj = self.pintg._gmres_j_regidx(j)
 			Q = self.system.ele_scal_upts(rj)
-			mv = self.pintg._mvec_regidx
-			# kern = []
+
+			kern = self._get_reduction_kerns(rj, mv, method='gmresdot', norm='l2')
+			self.backend.run_kernels(kern, wait=True)
+			htp = np.array([sum(v for k in kern for v in k.retval)])
+
+			comm.Allreduce(mpi.IN_PLACE, htp, op=mpi.SUM)
+			h[j] = htp
+
+			# h[j] = sum([np.dot(q[i].reshape(-1), Q[i].reshape(-1))
+			# 			for i in range(len(self.system.ele_types))])
+
+			# h[j] = comm.allreduce(h[j], op=mpi.SUM)
+			add(-1.0, mv, htp, rj)
+
 			# for i in range(netype):
-			# 	idx = self.get_index(j, k, i)
-			# 	kern.append(self.backend.kernel('dot', self.system.ele_banks[i][mv]
-			# 						 , self.system.ele_banks[i][rj], idx))
-			
-			# self.backend.run_kernels(kern)
-			# hb0 = np.array(self.Hb[0].get()[k, j])
-			# for i in range(1, netype):
-			# 	hbi =  np.array(self.Hb[i].get()[k, j])
-			# 	hb0 += hbi
-			
-			# comm.Allreduce(mpi.IN_PLACE, hb0, op=mpi.SUM)
+			# 	q[i] -= h[j] * Q[i]
+		
+		kern = self._get_reduction_kerns(mv, method='gmresnorm', norm='l2')
+		self.backend.run_kernels(kern, wait=True)
+		qnorm = np.array([sum(v for k in kern for v in k.retval)])
 
-			h[j] = sum([np.dot(q[i].reshape(-1), Q[i].reshape(-1))
-						for i in range(len(self.system.ele_types))])
+		comm.Allreduce(mpi.IN_PLACE, qnorm, op=mpi.SUM)
+		qnorm = np.sqrt(float(qnorm))
 
-			h[j] = comm.allreduce(h[j], op=mpi.SUM)
-			# add(-1.0, mv, hb0, rj)
-
-			for i in range(netype):
-				q[i] -= h[j] * Q[i]
-			
-
-		qnorm = sum([np.linalg.norm(q[i])**2 for i in range(netype)])
-		qnorm = np.sqrt(comm.allreduce(qnorm, op=mpi.SUM))
 		h[k+1] = qnorm
+		rkp1 = self.pintg._gmres_j_regidx(k+1)
+		add(0.0, rkp1, 1.0/qnorm, mv)
+		# for i in range(netype):
+		# 	q[i] /= h[k+1]
 
-
-		for i in range(netype):
-			q[i] /= h[k+1]
-
-		return h, q
+		return h
 
 	def giv_rot(self, h, cs, sn, k):
 		for i in range(k):

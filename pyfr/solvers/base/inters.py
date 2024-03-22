@@ -63,11 +63,11 @@ class BaseInters:
         vm = _get_inter_objs(inter, meth, self.elemap)
         vm = [np.concatenate(m) for m in zip(*vm)]
         mm = self._be.view(*vm, vshape=()).mapping.get()
-
         return np.argsort(mm[0])
 
     def _view(self, inter, meth, vshape=(), with_perm=True):
         vm = _get_inter_objs(inter, meth, self.elemap)
+        
         perm = self._perm if with_perm else Ellipsis
         vm = [np.concatenate(m)[perm] for m in zip(*vm)]
         return self._be.view(*vm, vshape=vshape)
