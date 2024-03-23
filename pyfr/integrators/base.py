@@ -230,7 +230,7 @@ class BaseCommon:
                                              dt_mat=dtaum, **kwargs))
 
         return kerns
-
+ 
     def _addv(self, consts, regidxs, subdims=None):
         # Get a suitable set of axnpby kernels
         axnpby = self._get_axnpby_kerns(*regidxs, subdims=subdims)
