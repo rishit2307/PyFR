@@ -406,8 +406,8 @@ class GMRESmultip(BaseStdIntegrator):
 			err = abs(beta[k+1]) / rnorm
 
 			if err < ltol:
-				# if rank == root:
-				# 	print(f'GMRES converged in {k} iterations, error is {err}')
+				if rank == root:
+					print(f'GMRES converged in {k} iterations, error is {err}')
 					
 				break
 			ed = time.time()
