@@ -224,7 +224,7 @@ class GMRESmultip(BaseStdIntegrator):
 									mesh, initsoln, mcfg)
 		
 		self.system = self.pintgs[order].system	
-		self.dotkern, self.rdev, self.rh = self._get_dot_kerns()
+		self.rdev, self.rh = self._get_rdevrh()
 		self._init_projmats()
 	
 	def plugins(self):
@@ -272,19 +272,18 @@ class GMRESmultip(BaseStdIntegrator):
 
 
 		
-	def _get_dot_kerns(self):
+	def _get_rdevrh(self):
 		dtk = defaultdict(list)
 		self.level = self._order
 		netype = len(self.system.ele_types)
-		rdev = self.backend.cuda.mem_alloc(np.dtype(float).itemsize)
-		for i in range(self.pintg.nregs):
-			for j in range(i, self.pintg.nregs):
-				for k in range(len(self.system.ele_types)):
-					dtk[i, j, k] = dtk[j, i, k] = [self.backend.kernel('dot', self.system.ele_banks[k][j], 
-												  self.system.ele_banks[k][i], out=rdev._as_parameter_)]
+		memalloc = self.backend.cuda.mem_alloc
+		halloc = self.backend.cuda.pagelocked_empty
+		rdev, rh = [], []
+		for n in range(self.pintg.gmresniter):
+			rdev.append(memalloc(np.dtype(float).itemsize))
+			rh.append(halloc((netype, 1), np.float64))
 		
-		rh = self.backend.cuda.pagelocked_empty((1,1) ,np.float64)
-		return dtk, rdev, rh
+		return rdev, rh
 
 
 	def _init_loworder(self, l1, l2):
@@ -370,7 +369,7 @@ class GMRESmultip(BaseStdIntegrator):
 		# for i in range(self.pintg.nregs):
 		# 	for j in range(self.pintg.nregs):
 		# 		self.dotkern[i, j].append(self._get_dot_kerns(i,j, out=self.rdev))
-		st = time.time()
+		# st = time.time()
 		kern = self._get_reduction_kerns(r0, method='gmresnorm', norm='l2')
 		self.backend.run_kernels(kern, wait=True)
 		rnorm = np.array([sum(v for k in kern for v in k.retval)])
@@ -386,17 +385,17 @@ class GMRESmultip(BaseStdIntegrator):
 		# 	 	   for _ in range(len(self.system.ele_types))]
 
 		beta = rnorm*self.pintg.e1	
-		ed = time.time()
-		self.init_time, self.givrot_time, self.dottime, self.allreduce_time, self.normtime, self.arnoldi_mvectime = 0, 0, 0, 0, 0, 0
-		self.init_time+=ed- st
-		print(f'init time is {self.init_time}')
+		# ed = time.time()
+		# self.init_time, self.givrot_time, self.dottime, self.allreduce_time, self.normtime, self.arnoldi_mvectime = 0, 0, 0, 0, 0, 0
+		# self.init_time+=ed- st
+		# print(f'init time is {self.init_time}')
 		for k in range(m):
 			self.pintg.k = k
 			H[:k+2, k] = self.arnoldi(k)
 
 			# for i in range(len(self.system.ele_types)):
 			# 	self.system.ele_banks[i][rkp1].set(q[i])
-			st = time.time()
+			# st = time.time()
 			H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
 													cs, sn ,k)
 
@@ -410,8 +409,8 @@ class GMRESmultip(BaseStdIntegrator):
 					print(f'GMRES converged in {k} iterations, error is {err}')
 					
 				break
-			ed = time.time()
-			self.givrot_time+= ed - st
+			# ed = time.time()
+			# self.givrot_time+= ed - st
 
 
 		if k == m-1 and err > ltol:
@@ -419,20 +418,20 @@ class GMRESmultip(BaseStdIntegrator):
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		
-		print(f'allreduce time is {self.allreduce_time}')
-		print(f'dottime is {self.dottime}')
-		print(f'normtime is {self.normtime}')
-		print(f'mvectime is {self.arnoldi_mvectime}')
-		print(f'givrottime is {self.givrot_time}')
+		# print(f'allreduce time is {self.allreduce_time}')
+		# print(f'dottime is {self.dottime}')
+		# print(f'normtime is {self.normtime}')
+		# print(f'mvectime is {self.arnoldi_mvectime}')
+		# print(f'givrottime is {self.givrot_time}')
 		self.solvelinalg_time = 0
-		st  = time.time()
+		# st  = time.time()
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		ed = time.time()
-		self.solvelinalg_time+=ed-st
-		print(f'solvetime is {self.solvelinalg_time}')
+		# ed = time.time()
+		# self.solvelinalg_time+=ed-st
+		# print(f'solvetime is {self.solvelinalg_time}')
 		# if rank == root:
 		# 	print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
-		st = time.time()
+		# st = time.time()
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
@@ -453,8 +452,8 @@ class GMRESmultip(BaseStdIntegrator):
 		for i in range(len(self.system.ele_types)):
 			self.system.ele_banks[i][rdu].set(Q[i][..., :k+1] @ y)
 		
-		ed = time.time()
-		print(f'final is {ed -st}')
+		# ed = time.time()
+		# print(f'final is {ed -st}')
 
 		niters = self.mpniters
 		if niters:
@@ -500,71 +499,54 @@ class GMRESmultip(BaseStdIntegrator):
 		self.level = self._order
 		add = self.pintg._add
 
-		h = np.zeros(k+2)
 		netype = len(self.system.ele_types)
 
 		cycle, csteps = self.cycle, self.csteps
 		comm, rank, root = get_comm_rank_root()
 		niters = self.mpniters
 
-		st = time.time()
+		# st = time.time()
 		self.pintg._eval_mat_vec()
-		ed = time.time()
-		self.arnoldi_mvectime += ed - st
+		# ed = time.time()
+		# self.arnoldi_mvectime += ed - st
 		mv = self.pintg._mvec_regidx
 
+		rji = self.pintg._gmres_j_regidx
+		
+		# st= time.time()
+		kerns = [self._get_dot_kerns(rji(j), mv) for j in range(k+1)]
+		for kern in kerns:
+			self.backend.run_kernels(kern)
+
+		self.backend.wait()
+		# ed = time.time()
+
+		# self.dottime+= ed - st
+
+		h = np.array([v.retval for kern in kerns for v in kern])
+		
+		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
+		if rank == root:
+			print(f'h is {h}')
+		# import pdb;pdb.set_trace()
+		# self._addv([1.0] + list(-h), [mv] + [rji(j) for j in range(k+1)])
 		for j in range(k+1):
-			rj = self.pintg._gmres_j_regidx(j)
-			
-			# kern = self._get_reduction_kerns(rj, mv, method='gmresdot', norm='l2')
-			# self.backend.run_kernels(kern, wait=True)
-			# htp = np.array([sum(v for k in kern for v in k.retval)])
-			htp= 0
+			add(1.0, mv, -h[j], rji(j))
 
-			
-			for etp in range(netype):
-				st = time.time()
-				self.backend.run_kernels(self.dotkern[rj, mv, etp], wait=True)
-				self.backend.cuda.memcpy(self.rh, self.rdev, self.rdev.nbytes)
-				ed = time.time()
-				self.dottime += ed - st
-				htp += self.rh
-			
-
-			
-			# import pdb;pdb.set_trace()
-			st = time.time()
-			htp = np.array(htp)
-			comm.Allreduce(mpi.IN_PLACE, htp, op=mpi.SUM)
-			h[j] = htp
-			ed = time.time()
-			self.allreduce_time += ed-st
-
-			# h[j] = sum([np.dot(q[i].reshape(-1), Q[i].reshape(-1))
-			# 			for i in range(len(self.system.ele_types))])
-
-			# h[j] = comm.allreduce(h[j], op=mpi.SUM)
-			
-			add(1.0, mv, -h[j], rj)
-
-			# for i in range(netype):
-			# 	q[i] -= h[j] * Q[i]
-		st = time.time()
+		# st = time.time()
 		kern = self._get_reduction_kerns(mv, method='gmresnorm', norm='l2')
 		self.backend.run_kernels(kern, wait=True)
 		qnorm = np.array([sum(v for k in kern for v in k.retval)])
 
 		comm.Allreduce(mpi.IN_PLACE, qnorm, op=mpi.SUM)
 		qnorm = np.sqrt(float(qnorm))
-		ed= time.time()
-		self.normtime += ed -  st
+		# ed= time.time()
+		# self.normtime += ed -  st
 		
 
-		h[k+1] = qnorm
+		h = np.append(h, qnorm)
 		rkp1 = self.pintg._gmres_j_regidx(k+1)
 		add(0.0, rkp1, 1.0/qnorm, mv)
-		# for i in range(netype):
-		# 	q[i] /= h[k+1]
 
 		return h
 
@@ -635,11 +617,11 @@ class GMRESmultip(BaseStdIntegrator):
 				# 	self.pintgs[l]._eval_jac()
 					
 				# self.pintgs[self._order]._eval_jac()
-				st = time.time()
+				# st = time.time()
 				self.solve_gmres() 
-				ed = time.time()
+				# ed = time.time()
 
-				print(f'gmres time is {ed - st}')
+				# print(f'gmres time is {ed - st}')
 				# rU = Un+1,k+1 = Un+1,k + s*dUk
 
 				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx
@@ -650,9 +632,9 @@ class GMRESmultip(BaseStdIntegrator):
 				nnorm = self.pintg.newton_res()
 
 				nonlin_iter += 1
-				# if rank == root:
-				# 	print(nnorm)
-				# 	print(nonlin_iter)
+				if rank == root:
+					print(nnorm)
+					print(nonlin_iter)
 			
 			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2

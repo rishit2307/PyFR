@@ -219,6 +219,13 @@ class BaseCommon:
                  for em in self.system.ele_banks]
 
         return kerns
+    
+    @memoize
+    def _get_dot_kerns(self, *rs):
+
+         kerns = [self.backend.kernel('dot', *[em[r] for r in rs]) 
+                  for em in self.system.ele_banks]
+         return kerns
 
     @memoize
     def _get_reduction_kerns(self, *rs, **kwargs):

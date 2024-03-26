@@ -83,24 +83,34 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         w, h = self.lib, self.handle
         cublasadd = w.cublasDaxpy_v2
 
-    def dot(self, a, b, out=None):
+    def dot(self, a, b):
+        cuda = self.backend.cuda
+        fpdtype = a.traits[-1]
         w, h = self.lib, self.handle
         cublasdot = w.cublasDdot
         n = a.nrow*a.ncol
-        x, y, z = a, b, out
+        x, y = a, b
         w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
+        rdev = cuda.mem_alloc(np.dtype(float).itemsize)
+
+        rhost = cuda.pagelocked_empty((), fpdtype)
 
         # ckey = (n)
 
         def ddd(stream):
             w.cublasSetStream(h, stream)
-            cublasdot(h, n, x, 1, y, 1, z)
+            cublasdot(h, n, x, 1, y, 1, rdev._as_parameter_)
 
         class DotKernel(CUDAKernel):
             def run(self, stream):
-                return ddd(stream)
+                ddd(stream)
+                cuda.memcpy(rhost, rdev, rdev.nbytes, stream)
+
+            @property
+            def retval(self):
+                return rhost
         
-        return DotKernel(mats=[a, b, out])
+        return DotKernel(mats=[a, b])
 
     def mul(self, a, b, out, alpha=1.0, beta=0.0, gmres=False):
         cuda = self.backend.cuda

@@ -20,8 +20,8 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
 		
 		comm, rank, root = get_comm_rank_root()
-		if rank == root:
-			print(f'tau is {self.tau}')
+		# if rank == root:
+		# 	print(f'tau is {self.tau}')
 
 		self.nfeval = 0
 
