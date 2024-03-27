@@ -31,17 +31,14 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-	def _eval_mat_vec(self, ev_rru=False):
+	def _eval_mat_vec(self, rdU, ev_rru=False):
 
 		add, rhs = self._add, self.system.rhs
 		epsmc = self.epsmc
-		comm, rank, root = get_comm_rank_root()
 		t, dt, dtfac = self.t, self.dt, self.dtfac
-		netp = len(self.system.ele_types)
 
 		rrhs = self._mvec_regidx
 		rU, rrU = self._up_rup_regidx
-		rdU = self._duold_regidx if ev_rru else self._du_regidx
 
 		# Calculate eps
 		# xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
@@ -427,7 +424,7 @@ class Trapezoidal(BaseStdStepper):
 
 		add, rhs_with_postproc = self._add, self.system.rhs
 
-		self._eval_mat_vec(ev_rru=True)
+		self._eval_mat_vec(self._duold_regidx, ev_rru=True)
 		
 		ru, rru = self._u_ru_regidx
 		rup, rrup = self._up_rup_regidx

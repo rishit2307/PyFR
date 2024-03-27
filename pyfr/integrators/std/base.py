@@ -71,7 +71,7 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
     
     @property
     def _src_regidx(self):
-        return self.nregs
+        return self.nregs - 1
 
     def _gmres_j_regidx(self, j):
         return j

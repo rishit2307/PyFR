@@ -45,11 +45,9 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			class lpsint(*bases):
 				name = 'GMRES-multip'
-				eval_nreg, pseudo_nregs = 4, 3
+				pseudo_nregs, duold_nreg = 3, 1
 				eval_src = 0 if l == self._order else 1
 				uru_nreg = 2 if l == self._order else 0
-				duold_nreg = 1 if l == self._order else 0
-
 
 				def _eval_jac(self):
 					add, rhs = self._add, self.system.rhs
@@ -270,18 +268,19 @@ class GMRESmultip(BaseStdIntegrator):
 					self.projmats[l, self._order].append(cmat(b2.proj_to(b1)))
 
 	def _init_loworder(self, l1, l2):
-		rl0, rl1, rl2, rl3, *rl4 = self.pintgs[l2]._regidx
-		rl4 = rl4[0]
-		
-		r0, r1, r2, r3, *r4 = self.pintgs[l1]._regidx
-		self.backend.run_kernels(self.mgproject(l1, r2 ,l2, rl2))
 
+		r1up, rr1up = self.pintgs[l1]._up_rup_regidx
+		r2up, rr2up = self.pintgs[l2]._up_rup_regidx
 
+		self.backend.run_kernels(
+		self.mgproject(l1, r1up ,l2, r2up)
+		)
 		t, dt = self.pintg.t, self.pintg.dt
 
-		# r4 = R(Un+1, k)
+		# rr2up = R(Un+1, k)
 		rhs = self.pintgs[l2].system.rhs
-		rhs(t+dt, rl2, rl4)
+		rhs(t+dt, r2up, rr2up)
+
 		self.pintgs[l2].nfeval += 1
 		
 	
@@ -416,30 +415,14 @@ class GMRESmultip(BaseStdIntegrator):
 		# 	print(f'y shape is {list(y)}')
 			# print(f'solvetime is {self.solvelinalg_time}')
 
-		# if rank == root:
-		# 	print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
 		st = time.time()
 		netype = len(self.system.ele_types)
 		cycle, csteps = self.cycle, self.csteps
 
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
-		
-		# Q = [[] for i in range(len(self.system.ele_types))]
 
 		self._addv([0.0] + list(y), [rdu]+[rj(j) for j in range(k+1)])
-			
-		# for i, etype in enumerate(self.system.ele_types):
-		# 	nupts, nvars, neles = self.system.ele_shapes[i]
-		# 	Q[i] = np.zeros((nupts, nvars, neles, m+1))
-		
-		# for j in range(m):
-		# 	for i in range(len(self.system.ele_types)):
-		# 		rj = self.pintg._gmres_j_regidx(j)
-		# 		Q[i][..., j] = self.system.ele_scal_upts(rj)[i]
 
-		# for i in range(len(self.system.ele_types)):
-		# 	self.system.ele_banks[i][rdu].set(Q[i][..., :k+1] @ y)
-		
 		ed = time.time()
 		# if rank == root:
 		# 	print(f'final time is {ed -st}')
@@ -495,7 +478,7 @@ class GMRESmultip(BaseStdIntegrator):
 		niters = self.mpniters
 
 		st = time.time()
-		self.pintg._eval_mat_vec()
+		self.pintg._eval_mat_vec(self._du_regidx)
 		ed = time.time()
 		self.arnoldi_mvectime += ed - st
 		mv = self.pintg._mvec_regidx
@@ -602,14 +585,10 @@ class GMRESmultip(BaseStdIntegrator):
 	
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
-				# 	if m is not None:
-				# 		self._init_loworder(l, m)
-				# # Eval the coarsest grid jacobians
-				# for l in self.levels:
-				# 	self.pintgs[l]._eval_jac()
+				for l, m in it.zip_longest(self.levels, self.levels[1:]):
+					if m is not None:
+						self._init_loworder(l, m)
 					
-				# self.pintgs[self._order]._eval_jac()
 				st = time.time()
 				self.solve_gmres() 
 				ed = time.time()
