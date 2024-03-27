@@ -53,7 +53,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		# Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
 
 		# eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-		eps = 1e-8
+		eps = epsmc*np.sqrt(self.Un)
 
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
@@ -91,7 +91,14 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.cs = np.zeros(self.m)
 		self.k = 0
 		self.y = [[] for _ in range(len(self.system.ele_types))]
-	
+		ru, rru = self._u_ru_regidx
+		kern = self._get_reduction_kerns(ru, method='gmresnorm', norm='l2')
+		self.backend.run_kernels(kern, wait=True)
+
+		Un = np.array([sum(v for k in kern for v in k.retval)])
+		comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
+		self.Un = np.sqrt(float(Un))
+
 	def solve_gmres(self, t, dt, x, dtfac=1.0, lclass=None):
 		comm, rank, root = get_comm_rank_root()
 		y = self.y

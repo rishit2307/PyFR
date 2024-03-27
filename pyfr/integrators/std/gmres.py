@@ -592,8 +592,12 @@ class GMRESmultip(BaseStdIntegrator):
 				
 				self.level = self._order
 
-				self.pintg._res()
+				st = time.time()
 				self.pintg._init_gmres()
+				ed = time.time()
+				print(f'init_gmres time is {ed - st}')
+
+				self.pintg._res()
 	
 				# Init the low order systems
 				# nl = len(self.levels) - 1
