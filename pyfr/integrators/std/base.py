@@ -12,10 +12,13 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
         if self.controller_needs_errest and not self.stepper_has_errest:
             raise TypeError('Incompatible stepper/controller combination')
         
-        self.gmresniter =  self.cfg.getint('solver-time-integrator', 'gmres-iter') + 1
+        if cfg.get('solver-time-integrator', 'multip', 'false') == 'true':
+            self.gmresniter =  self.cfg.getint('solver-time-integrator', 'gmres-iter') + 1
         # Determine the amount of temp storage required by this method
-        self.nregs = (self.gmresniter + self.stepper_nregs + self.eval_nreg
+            self.nregs = (self.gmresniter + self.stepper_nregs + self.eval_nreg
                       + self.eval_src + self.uru_nreg + self.duold_nreg)
+        else:
+            self.nregs = self.stepper_nregs
 
         # Construct the relevant system
         self.system = systemcls(backend, rallocs, mesh, initsoln,

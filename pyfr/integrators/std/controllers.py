@@ -1,4 +1,5 @@
 import math
+import time
 
 import numpy as np
 
@@ -18,6 +19,7 @@ class BaseStdController(BaseStdIntegrator):
 
 		# Stats on the most recent step
 		self.stepinfo = []
+		self.sttime = 0
 
 		# Fire off any event handlers if not restarting
 		if not self.isrestart:
@@ -61,17 +63,24 @@ class StdNoneController(BaseStdController):
 	def controller_needs_errest(self):
 		return False
 
-	def advance_to(self, t, lvl=None):
+	def advance_to(self, t):
 		if t < self.tcurr:
 			raise ValueError('Advance time is in the past')
 		
+		comm, rank, root = get_comm_rank_root()
 		
 		while self.tcurr < t:
 			# Decide on the time step
 			dt = max(min(t - self.tcurr, self._dt), self.dtmin)
-			
+			st = time.time()
 			# Take the step
-			idxcurr = self.step(self.tcurr, dt, lclass=lvl)
+			idxcurr = self.step(self.tcurr, dt)
+			ed = time.time()
+			self.sttime += (ed-st)
+			if rank == root and self.tcurr//self._dt == 10.0:
+				print(f'current time is {self.tcurr}')
+				print(f'step time is {self.sttime}')
+				self.sttime = 0
 
 			# We are not adaptive, so accept every step
 			self._accept_step(dt, idxcurr)

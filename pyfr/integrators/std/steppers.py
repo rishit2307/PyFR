@@ -44,15 +44,16 @@ class BaseStdStepper(BaseStdIntegrator):
 		rdU = self._duold_regidx if ev_rru else self._du_regidx
 
 		# Calculate eps
-		xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
-				  for i in range(netp)])
-		xn = comm.allreduce(xn, op=mpi.SUM)
+		# xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
+		# 		  for i in range(netp)])
+		# xn = comm.allreduce(xn, op=mpi.SUM)
 
-		Un = sum([np.linalg.norm(self.system.ele_scal_upts(rU)[i])**2
-								for i in range(netp)])				
-		Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
+		# Un = sum([np.linalg.norm(self.system.ele_scal_upts(rU)[i])**2
+		# 						for i in range(netp)])				
+		# Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
 
-		eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+		# eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
+		eps = 1e-8
 
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
@@ -75,7 +76,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
 		self.rnorm= dict()
 
-		self.ltol = 1e-6
+		self.ltol = 1e-16
 		self.eletype = dict()
 
 		comm, rank, root = get_comm_rank_root()
@@ -428,6 +429,7 @@ class Trapezoidal(BaseStdStepper):
 
 		# rru = R(Un)
 		rhs_with_postproc(t, ru, rru)
+		self.nfeval += 1
 
 		# rdu0 = R(Un)/2 + R(Un+1,k)/2 
 		add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
@@ -449,7 +451,7 @@ class Trapezoidal(BaseStdStepper):
 		rUp, rrUp = self._up_rup_regidx
 
 		rhs_with_postproc(t, rU, rrU)
-		
+
 		rv = self._mvec_regidx
 		add(0.0, rv, -1/2, rrU, 1/dt, rUp, -1/dt, rU)
 
@@ -457,6 +459,8 @@ class Trapezoidal(BaseStdStepper):
 
 		rhs_with_postproc(t+dt, rUp, rrUp)
 		add(1.0, rv, -1/2, rrUp)
+
+		self.nfeval+=2
 		# r1 = R(Un)
 		# rhs_with_postproc(t, r0, r1)
 
