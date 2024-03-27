@@ -371,8 +371,8 @@ class GMRESmultip(BaseStdIntegrator):
 		ed = time.time()
 		self.init_time, self.givrot_time, self.dottime, self.allreduce_time, self.normtime, self.arnoldi_mvectime = 0, 0, 0, 0, 0, 0
 		self.init_time+=ed- st
-		if rank == root:
-			print(f'init time is {self.init_time}')
+		# if rank == root:
+		# 	print(f'init time is {self.init_time}')
 		for k in range(m):
 			self.pintg.k = k
 			H[:k+2, k] = self.arnoldi(k)
@@ -401,20 +401,20 @@ class GMRESmultip(BaseStdIntegrator):
 			if rank == root:
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
-		if rank == root:
-			print(f'allreduce time is {self.allreduce_time}')
-			print(f'dottime is {self.dottime}')
-			print(f'normtime is {self.normtime}')
-			print(f'mvectime is {self.arnoldi_mvectime}')
-			print(f'givrottime is {self.givrot_time}')
+		# if rank == root:
+		# 	print(f'allreduce time is {self.allreduce_time}')
+		# 	print(f'dottime is {self.dottime}')
+		# 	print(f'normtime is {self.normtime}')
+		# 	print(f'mvectime is {self.arnoldi_mvectime}')
+		# 	print(f'givrottime is {self.givrot_time}')
 		self.solvelinalg_time = 0
 		st  = time.time()
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 		ed = time.time()
 		self.solvelinalg_time+=ed-st
-		if rank == root:
+		# if rank == root:
 		# 	print(f'y shape is {list(y)}')
-			print(f'solvetime is {self.solvelinalg_time}')
+			# print(f'solvetime is {self.solvelinalg_time}')
 
 		# if rank == root:
 		# 	print(f'eigvals are {np.amax(np.abs(np.linalg.eigvals(H[:m, :m])))}')
@@ -425,8 +425,8 @@ class GMRESmultip(BaseStdIntegrator):
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
 		
 		# Q = [[] for i in range(len(self.system.ele_types))]
-		
-		self._addv([0.0] + list(y), [rdu]+[rj(j) for j in range(k+2)])
+
+		self._addv([0.0] + list(y), [rdu]+[rj(j) for j in range(k+1)])
 			
 		# for i, etype in enumerate(self.system.ele_types):
 		# 	nupts, nvars, neles = self.system.ele_shapes[i]
@@ -441,8 +441,8 @@ class GMRESmultip(BaseStdIntegrator):
 		# 	self.system.ele_banks[i][rdu].set(Q[i][..., :k+1] @ y)
 		
 		ed = time.time()
-		if rank == root:
-			print(f'final time is {ed -st}')
+		# if rank == root:
+		# 	print(f'final time is {ed -st}')
 
 		niters = self.mpniters
 		if niters:
@@ -489,7 +489,7 @@ class GMRESmultip(BaseStdIntegrator):
 		add = self.pintg._add
 
 		netype = len(self.system.ele_types)
-
+		h = np.zeros(k+1)
 		cycle, csteps = self.cycle, self.csteps
 		comm, rank, root = get_comm_rank_root()
 		niters = self.mpniters
@@ -512,13 +512,14 @@ class GMRESmultip(BaseStdIntegrator):
 		self.dottime+= ed - st
 		st = time.time()
 
-		h = np.array([v.retval for kern in kerns for v in kern])
+		for i, kern in enumerate(kerns):
+			h[i] = sum([v.retval for v in kern])
+
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 
 		ed = time.time()
 		self.allreduce_time += ed - st
 
-		# import pdb;pdb.set_trace()
 		self._addv([1.0] + list(-h), [mv] + [rji(j) for j in range(k+1)])
 		# for j in range(k+1):
 		# 	add(1.0, mv, -h[j], rji(j))
@@ -583,7 +584,7 @@ class GMRESmultip(BaseStdIntegrator):
 			comm, rank, root = get_comm_rank_root()
 
 			nonlin_iter = 0
-			# st= time.time()
+			st= time.time()
 			while nnorm > ntol:
 
 				for l in self.levels:
@@ -595,7 +596,7 @@ class GMRESmultip(BaseStdIntegrator):
 				st = time.time()
 				self.pintg._init_gmres()
 				ed = time.time()
-				print(f'init_gmres time is {ed - st}')
+				# print(f'init_gmres time is {ed - st}')
 
 				self.pintg._res()
 	
@@ -612,8 +613,8 @@ class GMRESmultip(BaseStdIntegrator):
 				st = time.time()
 				self.solve_gmres() 
 				ed = time.time()
-				if rank == root:
-					print(f'gmres time is {ed - st}')
+				# if rank == root:
+				# 	print(f'gmres time is {ed - st}')
 				# rU = Un+1,k+1 = Un+1,k + s*dUk
 
 				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx
@@ -638,12 +639,12 @@ class GMRESmultip(BaseStdIntegrator):
 			# for l in self.levels:
 				# if rank == root:
 				# 	print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
-			if rank == root:
-				print(f'nfevals are {self.pintg.nfeval}')
+			# if rank == root:
+			# 	print(f'nfevals are {self.pintg.nfeval}')
 			idxcurr = rU
 			self.pintg._accept_step(dt, idxcurr)
 		
 
-			# ed = time.time()
+			ed = time.time()
 			# if rank == root:
 			# 	print(f'total time is {ed - st}')	

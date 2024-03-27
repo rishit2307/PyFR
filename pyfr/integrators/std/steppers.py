@@ -457,7 +457,7 @@ class Trapezoidal(BaseStdStepper):
 		rU, rrU = self._u_ru_regidx
 		rUp, rrUp = self._up_rup_regidx
 
-		rhs_with_postproc(t, rU, rrU)
+		# rhs_with_postproc(t, rU, rrU)
 
 		rv = self._mvec_regidx
 		add(0.0, rv, -1/2, rrU, 1/dt, rUp, -1/dt, rU)
@@ -467,7 +467,7 @@ class Trapezoidal(BaseStdStepper):
 		rhs_with_postproc(t+dt, rUp, rrUp)
 		add(1.0, rv, -1/2, rrUp)
 
-		self.nfeval+=2
+		self.nfeval+=1
 		# r1 = R(Un)
 		# rhs_with_postproc(t, r0, r1)
 

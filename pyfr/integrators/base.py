@@ -222,7 +222,6 @@ class BaseCommon:
     
     @memoize
     def _get_dot_kerns(self, *rs):
-
          kerns = [self.backend.kernel('dot', *[em[r] for r in rs]) 
                   for em in self.system.ele_banks]
          return kerns
@@ -250,3 +249,6 @@ class BaseCommon:
 
     def _add(self, *args, subdims=None):
         self._addv(args[::2], args[1::2], subdims=subdims)
+
+
+
