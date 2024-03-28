@@ -45,9 +45,11 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			class lpsint(*bases):
 				name = 'GMRES-multip'
-				pseudo_nregs, duold_nreg = 3, 1
+				eval_nreg, pseudo_nregs = 4, 3
 				eval_src = 0 if l == self._order else 1
 				uru_nreg = 2 if l == self._order else 0
+				duold_nreg = 1 if l == self._order else 0
+
 
 				def _eval_jac(self):
 					add, rhs = self._add, self.system.rhs
