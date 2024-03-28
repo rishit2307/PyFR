@@ -31,13 +31,12 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-	def _eval_mat_vec(self, rdU, ev_rru=False):
+	def _eval_mat_vec(self, rdU, rrhs, ev_rru=False):
 
 		add, rhs = self._add, self.system.rhs
 		epsmc = self.epsmc
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
-		rrhs = self._mvec_regidx
 		rU, rrU = self._up_rup_regidx
 
 		# Calculate eps
