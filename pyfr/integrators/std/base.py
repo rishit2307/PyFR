@@ -13,10 +13,10 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
             raise TypeError('Incompatible stepper/controller combination')
         
         if cfg.get('solver-time-integrator', 'multip', 'false') == 'true':
-            self.gmresniter =  self.cfg.getint('solver-time-integrator', 'gmres-iter') + 1
+            self.gmresniter =  self.cfg.getint('solver-time-integrator', 'gmres-iter')
         # Determine the amount of temp storage required by this method
             self.nregs = (self.gmresniter + self.stepper_nregs + self.eval_nreg
-                      + self.eval_src + self.uru_nreg + self.duold_nreg)
+                      + self.eval_src + self.uru_nreg + self.duold_nreg + self.aux_gmres)
 
         else:
             self.nregs = self.stepper_nregs
@@ -48,31 +48,32 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
     
     @property
     def _mvec_regidx(self):
-        return self.gmresniter + self.stepper_nregs + self.uru_nreg + self.duold_nreg + self.pseudo_nregs
+        return self.gmresniter + self.aux_gmres + self.stepper_nregs + self.uru_nreg + self.duold_nreg + self.pseudo_nregs
     
     @property
     def _up_rup_regidx(self):
-        st = self.gmresniter + self.uru_nreg
+        st = self.gmresniter + self.aux_gmres + self.uru_nreg
         ed = st + self.stepper_nregs
         return range(st, ed)
     
     @property
     def _u_ru_regidx(self):
-        return range(self.gmresniter, self.gmresniter+self.uru_nreg)
+        ngmres = self.gmresniter + self.aux_gmres
+        return range(ngmres, ngmres+self.uru_nreg)
     
     @property
     def _duold_regidx(self):
-        ngmres = self.gmresniter
+        ngmres = self.gmresniter + self.aux_gmres
         return ngmres+self.uru_nreg+self.stepper_nregs
     
     @property
     def _pseudo_regidx(self):
-        st = self.gmresniter+self.stepper_nregs+self.uprup_nreg+self.duold_nreg
+        st = self.gmresniter+self.aux_gmres+self.stepper_nregs+self.uru_nreg+self.duold_nreg
         return range(st, st+self.pseudo_nregs)
     
     @property
     def _src_regidx(self):
-        return self.nregs - 1
+        return self.k if self.gmresniter else self.nregs - 1
 
     def _gmres_j_regidx(self, j):
         return j
