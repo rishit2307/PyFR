@@ -538,8 +538,6 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			self.level = self._order
 			self.pintg._add(0.0, self.pintg._du_regidx, 1.0, r0)
-		
-		self.pintg._add(1.0, rdu, 1.0, self.pintg._duold_regidx)
 
 	def arnoldi(self, k):
 		self.level = self._order
