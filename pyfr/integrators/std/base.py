@@ -17,6 +17,7 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
         # Determine the amount of temp storage required by this method
             self.nregs = (self.gmresniter + self.stepper_nregs + self.eval_nreg
                       + self.eval_src + self.uru_nreg + self.duold_nreg)
+
         else:
             self.nregs = self.stepper_nregs
 
