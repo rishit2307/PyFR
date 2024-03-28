@@ -487,13 +487,17 @@ class GMRESmultip(BaseStdIntegrator):
 			# print(f'solvetime is {self.solvelinalg_time}')
 
 		st = time.time()
-		# self.mg_vcycle()
+		
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
-		rduold = self.pintg._duold_regidx
-		consts = [0.0, 1.0]+list(y)
-		regidxs = [rdu, rduold] + [rj(j) for j in range(k+1)]
-
+		
+		consts = [0.0]+list(y)
+		regidxs = [rdu] + [rj(j) for j in range(k+1)]
 		self._addv(consts, regidxs)
+
+		# self.mg_vcycle()
+		
+		rduold = self.pintg._duold_regidx
+		self._add(1.0, rdu, 1.0, rduold)
 
 		ed = time.time()
 		# if rank == root:
