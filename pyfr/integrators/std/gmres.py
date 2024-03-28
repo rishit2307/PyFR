@@ -487,12 +487,13 @@ class GMRESmultip(BaseStdIntegrator):
 			# print(f'solvetime is {self.solvelinalg_time}')
 
 		st = time.time()
-		netype = len(self.system.ele_types)
-
-		self.mg_vcycle()
+		# self.mg_vcycle()
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
+		rduold = self.pintg._duold_regidx
+		consts = [0.0, 1.0]+list(y)
+		regidxs = [rdu, rduold] + [rj(j) for j in range(k+1)]
 
-		self._addv([0.0] + list(y), [rdu]+[rj(j) for j in range(k+1)])
+		self._addv(consts, regidxs)
 
 		ed = time.time()
 		# if rank == root:
@@ -540,7 +541,8 @@ class GMRESmultip(BaseStdIntegrator):
 		comm, rank, root = get_comm_rank_root()
 		niters = self.mpniters
 
-		rdu, rmv = self._du_regidx, self._mvec_regidx
+		rdu = self.pintg._du_regidx
+		rmv = self.pintg._mvec_regidx
 		st = time.time()
 		self.pintg._eval_mat_vec(rdu, rmv)
 		ed = time.time()
@@ -667,9 +669,9 @@ class GMRESmultip(BaseStdIntegrator):
 				nnorm = self.pintg.newton_res()
 
 				nonlin_iter += 1
-				if rank == root:
-					print(nnorm)
-					print(nonlin_iter)
+				# if rank == root:
+				# 	print(nnorm)
+				# 	print(nonlin_iter)
 			
 			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2

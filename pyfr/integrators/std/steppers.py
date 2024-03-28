@@ -50,7 +50,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		# eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 		eps = epsmc*np.sqrt(self.Un)
-
+		
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
 
@@ -422,13 +422,14 @@ class Trapezoidal(BaseStdStepper):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
 		add, rhs_with_postproc = self._add, self.system.rhs
+		rmv = self._mvec_regidx
 
-		self._eval_mat_vec(self._duold_regidx, ev_rru=True)
+		self._eval_mat_vec(self._duold_regidx, rmv, ev_rru=True)
 		
 		ru, rru = self._u_ru_regidx
 		rup, rrup = self._up_rup_regidx
 		rdu = self._gmres_j_regidx(0)
-		rmv = self._mvec_regidx
+		
 
 		# rru = R(Un)
 		rhs_with_postproc(t, ru, rru)
