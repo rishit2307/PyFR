@@ -503,7 +503,8 @@ class GMRESmultip(BaseStdIntegrator):
 		self.mg_vcycle()
 		
 		rduold = self.pintg._duold_regidx
-		self._add(1.0, rdu, 1.0, rduold)
+		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
+		self._add(0.0, rdu, 1.0, r0, 1.0, rduold)
 
 		ed = time.time()
 		# if rank == root:
@@ -537,7 +538,6 @@ class GMRESmultip(BaseStdIntegrator):
 					self.prolongate(l, m)
 			
 			self.level = self._order
-			self.pintg._add(0.0, self.pintg._du_regidx, 1.0, r0)
 
 	def arnoldi(self, k):
 		self.level = self._order
@@ -551,10 +551,11 @@ class GMRESmultip(BaseStdIntegrator):
 
 		rdu = self.pintg._du_regidx
 		rmv = self.pintg._mvec_regidx
+		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
 
 		self.mg_vcycle()
 		st = time.time()
-		self.pintg._eval_mat_vec(rdu, rmv)
+		self.pintg._eval_mat_vec(r0, rmv)
 		ed = time.time()
 		self.arnoldi_mvectime += ed - st
 
@@ -574,7 +575,7 @@ class GMRESmultip(BaseStdIntegrator):
 			h[i] = sum([v.retval for v in kern])
 
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
-
+		
 		ed = time.time()
 		self.allreduce_time += ed - st
 
