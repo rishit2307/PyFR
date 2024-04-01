@@ -661,9 +661,9 @@ class GMRESmultip(BaseStdIntegrator):
 	
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
-				# 	if m is not None:
-				# 		self._init_loworder(l, m)
+				for l, m in it.zip_longest(self.levels, self.levels[1:]):
+					if m is not None:
+						self._init_loworder(l, m)
 				
 				st = time.time()
 				self.solve_gmres() 
