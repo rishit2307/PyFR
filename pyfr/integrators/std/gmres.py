@@ -500,11 +500,11 @@ class GMRESmultip(BaseStdIntegrator):
 		regidxs = [rdu] + [rj(j) for j in range(k+1)]
 		self._addv(consts, regidxs)
 
-		# self.mg_vcycle()
+		self.mg_vcycle()
 		
 		rduold = self.pintg._duold_regidx
-		# r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
-		self._add(1.0, rdu, 1.0, rduold)
+		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
+		self._add(0.0, rdu, 1.0, r0, 1.0, rduold)
 
 		ed = time.time()
 		# if rank == root:
@@ -551,11 +551,11 @@ class GMRESmultip(BaseStdIntegrator):
 
 		rdu = self.pintg._du_regidx
 		rmv = self.pintg._mvec_regidx
-		# r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
+		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
 
-		# self.mg_vcycle()
+		self.mg_vcycle()
 		st = time.time()
-		self.pintg._eval_mat_vec(rdu, rmv)
+		self.pintg._eval_mat_vec(r0, rmv)
 		ed = time.time()
 		self.arnoldi_mvectime += ed - st
 
@@ -661,9 +661,9 @@ class GMRESmultip(BaseStdIntegrator):
 	
 				# Init the low order systems
 				# nl = len(self.levels) - 1
-				for l, m in it.zip_longest(self.levels, self.levels[1:]):
-					if m is not None:
-						self._init_loworder(l, m)
+				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
+				# 	if m is not None:
+				# 		self._init_loworder(l, m)
 				
 				st = time.time()
 				self.solve_gmres() 
