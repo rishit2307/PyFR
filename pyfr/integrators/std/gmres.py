@@ -121,107 +121,60 @@ class GMRESmultip(BaseStdIntegrator):
 					r0, r1, r2 = self._pseudo_regidx
 					rmv, rsrc = self._mvec_regidx, self._src_regidx
 
-					for _ in range(nsmooth):
-						# rmv = A*r0
-						self._eval_mat_vec(r0, rmv)
-
-						# rmv = b - A*r0
-						add(-1.0, rmv, 1.0, rsrc)
-
-						# r0 = x + tau(b - A*r1)
-						add(1.0, r0, tau, rmv)
-					# r0, r1, r2 = self._pseudo_regidx
-					# rmv, rsrc = self._mvec_regidx, self._src_regidx
 					# for _ in range(nsmooth):
-					# 	## First stage
 					# 	# rmv = A*r0
 					# 	self._eval_mat_vec(r0, rmv)
+
 					# 	# rmv = b - A*r0
 					# 	add(-1.0, rmv, 1.0, rsrc)
 
-					# 	## Second stage
-					# 	# r1 = rmv*dtau/2 + r0
-					# 	add(0.0, r1, 1.0, r0, tau/2.0, rmv)
-					# 	# r2 = A*r1
-					# 	self._eval_mat_vec(r1, r2)
-					# 	# r2 = b - A*r1
-					# 	add(-1.0, r2, 1.0, rsrc)
+					# 	# r0 = x + tau(b - A*r1)
+					# 	add(1.0, r0, tau, rmv)
+					r0, r1, r2 = self._pseudo_regidx
+					rmv, rsrc = self._mvec_regidx, self._src_regidx
+					for _ in range(nsmooth):
+						## First stage
+						# rmv = A*r0
+						self._eval_mat_vec(r0, rmv)
+						# rmv = b - A*r0
+						add(-1.0, rmv, 1.0, rsrc)
 
-					# 	## Accumulate
-					# 	# rmv = r0 + dtau/6(rmv + 2*r2)
-					# 	add(tau/6.0, rmv, 1.0, r0, tau/3.0, r2)
+						## Second stage
+						# r1 = rmv*dtau/2 + r0
+						add(0.0, r1, 1.0, r0, tau/2.0, rmv)
+						# r2 = A*r1
+						self._eval_mat_vec(r1, r2)
+						# r2 = b - A*r1
+						add(-1.0, r2, 1.0, rsrc)
 
-					# 	## Third stage
-					# 	# r1 = r2*dtau/2.0  + r0
-					# 	add(0.0, r1, tau/2.0, r2, 1.0, r0)
-					# 	# r2 = A*r1
-					# 	self._eval_mat_vec(r1, r2)
-					# 	# r2 = b - A*r1
-					# 	add(-1.0, r2, 1.0, rsrc)
+						## Accumulate
+						# rmv = r0 + dtau/6(rmv + 2*r2)
+						add(tau/6.0, rmv, 1.0, r0, tau/3.0, r2)
 
-					# 	## Accumulate
-					# 	# rmv = rmv + dtau/3*r2
-					# 	add(1.0, rmv, tau/3.0, r2)
+						## Third stage
+						# r1 = r2*dtau/2.0  + r0
+						add(0.0, r1, tau/2.0, r2, 1.0, r0)
+						# r2 = A*r1
+						self._eval_mat_vec(r1, r2)
+						# r2 = b - A*r1
+						add(-1.0, r2, 1.0, rsrc)
 
-					# 	## Fourth stage
-					# 	# r1 = dtau*r2 + r0
-					# 	add(0.0, r1, tau, r2, 1.0, r0)
-					# 	# r2 = A*r1
-					# 	self._eval_mat_vec(r1, r2)
-					# 	# r2 = b - A*r1
-					# 	add(-1.0, r2, 1.0, rsrc)
+						## Accumulate
+						# rmv = rmv + dtau/3*r2
+						add(1.0, rmv, tau/3.0, r2)
 
-					# 	# rmv = rmv + dtau/6*r2
-					# 	add(1.0, rmv, tau/6.0, r2)
+						## Fourth stage
+						# r1 = dtau*r2 + r0
+						add(0.0, r1, tau, r2, 1.0, r0)
+						# r2 = A*r1
+						self._eval_mat_vec(r1, r2)
+						# r2 = b - A*r1
+						add(-1.0, r2, 1.0, rsrc)
 
-					# 	add(0.0, r0, 1.0, rmv)
+						# rmv = rmv + dtau/6*r2
+						add(1.0, rmv, tau/6.0, r2)
 
-						
-
-					# for _ in range(nsmooth):
-					# 	## First stage
-					# 	# r5 = A*r1
-					# 	self._eval_mat_vec(r2, r1, r5, r4)
-					# 	# r5 = b - A*r1
-					# 	add(-1.0, r5, 1.0, r3)
-						
-					# 	## Second stage
-					# 	# r6 = r5*dtau/2 + r1
-					# 	add(0.0, r6, 1.0, r1, tau/2.0, r5)
-					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4)
-					# 	# r7 = b - A*r6
-					# 	add(-1.0, r7, 1.0, r3)
-						
-					# 	## Accumulate
-					# 	# r5 = r1 + dtau/6(r5  + 2*r7)
-					# 	add(tau/6.0, r5, 1.0, r1, tau/3.0, r7)
-						
-					# 	## Third Stage
-					# 	# r6 = r7*dtau/2 + r1
-					# 	add(0.0, r6, tau/2, r7, 1.0, r1)
-					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4)
-					# 	# r7 = b - A*r6
-					# 	add(-1.0, r7, 1.0, r3)
-
-					# 	## Accumulate
-					# 	# r5 = r5 + dtau*r7/3
-					# 	add(1.0, r5, tau/3, r7)
-
-					# 	# r6 = dtau*r7 + r1
-					# 	add(0.0, r6, tau, r7, 1.0, r1)
-					# 	# r7 = A*r6
-					# 	self._eval_mat_vec(r2, r6, r7, r4)
-					# 	# r7 = b - A*r7
-					# 	add(-1.0, r7, 1.0, r3)
-
-					# 	# r5 = r5 + dtau*r7/6
-					# 	add(1.0, r5, tau/6, r7)
-
-					# 	# r1 = r5
-					# 	add(0.0, r1, 1.0, r5)
-
+						add(0.0, r0, 1.0, rmv)
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, r2, r3, r4, *r5 =  self._regidx

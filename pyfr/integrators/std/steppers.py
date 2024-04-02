@@ -50,7 +50,7 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		# eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 		# eps = epsmc*np.sqrt(self.Un)
-		eps = 1e-8
+		eps = 1e-6
 		
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
