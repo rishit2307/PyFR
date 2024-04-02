@@ -349,7 +349,6 @@ class GMRESmultip(BaseStdIntegrator):
 	def restrict(self, l1, l2):
 		# r0, r1, r2, r3, r4, *r5 = self.pintgs[l1]._regidx
 		# r5 = r5[0]
-		add = self._add
 		self.level = l1
 		rmv = self.pintg._mvec_regidx
 		r0, *r = self.pintg._pseudo_regidx
@@ -358,7 +357,7 @@ class GMRESmultip(BaseStdIntegrator):
 		# rmv = A*r0
 		self.pintg._eval_mat_vec(r0, rmv)
 		# rmv = b - A*r0
-		add(-1.0, rmv, 1.0, rsl1)
+		self.pintg._add(-1.0, rmv, 1.0, rsl1)
 
 		self.level = l2
 		rsl2 = self.pintg._src_regidx
