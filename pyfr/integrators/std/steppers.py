@@ -50,7 +50,29 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		# eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
 		# eps = epsmc*np.sqrt(self.Un)
-		eps = 1e-6
+		comm, rank, root = get_comm_rank_root()
+
+		if ev_rru:
+			rhs(t+dt, rU, rrU)
+			self.nfeval += 1
+
+			kern = self._get_reduction_kerns(rU, method='gmresnorm', norm='l2')
+			self.backend.run_kernels(kern, wait=True)
+			Un = np.array([sum(v for k in kern for v in k.retval)])
+
+			comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
+			self.Un = np.sqrt(float(Un))
+
+
+		dkerns = self._get_reduction_kerns(rdU, method='gmresnorm', norm='l2')
+		self.backend.run_kernels(dkerns, wait=True)
+		dUn = np.array([sum(v for k in dkerns for v in k.retval)])
+		comm.Allreduce(mpi.IN_PLACE, dUn, op=mpi.SUM)
+
+		eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
+		
+
+
 		
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
@@ -60,11 +82,6 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		self.nfeval += 1
 
-		if ev_rru: 
-			# rrU = rhs(t+dt, rU, rrU)
-			rhs(t+dt, rU, rrU)
-			self.nfeval += 1
-		
 		# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
 		add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
 
@@ -76,26 +93,13 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.ltol = 1e-16
 		self.eletype = dict()
 
-		comm, rank, root = get_comm_rank_root()
-
-		self.eletype = set(comm.allreduce(self.system.ele_types, op=mpi.SUM))
-		self.eletype = comm.bcast(self.eletype, root=root)
-
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
 		self.sn = np.zeros(self.m)
 		self.cs = np.zeros(self.m)
 		self.k = 0
-		self.y = [[] for _ in range(len(self.system.ele_types))]
-		ru, rru = self._u_ru_regidx
-		kern = self._get_reduction_kerns(ru, method='gmresnorm', norm='l2')
-		self.backend.run_kernels(kern, wait=True)
-
-		Un = np.array([sum(v for k in kern for v in k.retval)])
-		comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
-		self.Un = np.sqrt(float(Un))
-
+		self.y = [[] for _ in range(len(self.system.ele_types))]		
 	
 class StdEulerStepper(BaseStdStepper):
 	stepper_name = 'euler'

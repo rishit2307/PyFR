@@ -287,6 +287,15 @@ class GMRESmultip(BaseStdIntegrator):
 		rhs = self.pintgs[l2].system.rhs
 		rhs(t+dt, r2up, rr2up)
 
+		comm, rank, root = get_comm_rank_root()
+		kern = self.pintgs[l2]._get_reduction_kerns(r2up, method='gmresnorm', norm='l2')
+		self.backend.run_kernels(kern, wait=True)
+		Un = np.array([sum(v for k in kern for v in k.retval)])
+
+		comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
+		self.pintgs[l2].Un = np.sqrt(float(Un))
+
+
 		self.pintgs[l2].nfeval += 1
 		
 	@memoize
