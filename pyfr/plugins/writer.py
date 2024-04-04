@@ -43,7 +43,8 @@ class WriterPlugin(PostactionMixin, RegionMixin, BaseSolnPlugin):
             return
 
         comm, rank, root = get_comm_rank_root()
-
+        if rank == root:
+            print(f' Writer plugin running')
         stats = Inifile()
         stats.set('data', 'fields', ','.join(self.fields))
         stats.set('data', 'prefix', 'soln')

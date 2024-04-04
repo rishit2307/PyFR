@@ -20,9 +20,6 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
 		
 		comm, rank, root = get_comm_rank_root()
-		if rank == root:
-			print(f'tau is {self.tau}')
-
 		self.nfeval = 0
 
 		prec = self.cfg.get('backend', 'precision')
@@ -39,17 +36,6 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		rU, rrU = self._up_rup_regidx
 
-		# Calculate eps
-		# xn = sum([np.linalg.norm(self.system.ele_scal_upts(rdU)[i])**2
-		# 		  for i in range(netp)])
-		# xn = comm.allreduce(xn, op=mpi.SUM)
-
-		# Un = sum([np.linalg.norm(self.system.ele_scal_upts(rU)[i])**2
-		# 						for i in range(netp)])				
-		# Un = np.sqrt(comm.allreduce(Un, op=mpi.SUM))
-
-		# eps= epsmc*np.sqrt(Un + 1)/(np.sqrt(xn) + epsmc**2)
-		# eps = epsmc*np.sqrt(self.Un)
 		comm, rank, root = get_comm_rank_root()
 
 		if ev_rru:
@@ -64,16 +50,14 @@ class BaseStdStepper(BaseStdIntegrator):
 			self.Un = np.sqrt(float(Un))
 
 
-		dkerns = self._get_reduction_kerns(rdU, method='gmresnorm', norm='l2')
-		self.backend.run_kernels(dkerns, wait=True)
-		dUn = np.array([sum(v for k in dkerns for v in k.retval)])
-		comm.Allreduce(mpi.IN_PLACE, dUn, op=mpi.SUM)
+		# dkerns = self._get_reduction_kerns(rdU, method='gmresnorm', norm='l2')
+		# self.backend.run_kernels(dkerns, wait=True)
+		# dUn = np.array([sum(v for k in dkerns for v in k.retval)])
+		# comm.Allreduce(mpi.IN_PLACE, dUn, op=mpi.SUM)
 
-		eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
-		
+		# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
+		eps = epsmc*np.sqrt(self.Un)
 
-
-		
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
 
@@ -281,7 +265,7 @@ class Trapezoidal(BaseStdStepper):
 		add(1.0, rdu, -1.0, rmv)
 
 
-	def newton_res(self, tp=0):
+	def newton_res(self):
 		add, rhs_with_postproc = self._add, self.system.rhs
 		self.normele = dict()
 		comm, rank, root = get_comm_rank_root()

@@ -3,6 +3,7 @@ from collections import defaultdict
 import copy
 import itertools as it
 import time
+import math
 from pyfr.inifile import Inifile
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.integrators.std.controllers import BaseStdController
@@ -51,68 +52,6 @@ class GMRESmultip(BaseStdIntegrator):
 				uru_nreg = 2 if l == self._order else 0
 				duold_nreg = 1 if l == self._order else 0
 				aux_gmres = 1 if l == self._order else 0
-
-
-				def _eval_jac(self):
-					add, rhs = self._add, self.system.rhs
-					comm, rank, root = get_comm_rank_root()
-					r0, r1, r2, r3, *r4 = self._regidx
-					r4, r5 = r4[0], r4[1]
-					t, dt, dtfac = self.t, self.dt, self.dtfac
-
-
-					self.jac = jac = defaultdict(list)
-					rhs(t+dt, r2, r1)
-						
-					
-
-					for col, etp in sorted(self.system.celes.keys()):
-						i = self.system.ele_types.index(etp)
-						ur0 = self.system.ele_banks[i][r2].get()
-						dr1 = self.system.ele_banks[i][r1].get()
-
-						for j in range(len(self.system.ele_types)):
-							u = self.system.ele_scal_upts(r2)[j]
-							self.system.ele_banks[j][r5].set(u)
-
-						nupts = self.system.ele_shapes[i][0]
-						for v in range(self.system.nvars):
-							for npt in range(nupts):
-								eidx = self.system.celes[col, etp]
-								
-								eps = np.zeros_like(ur0)
-
-								eps[npt, v, eidx] = 1e-8
-
-								ur = ur0+eps
-
-								self.system.ele_banks[i][r5].set(ur)
-
-								rhs(t+dt, r5, r5)
-								self.backend.wait()
-						
-								dr2 = self.system.ele_banks[i][r5].get()
-
-								dr = (dr1 - dr2)/1e-8
-
-								for e in eidx:
-									jac[etp, e].append(dr[..., e].T.reshape(-1))
-					cond = []
-					for i, eshape in enumerate(self.system.ele_shapes):
-						nele = eshape[-1]
-						etp = self.system.ele_types[i]
-						for e in range(nele):
-							shape = len(jac[etp, e])
-
-							jac[etp, e] = np.array(jac[etp, e]).T + (dtfac/dt)*np.eye(shape)
-							cond.append(np.linalg.cond(jac[etp, e]))
-
-							jac[etp, e] = np.linalg.inv(jac[etp, e])
-
-					cond = comm.allreduce(cond, op=mpi.MAX)
-
-					if rank == root:
-						print(f'rank is {rank} cond number is {np.amax(cond)}')
 				
 				def richardson(self, nsmooth):
 					add = self._add
@@ -121,60 +60,59 @@ class GMRESmultip(BaseStdIntegrator):
 					r0, r1, r2 = self._pseudo_regidx
 					rmv, rsrc = self._mvec_regidx, self._src_regidx
 
-					# for _ in range(nsmooth):
-					# 	# rmv = A*r0
-					# 	self._eval_mat_vec(r0, rmv)
-
-					# 	# rmv = b - A*r0
-					# 	add(-1.0, rmv, 1.0, rsrc)
-
-					# 	# r0 = x + tau(b - A*r1)
-					# 	add(1.0, r0, tau, rmv)
-					r0, r1, r2 = self._pseudo_regidx
-					rmv, rsrc = self._mvec_regidx, self._src_regidx
 					for _ in range(nsmooth):
-						## First stage
 						# rmv = A*r0
 						self._eval_mat_vec(r0, rmv)
+
 						# rmv = b - A*r0
 						add(-1.0, rmv, 1.0, rsrc)
 
-						## Second stage
-						# r1 = rmv*dtau/2 + r0
-						add(0.0, r1, 1.0, r0, tau/2.0, rmv)
-						# r2 = A*r1
-						self._eval_mat_vec(r1, r2)
-						# r2 = b - A*r1
-						add(-1.0, r2, 1.0, rsrc)
+						# r0 = x + tau(b - A*r1)
+						add(1.0, r0, tau, rmv)
 
-						## Accumulate
-						# rmv = r0 + dtau/6(rmv + 2*r2)
-						add(tau/6.0, rmv, 1.0, r0, tau/3.0, r2)
+					# for _ in range(nsmooth):
+					# 	## First stage
+					# 	# rmv = A*r0
+					# 	self._eval_mat_vec(r0, rmv)
+					# 	# rmv = b - A*r0
+					# 	add(-1.0, rmv, 1.0, rsrc)
 
-						## Third stage
-						# r1 = r2*dtau/2.0  + r0
-						add(0.0, r1, tau/2.0, r2, 1.0, r0)
-						# r2 = A*r1
-						self._eval_mat_vec(r1, r2)
-						# r2 = b - A*r1
-						add(-1.0, r2, 1.0, rsrc)
+					# 	## Second stage
+					# 	# r1 = rmv*dtau/2 + r0
+					# 	add(0.0, r1, 1.0, r0, tau/2.0, rmv)
+					# 	# r2 = A*r1
+					# 	self._eval_mat_vec(r1, r2)
+					# 	# r2 = b - A*r1
+					# 	add(-1.0, r2, 1.0, rsrc)
 
-						## Accumulate
-						# rmv = rmv + dtau/3*r2
-						add(1.0, rmv, tau/3.0, r2)
+					# 	## Accumulate
+					# 	# rmv = r0 + dtau/6(rmv + 2*r2)
+					# 	add(tau/6.0, rmv, 1.0, r0, tau/3.0, r2)
 
-						## Fourth stage
-						# r1 = dtau*r2 + r0
-						add(0.0, r1, tau, r2, 1.0, r0)
-						# r2 = A*r1
-						self._eval_mat_vec(r1, r2)
-						# r2 = b - A*r1
-						add(-1.0, r2, 1.0, rsrc)
+					# 	## Third stage
+					# 	# r1 = r2*dtau/2.0  + r0
+					# 	add(0.0, r1, tau/2.0, r2, 1.0, r0)
+					# 	# r2 = A*r1
+					# 	self._eval_mat_vec(r1, r2)
+					# 	# r2 = b - A*r1
+					# 	add(-1.0, r2, 1.0, rsrc)
 
-						# rmv = rmv + dtau/6*r2
-						add(1.0, rmv, tau/6.0, r2)
+					# 	## Accumulate
+					# 	# rmv = rmv + dtau/3*r2
+					# 	add(1.0, rmv, tau/3.0, r2)
 
-						add(0.0, r0, 1.0, rmv)
+					# 	## Fourth stage
+					# 	# r1 = dtau*r2 + r0
+					# 	add(0.0, r1, tau, r2, 1.0, r0)
+					# 	# r2 = A*r1
+					# 	self._eval_mat_vec(r1, r2)
+					# 	# r2 = b - A*r1
+					# 	add(-1.0, r2, 1.0, rsrc)
+
+					# 	# rmv = rmv + dtau/6*r2
+					# 	add(1.0, rmv, tau/6.0, r2)
+
+					# 	add(0.0, r0, 1.0, rmv)
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, r2, r3, r4, *r5 =  self._regidx
@@ -326,28 +264,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 		self.backend.run_kernels(self.mgproject(l1, rmv, l2, rsl2))
 
-
-		# rl0, rl1, rl2, rl3, rl4, *rl5 = self.pintgs[l2]._regidx
-		# rl5, rl8, rl7= rl5[0], rl5[-1], rl5[-2]
-		# add = self.pintgs[l1]._add
-
-		# # r5 = A*r1
-		# self.pintgs[l1]._eval_mat_vec(rmv)
-		# # r5 = b - A*r1
-		# add(-1.0, r5, 1.0, r3)
-
-		# self.backend.run_kernels(self.mgproject(l1, r5, l2, rl3))
-		# self.backend.run_kernels(self.mgproject(l1, r1, l2, rl8))
-
-		# self.level = l2
-		# add = self.pintg._add
-
-		# # rl7 = A*rl8
-		# self.pintg._eval_mat_vec(rl2, rl8, rl7, rl4)
-
-		# # rl3 = rl3 + rl7
-		# add(1.0, rl3, 1.0, rl7)
-
 	def prolongate(self, l1, l2):
 
 		r0, r1, r2 = self.pintgs[l1]._pseudo_regidx
@@ -355,21 +271,6 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels(self.mgproject(l1, r0, l2, rl1))
 
 		self.pintgs[l2]._add(1.0, rl0, 1.0, rl1)
-
-
-		# r0, r1, *r2 = self.pintgs[l1]._regidx
-		# r8 = r2[-1]
-		# rf0, rf1, *rf5 = self.pintgs[l2]._regidx
-		# rf8 = rf5[-1]
-		# add = self.pintgs[l1]._add
-
-		# # # r8 = e = y^s - y^ns
-		# # add(-1.0, r8, 1.0, r1)
-		# self.backend.run_kernels(self.mgproject(l1, r1, l2, rf8))
-
-		# add = self.pintgs[l2]._add
-		# # r1 = ys + e
-		# add(1.0, rf1, 1.0, rf8)
 
 	def solve_gmres(self):
 		comm, rank, root = get_comm_rank_root()
@@ -401,10 +302,7 @@ class GMRESmultip(BaseStdIntegrator):
 		add(0.0, r0, 1/rnorm, r0)
 
 		H = np.zeros((m+1, m))
-		
-		# self.Hb = [self.backend.matrix(H.T.shape, H.T, tags={'align'})
-		# 	 	   for _ in range(len(self.system.ele_types))]
-
+	
 		beta = rnorm*self.pintg.e1	
 		ed = time.time()
 		self.init_time, self.givrot_time, self.dottime, self.allreduce_time, self.normtime, self.arnoldi_mvectime = 0, 0, 0, 0, 0, 0
@@ -541,8 +439,6 @@ class GMRESmultip(BaseStdIntegrator):
 		self.allreduce_time += ed - st
 
 		self._addv([1.0] + list(-h), [rmv] + [rji(j) for j in range(k+1)])
-		# for j in range(k+1):
-		# 	add(1.0, mv, -h[j], rji(j))
 
 		st = time.time()
 		kern = self._get_reduction_kerns(rmv, method='gmresnorm', norm='l2')
@@ -583,13 +479,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		return cs, sn
 	
-	def get_index(self, j, k, i):
-		return self.Hb[i].data + (self.Hb[i].leaddim*k + j)*self.Hb[i].itemsize
-
-	
 	def advance_to(self, t):
-		cycle, csteps = self.cycle, self.csteps
-
 		
 		while self.tcurr < t:
 			self.level = self._order
@@ -612,7 +502,8 @@ class GMRESmultip(BaseStdIntegrator):
 					self.pintg._init_step(self.tcurr, dt)
 				
 				self.level = self._order
-
+				if rank == root:
+					print(f't is {self.tcurr}, dt is {dt}')
 				st = time.time()
 				self.pintg._init_gmres()
 				ed = time.time()
@@ -639,6 +530,18 @@ class GMRESmultip(BaseStdIntegrator):
 				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 
 				nnorm = self.pintg.newton_res()
+				if math.isnan(nnorm):
+					solrup = [self.system.ele_scal_upts(rUp)[i] for i in range(len(self.system.ele_types))]
+					solrrup = [self.system.ele_scal_upts(rrUp)[i] for i in range(len(self.system.ele_types))]
+
+					for sol in solrup:
+						if np.isnan(sol).any():
+							print(f'rUp is nan')
+
+					for sol in solrrup:
+						if np.isnan(sol).any():
+							print(f'rrUp is nan')
+
 
 				nonlin_iter += 1
 				if rank == root:
@@ -652,9 +555,9 @@ class GMRESmultip(BaseStdIntegrator):
 			# if rank == root:
 			# 	print("Step completed")
 			
-			# for l in self.levels:
-				# if rank == root:
-				# 	print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
+			for l in self.levels:
+				if rank == root:
+					print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
 			# if rank == root:
 			# 	print(f'nfevals are {self.pintg.nfeval}')
 			idxcurr = rU
