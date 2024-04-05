@@ -37,12 +37,14 @@ class GMRESmultip(BaseStdIntegrator):
 		self.pintgs = {}
 
 		for l in self.levels:
+
 			if l == order:
 				mcfg = cfg
 			else:
 				mcfg = Inifile(cfg.tostr())
 				mcfg.set('solver', 'order', l)
 				mcfg.set('solver-time-integrator', 'gmres-iter', 0)
+				tau = mcfg.getfloat('solver-time-integrator', 'tau')
 			
 			class lpsint(*bases):
 				name = 'GMRES-multip'
@@ -55,12 +57,13 @@ class GMRESmultip(BaseStdIntegrator):
 				
 				def richardson(self, nsmooth):
 					add = self._add
-					tau = self.tau
+					tau = mcfg.getfloat('solver-time-integrator', 'tau')
 
 					r0, r1, r2 = self._pseudo_regidx
 					rmv, rsrc = self._mvec_regidx, self._src_regidx
-
-					for _ in range(nsmooth):
+					
+					ri = lambda j, M: 1 + math.cos((j - 0.5)*math.pi/M)
+					for j in range(nsmooth):
 						# rmv = A*r0
 						self._eval_mat_vec(r0, rmv)
 
@@ -69,6 +72,8 @@ class GMRESmultip(BaseStdIntegrator):
 
 						# r0 = x + tau(b - A*r1)
 						add(1.0, r0, tau, rmv)
+
+						tau = tau*ri(j-1, nsmooth)/ri(j, nsmooth)
 
 					# for _ in range(nsmooth):
 					# 	## First stage
@@ -402,11 +407,8 @@ class GMRESmultip(BaseStdIntegrator):
 		self.level = self._order
 		add = self.pintg._add
 
-		netype = len(self.system.ele_types)
 		h = np.zeros(k+1)
-		cycle, csteps = self.cycle, self.csteps
 		comm, rank, root = get_comm_rank_root()
-		niters = self.mpniters
 
 		rdu = self.pintg._du_regidx
 		rmv = self.pintg._mvec_regidx
@@ -536,12 +538,12 @@ class GMRESmultip(BaseStdIntegrator):
 
 					for sol in solrup:
 						if np.isnan(sol).any():
-							print(f'rUp is nan')
+								print(f'rank is {rank}, rUp is nan')
 
 					for sol in solrrup:
 						if np.isnan(sol).any():
-							print(f'rrUp is nan')
-
+								print(f'rank is {rank}, rrUp is nan')
+					exit()
 
 				nonlin_iter += 1
 				if rank == root:
