@@ -17,9 +17,8 @@ class BaseStdStepper(BaseStdIntegrator):
 		name = self.cfg.get('solver-time-integrator', 'scheme')
 		stp_class = subclass_where(BaseStdStepper, stepper_name=name)
 		self.dtfac = stp_class.dtfac
-		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau', 0.01)
+		self.tau = self.cfg.getfloat('solver-time-integrator', 'tau')
 		
-		comm, rank, root = get_comm_rank_root()
 		self.nfeval = 0
 
 		prec = self.cfg.get('backend', 'precision')
@@ -42,12 +41,7 @@ class BaseStdStepper(BaseStdIntegrator):
 			rhs(t+dt, rU, rrU)
 			self.nfeval += 1
 
-			kern = self._get_reduction_kerns(rU, method='gmresnorm', norm='l2')
-			self.backend.run_kernels(kern, wait=True)
-			Un = np.array([sum(v for k in kern for v in k.retval)])
-
-			comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
-			self.Un = np.sqrt(float(Un))
+			self.Un = self.eval_norm(rU)
 
 
 		# dkerns = self._get_reduction_kerns(rdU, method='gmresnorm', norm='l2')
@@ -75,8 +69,6 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.rnorm= dict()
 
 		self.ltol = 1e-16
-		self.eletype = dict()
-
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
@@ -304,11 +296,10 @@ class Trapezoidal(BaseStdStepper):
 		# r1 = R(Un)/2 + Du/dt + R(Un+1)/2
 		# add(1.0, r1, -1/2, r4)
 
-		self.normele = sum([np.linalg.norm(self.system.ele_banks[i][rv]
-							.get())**2 for i in range(len(self.system.ele_types))])
+		normele = self.eval_norm(rv)
+
 		
-		self.normele = np.sqrt(comm.allreduce(self.normele, op=mpi.SUM))
-		return self.normele/self._get_gndofs()
+		return normele
 		# return self.normele
 
 class StdTVDRK3Stepper(BaseStdStepper):
@@ -377,6 +368,43 @@ class StdRK2Stepper(BaseStdStepper):
 		add(1.0, r1, 1.0, r0)
 
 		return r1
+	
+class StdRK3Stepper(BaseStdStepper):
+    stepper_name = 'rk3'
+    stepper_has_errest = False
+    stepper_nregs = 3
+    stepper_order = 3
+
+    @property
+    def _stepper_nfevals(self):
+        return 3*self.nsteps
+
+    def step(self, t, dt):
+        add, rhs_with_postproc = self._add, self.system.rhs
+
+        # Get the bank indices for each register
+        r0, r1, r2 = self._regidx
+
+        # Ensure r0 references the bank containing u(t)
+        if r0 != self._idxcurr:
+            r0, r1 = r1, r0
+
+        rhs_with_postproc(t, r0, r1)
+
+        add(0.0, r2, 1.0, r0, dt, r1)
+
+        rhs_with_postproc(t+dt, r2, r2)
+        
+        add(dt/6, r1, 1.0, r0, dt/6, r2)
+
+        add(0.0, r2, -1/2, r0, 3/2, r1)
+
+        rhs_with_postproc(t+dt/2, r2, r2)
+
+        add(1.0, r1, 4*dt/6, r2)
+
+        return r1
+
 
 class StdRK4Stepper(BaseStdStepper):
 	stepper_name = 'rk4'

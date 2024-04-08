@@ -38,8 +38,8 @@ class WriterPlugin(PostactionMixin, RegionMixin, BaseSolnPlugin):
         if not intg.isrestart:
             self.tout_last -= self.dt_out
 
-    def __call__(self, intg):
-        if intg.tcurr - self.tout_last < self.dt_out - self.tol:
+    def __call__(self, intg, override=False):
+        if intg.tcurr - self.tout_last < self.dt_out - self.tol and not override:
             return
 
         comm, rank, root = get_comm_rank_root()

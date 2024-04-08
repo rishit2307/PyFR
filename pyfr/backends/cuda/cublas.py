@@ -50,10 +50,11 @@ class CUBLASWrappers(LibWrapper):
          POINTER(c_float), c_void_p, c_int, c_void_p, c_int,
          POINTER(c_float), c_void_p, c_int),
         (c_int, 'cublasDdot_v2', c_void_p, c_int, c_void_p, c_int, c_void_p, 
-        c_int, c_uint64),
+        c_int, c_void_p),
         (c_int, 'cublasSetPointerMode_v2', c_void_p, c_int), 
         (c_int, 'cublasDaxpy_v2', c_void_p, c_int, POINTER(c_double), c_void_p, 
-         c_int, c_void_p, c_int)
+         c_int, c_void_p, c_int), 
+         (c_int, 'cublasDnrm2_v2', c_void_p, c_int, c_void_p, c_int, c_void_p)
     ]
 
     def _transname(self, name):
@@ -83,6 +84,33 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         w, h = self.lib, self.handle
         cublasadd = w.cublasDaxpy_v2
 
+    def norm(self, a):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+        cublasnrm2 = w.cublasDnrm2
+        fpdtype = a.traits[-1]
+        n = a.nrow*a.ncol
+        x = a
+        w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
+        rdev = cuda.mem_alloc(np.dtype(float).itemsize)
+
+        rhost = cuda.pagelocked_empty((), fpdtype)
+
+        def l2(stream):
+            w.cublasSetStream(h, stream)
+            cublasnrm2(h, n, x, 1, rdev)
+
+        class NormKernel(CUDAKernel):
+            def run(self, stream):
+                l2(stream)
+                cuda.memcpy(rhost, rdev, rdev.nbytes, stream)
+            
+            @property
+            def retval(self):
+                return rhost
+
+        return NormKernel(mats=[a])
+
     def dot(self, a, b):
         cuda = self.backend.cuda
         fpdtype = a.traits[-1]
@@ -99,7 +127,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
 
         def ddd(stream):
             w.cublasSetStream(h, stream)
-            cublasdot(h, n, x, 1, y, 1, rdev._as_parameter_)
+            cublasdot(h, n, x, 1, y, 1, rdev)
 
         class DotKernel(CUDAKernel):
             def run(self, stream):

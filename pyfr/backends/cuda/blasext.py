@@ -90,8 +90,6 @@ class CUDABlasExtKernels(CUDAKernelProvider):
             argt = [ixdtype]*3 + [np.uintp]*4 + [fpdtype]*2
         elif method == 'resid' and dt_mat:
             argt = [ixdtype]*3 + [np.uintp]*4 + [fpdtype]
-        elif method == 'gmresnorm':
-            argt = [ixdtype]*3 + [np.uintp]*2
         else:
             argt = [ixdtype]*3 + [np.uintp]*3 + [fpdtype]
 

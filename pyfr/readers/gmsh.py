@@ -392,9 +392,10 @@ class GmshReader(BaseReader):
 
         # Block and total element count
         nb, ne = (int(i) for i in next(mshit).split()[:2])
-
         for i in range(nb):
             edim, etag, etype, ecount = (int(j) for j in next(mshit).split())
+            if etype == 15:
+                continue
 
             if etype not in self._etype_map:
                 raise ValueError(f'Unsupported element type {etype}')
