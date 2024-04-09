@@ -68,7 +68,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
 		self.rnorm= dict()
 
-		self.ltol = 1e-16
+		self.ltol = 8e-13
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
