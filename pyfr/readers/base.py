@@ -103,6 +103,7 @@ class NodalMeshAssembler:
 
         # Nodes
         nodes = np.sort(foeles[:, fnmap]).reshape(len(con), -1)
+        nodes = np.ascontiguousarray(nodes)
         nodes = nodes.view([('', nodes.dtype)]*nodes.shape[-1]).squeeze()
 
         return con, nodes
