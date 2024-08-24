@@ -7,9 +7,10 @@ from pyfr.nputil import npeval
 from pyfr.plugins.base import BaseSolnPlugin, SurfaceMixin, init_csv
 
 
-FWHSurfParams = namedtuple('FWHSurfParams', ('eidxs', 'm0', 'nda',
-                                             'r_tilde_vec', 'r_star_inv',
-                                             'r_star_tilde_vec'))
+FWHSurfParams = namedtuple(
+    'FWHSurfParams',
+    ('eidxs', 'm0', 'nda', 'r_tilde_vec',  'r_star_inv', 'r_star_tilde_vec')
+)
 
 
 class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
@@ -61,8 +62,8 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
             self.qinf['c'] = (gamma * self.qinf['p'] / self.qinf['rho'])**0.5
             self._ridx = privarmap.index('rho')
 
-        self.qinf['M'] = np.array([self.qinf[k]/self.qinf['c'] for k in
-                                   'uvw'[:ndims]])
+        self.qinf['M'] = np.array([self.qinf[k] / self.qinf['c']
+                                   for k in 'uvw'[:ndims]])
         Minf = np.linalg.norm(self.qinf['M'])
         if Minf >= 1:
             raise ValueError('FWH farfield Mach number greater than 1')
@@ -101,14 +102,9 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
 
             # Get ops and components of the surface
             m0 = eles.basis.ubasis.nodal_basis_at(qpts)
-            norm_mag = np.linalg.norm(pnorm, axis=-1, keepdims=True)
-            # norm_mag = np.linalg.norm(pnorm, axis=-1)
-            n = (qwts[:, None] * pnorm.transpose(2, 0, 1)).reshape(self.ndims, -1)
-            # n = pnorm.transpose(2, 0, 1).reshape(self.ndims, -1)
-            # area = np.repeat(qwts, len(eidxs))
-            # area = (qwts[:, None]*np.ones_like(norm_mag)).reshape(-1)
-            # area = (qwts[:, None] * norm_mag[..., 0]).reshape(-1)
-            dist = self._distances(ploc)
+            nds = qwts[:, None]*pnorm.transpose(2, 0, 1)
+            nds = nds.reshape(self.ndims, -1)
+            dist = self._distances(ploc, Minf)
 
             self.surf[etype, fidx] = FWHSurfParams(eidxs, m0, n, *dist)
 
@@ -128,8 +124,8 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         self.rs = np.linalg.norm(r_star_vec, axis=-1)
         r_star_inv = 1 / np.linalg.norm(r_star_vec, axis=-1)
 
-        r_grad_fac = (np.einsum('ij,k->ijk', m_r, self.qinf['M']) +
-                      r_o_hat*gamma_inv**2)
+        r_grad_fac = (np.einsum('ij,k->ijk', m_r, self.qinf['M'])
+                      + r_o_hat*gamma_inv**2)
         r_snorm = r_star_inv*d
 
         r_star_tilde_vec = r_snorm[..., None]*r_grad_fac
@@ -148,6 +144,12 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         # Apply no-slip
         pris[self._pidx] += 0.5*(gamma-1)*pris[self._ridx]*vmag
         pris[self._vidx] = 0
+
+        if not self.incomp:
+            rho = pris[self._ridx]
+
+            # Apply no-slip
+            pris[self._pidx] += 0.5*(self.consts['gamma'] - 1)*rho*vmag
 
     def _fwh_solve(self, intg):
         o_vals = np.zeros(self.nobvs)
