@@ -59,11 +59,12 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         else:
             gamma = self.consts['gamma']
             self.qinf['c'] = (gamma * self.qinf['p'] / self.qinf['rho'])**0.5
+            self._ridx = privarmap.index('rho')
 
         self.qinf['M'] = np.array([self.qinf[k]/self.qinf['c'] for k in
                                    'uvw'[:ndims]])
-        self.Minf = np.linalg.norm(self.qinf['M'])
-        if self.Minf >= 1:
+        Minf = np.linalg.norm(self.qinf['M'])
+        if Minf >= 1:
             raise ValueError('FWH farfield Mach number greater than 1')
 
         # Initialise surface data
@@ -75,7 +76,14 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         
         self._init_surf(ele_map)
 
-    def _init_surf(self, ele_map):
+        # Get boundary type info
+        sname = self.cfg.get(cfgsect, 'surface')
+        if '(' not in sname:
+            self.bctype = self.cfg.get(f'soln-bcs-{sname}', 'type')
+        else:
+            self.bctype = None
+
+    def _init_surf(self, ele_map, Minf):
         self.surf = {}
         for doff, etype, fidx, eidxs in self.ele_surface:
             eles = ele_map[etype]
@@ -89,7 +97,6 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
 
             # Get physical location, transformations, and normals
             ploc = eles.ploc_at_np(qpts)[..., eidxs]
-            rcpdjac = eles.rcpdjac_at_np(qpts)[..., eidxs]
             pnorm = eles.pnorm_at(qpts, norm)[:, eidxs]
 
             # Get ops and components of the surface
@@ -105,10 +112,10 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
 
             self.surf[etype, fidx] = FWHSurfParams(eidxs, m0, n, *dist)
 
-    def _distances(self, spts):
+    def _distances(self, spts, Minf):
         surf_pts = spts.transpose(0, 2, 1).reshape(-1, self.ndims)
 
-        gamma_inv = (1 - self.Minf**2)**0.5
+        gamma_inv = (1 - Minf**2)**0.5
         gamma = 1 / gamma_inv
 
         r_o = self.obsv_pts[None] - surf_pts[:, None]
