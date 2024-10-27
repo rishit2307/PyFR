@@ -59,7 +59,7 @@ class BaseSystem:
         self.ndims = eles[0].ndims
         self.nvars = eles[0].nvars
         self.neles = eles[0].neles
-        # self.celes = self.color_mesh(mesh, rallocs)
+        self.celes = self.color_mesh(mesh, rallocs)
         # Load the interfaces
         self._int_inters = self._load_int_inters(rallocs, mesh, elemap)
         self._mpi_inters = self._load_mpi_inters(rallocs, mesh, elemap)

@@ -54,6 +54,60 @@ class GMRESmultip(BaseStdIntegrator):
 				uru_nreg = 2 if l == self._order else 0
 				duold_nreg = 1 if l == self._order else 0
 				aux_gmres = 1 if l == self._order else 0
+
+				def _eval_jac(self):
+					add, rhs = self._add, self.system.rhs
+					comm, rank, root = get_comm_rank_root()
+					rup, rrup = self._up_rup_regidx
+					r0, *r = self._pseudo_regidx
+
+					t, dt, dtfac = self.t, self.dt, self.dtfac
+					self.jac = jac = defaultdict(list)
+
+					for col, etp in sorted(self.system.celes.keys()):
+						i = self.system.ele_types.index(etp)
+						ur0 = self.system.ele_banks[i][rup].get()
+						dr1 = self.system.ele_banks[i][rrup].get()
+
+						nupts = self.system.ele_shapes[i][0]
+						for v in range(self.system.nvars):
+							for npt in range(nupts):
+								eidx = self.system.celes[col, etp]
+								
+								eps = np.zeros_like(ur0)
+
+								eps[npt, v, eidx] = 1e-8
+
+								ur = ur0+eps
+
+								self.system.ele_banks[i][r0].set(ur)
+
+								rhs(t+dt, r0, r0)
+								self.backend.wait()
+						
+								dr2 = self.system.ele_banks[i][r0].get()
+
+								dr = (dr1 - dr2)/1e-8
+
+								for e in eidx:
+									jac[etp, e].append(dr[..., e].T.reshape(-1))
+					cond = []
+					for i, eshape in enumerate(self.system.ele_shapes):
+						nele = eshape[-1]
+						etp = self.system.ele_types[i]
+						for e in range(nele):
+							shape = len(jac[etp, e])
+
+							jac[etp, e] = np.array(jac[etp, e]).T + (dtfac/dt)*np.eye(shape)
+							cond.append(np.linalg.cond(jac[etp, e]))
+
+							jac[etp, e] = np.linalg.inv(jac[etp, e])
+
+					cond = comm.allreduce(cond, op=mpi.MAX)
+
+					if rank == root:
+						print(f'rank is {rank} cond number is {np.amax(cond)}')
+
 				
 				def richardson(self, nsmooth):
 					add = self._add
@@ -118,17 +172,18 @@ class GMRESmultip(BaseStdIntegrator):
 					# 	add(0.0, r0, 1.0, rmv)
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
-					r0, r1, r2, r3, r4, *r5 =  self._regidx
-					r5 = r5[0]
+					r0, *r = self._pseudo_regidx
+					rmv = self._mvec_regidx
+					rsrc = self._src_regidx
 					
-					xi = [self.system.ele_banks[i][r1].get()
+					xi = [self.system.ele_banks[i][r0].get()
 							for i in range(len(self.system.ele_types))]
 					jac = self.jac
 					for _ in range(nsmooth):
 
-						self._eval_mat_vec(r2, r1, r5, r4)
+						self._eval_mat_vec(r0, rmv)
 						
-						Axi = [self.system.ele_scal_upts(r5)[i]
+						Axi = [self.system.ele_scal_upts(rmv)[i]
 							   for i in range(len(self.system.ele_types))]
 
 						for i in range(len(self.system.ele_types)):
@@ -137,7 +192,7 @@ class GMRESmultip(BaseStdIntegrator):
 							# nhpt = hclass.system.ele_shapes[i][0] 
 							neles = self.system.ele_shapes[i][-1]
 							nvars = self.system.nvars
-							b = self.system.ele_scal_upts(r3)[i]
+							b = self.system.ele_scal_upts(rsrc)[i]
 							
 							# pr = p[i].get()
 							# re = r[i].get()
@@ -156,14 +211,13 @@ class GMRESmultip(BaseStdIntegrator):
 
 								tmp2 = jac[etp, e] @ b[..., e].T.reshape(-1)
 								xi[i][... ,e] += (2/3) * tmp2.reshape(nvars, nupts).T 
-							self.system.ele_banks[i][r1].set(xi[i])
+							self.system.ele_banks[i][r0].set(xi[i])
 
 				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
 					if f:
 						self.jacobi(nsmooth, hclass=hclass, p=p, r=r)
 					else:
 						self.richardson(nsmooth)
-			
 
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
 									mesh, initsoln, mcfg)
@@ -236,6 +290,12 @@ class GMRESmultip(BaseStdIntegrator):
 		comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
 		self.pintgs[l2].Un = np.sqrt(float(Un))
 
+		for i in range(len(self.system.ele_types)):
+			nuptl2, nvarl2, nelel2 = self.pintgs[l2].system.ele_shapes[i]
+			etp = self.system.ele_types[i]
+			self.pintgs[l2].jac = jac = defaultdict(list)
+			for e in range(nelel2):
+				jac[etp, e] = self.projmats[l1, l2] @ self.pintgs[l1].jac[etp, e]
 
 		self.pintgs[l2].nfeval += 1
 		
@@ -376,7 +436,8 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 				self.level = l
-				self.pintg.jac_mult(n)
+				# self.pintg.jac_mult(n)
+				self.pintg.jac_mult(n, f='jacobi')
 
 				if m is not None and l > m:
 					self.restrict(l, m)

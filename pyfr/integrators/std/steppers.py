@@ -277,24 +277,6 @@ class Trapezoidal(BaseStdStepper):
 		add(1.0, rv, -dtfac/2, rrUp)
 
 		self.nfeval+=1
-		# r1 = R(Un)
-		# rhs_with_postproc(t, r0, r1)
-
-		# r1 = R(Un)/2 + Du/Dt
-		# add(-1/2, r1, 1/dt, r2, -1/dt, r0)
-		
-		# if tp == 1.0:
-		# # r4 = R(Un+1)
-		#     rhs_with_postproc(t, r2, r4)
-		
-		# else:
-		#     rhs_with_postproc(t, r2, r4)
-
-		# r4 = R(Un+1)
-		# rhs_with_postproc(t+dt, r2, r4)
-
-		# r1 = R(Un)/2 + Du/dt + R(Un+1)/2
-		# add(1.0, r1, -1/2, r4)
 
 		normele = self.eval_norm(rv)
 
