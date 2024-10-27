@@ -355,49 +355,28 @@ class GMRESmultip(BaseStdIntegrator):
 		H = np.zeros((m+1, m))
 	
 		beta = rnorm*self.pintg.e1	
-		# for k in range(m):
-		# 	self.pintg.k = k
-		# 	H[:k+2, k] = self.arnoldi(k)
-
-
-		# 	H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
-		# 											cs, sn ,k)
-
-		# 	beta[k+1] = -sn[k] * beta[k]
-		# 	beta[k] = cs[k] * beta[k]
-
-		# 	err = abs(beta[k+1])
-
-		# 	if err < ltol:
-		# 		if rank == root:
-		# 			print(f'GMRES converged in {k} iterations, error is {err}')
-					
-		# 		break
-
-		# if k == m-1 and err > ltol:
-		# 	if rank == root:
-		# 		print(f'GMRES did not converge in {m} iterations, error is {err}')
-
-		while lerr > ltol:
-			k = self.pintg.k
+		for k in range(m):
+			self.pintg.k = k
 			H[:k+2, k] = self.arnoldi(k)
+
 
 			H[:k+2, k], cs[k], sn[k] = self.giv_rot(H[:k+2, k], 
 													cs, sn ,k)
-			
+
 			beta[k+1] = -sn[k] * beta[k]
 			beta[k] = cs[k] * beta[k]
 
-			lerr = abs(beta[k+1])
+			err = abs(beta[k+1])
 
-			self.pintg.k += 1
+			if err < ltol:
+				if rank == root:
+					print(f'GMRES converged in {k} iterations, error is {err}')
+					
+				break
 
-			# if k == m-1 and lerr > ltol:
-			# 	if rank == root:
-			# 		print(f'GMRES error after {k} iters is {lerr}')
-			# 	self.pintg.k = 0
-			# 	add(0.0, self.pintg._du_regidx, 1.0, self.pintg._gmres_j_regidx(m-1))
-				
+		if k == m-1 and err > ltol:
+			if rank == root:
+				print(f'GMRES did not converge in {m} iterations, error is {err}')
 		
 		if rank == root:
 			print(f'GMRES error is {lerr} in iterations {k}')
@@ -531,9 +510,13 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 				self.pintg._res()
 
+				self.pintg._eval_jac()
+
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
 					if m is not None:
 						self._init_loworder(l, m)
+
+
 
 				self.solve_gmres() 
 
@@ -544,30 +527,7 @@ class GMRESmultip(BaseStdIntegrator):
 				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 
 				nnorm = self.pintg.newton_res()
-				if math.isnan(nnorm):
-					solrup = [self.system.ele_scal_upts(rUp)[i] for i in range(len(self.system.ele_types))]
-					solrrup = [self.system.ele_scal_upts(rrUp)[i] for i in range(len(self.system.ele_types))]
-					self._idxcurr = rUp
-
-
-					for sol in solrup:
-						if np.isnan(sol).any():
-								print(f'rank is {rank}, rUp is nan')
-
-					for sol in solrrup:
-						if np.isnan(sol).any():
-								print(f'rank is {rank}, rrUp is nan')
-
-					for sol in solrup:
-						if np.any(sol < 0):
-							print(f'rank is {rank}, negative density')
-					
-					# for plugin in self.pintgs[self._order].plugins:
-					# 	if plugin.name == 'writer':
-					# 		plugin(self.pintgs[self._order], override=True)
-				
-				# if math.isnan(nnorm):
-				# 	exit()
+			
 				nonlin_iter += 1
 				if rank == root:
 					print(nnorm)
