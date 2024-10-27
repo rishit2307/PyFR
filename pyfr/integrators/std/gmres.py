@@ -412,8 +412,8 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 				self.level = l
-				self.pintg.jac_mult(n)
-				# self.pintg.jac_mult(n, f='jacobi')
+				# self.pintg.jac_mult(n)
+				self.pintg.jac_mult(n, f='jacobi')
 
 				if m is not None and l > m:
 					self.restrict(l, m)
