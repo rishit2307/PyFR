@@ -350,7 +350,7 @@ class GMRESmultip(BaseStdIntegrator):
 		rnorm = self.pintg.eval_norm(r0)
 		
 		add(0.0, r0, 1/rnorm, r0)
-		lerr = np.inf
+
 
 		H = np.zeros((m+1, m))
 	
@@ -366,7 +366,7 @@ class GMRESmultip(BaseStdIntegrator):
 			beta[k+1] = -sn[k] * beta[k]
 			beta[k] = cs[k] * beta[k]
 
-			err = abs(beta[k+1])
+			err = abs(beta[k+1]) / abs(rnorm)
 
 			if err < ltol:
 				if rank == root:
@@ -377,9 +377,6 @@ class GMRESmultip(BaseStdIntegrator):
 		if k == m-1 and err > ltol:
 			if rank == root:
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
-		
-		if rank == root:
-			print(f'GMRES error is {lerr} in iterations {k}')
 
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 
@@ -415,8 +412,8 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 				self.level = l
-				# self.pintg.jac_mult(n)
-				self.pintg.jac_mult(n, f='jacobi')
+				self.pintg.jac_mult(n)
+				# self.pintg.jac_mult(n, f='jacobi')
 
 				if m is not None and l > m:
 					self.restrict(l, m)
@@ -510,7 +507,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 				self.pintg._res()
 
-				self.pintg._eval_jac()
+				# self.pintg._eval_jac()
 
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
 					if m is not None:
