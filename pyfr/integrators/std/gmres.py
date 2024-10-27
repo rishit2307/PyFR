@@ -489,7 +489,7 @@ class GMRESmultip(BaseStdIntegrator):
 			add = self._add
 			nnorm = np.inf
 			s = 1.0
-			ntol = self.ntol = 1e-8
+			ntol = self.ntol = 1e-2
 			comm, rank, root = get_comm_rank_root()
 
 			nonlin_iter = 0
@@ -507,7 +507,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 				self.pintg._res()
 
-				# self.pintg._eval_jac()
+				self.pintg._eval_jac()
 
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
 					if m is not None:

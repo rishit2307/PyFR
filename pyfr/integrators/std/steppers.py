@@ -68,7 +68,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
 		self.rnorm= dict()
 
-		self.ltol = 8e-13
+		self.ltol = 1e-4
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
@@ -281,7 +281,7 @@ class Trapezoidal(BaseStdStepper):
 		normele = self.eval_norm(rv)
 
 		
-		return normele
+		return normele/self._get_gndofs()
 		# return self.normele
 
 class StdTVDRK3Stepper(BaseStdStepper):
