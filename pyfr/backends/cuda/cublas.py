@@ -176,7 +176,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         
         return DotKernel(mats=[a, b])
 
-    def lu(self, a, b,c):
+    def lu(self, a):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
         sz = np.dtype(a.traits[-1]).itemsize
@@ -185,40 +185,23 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         batchsize = a.nrow
         n = int(np.sqrt(a.ncol))
 
+        cdptr = cuda.mem_alloc(np.dtype(np.uint32).itemsize)
         adptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
-        bdptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
         ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
-        bhptr = np.ascontiguousarray([b.data + i*sz*b.leaddim for i in range(batchsize)], dtype=np.uintp)
 
-        cuda.memcpy(bdptr, bhptr, bdptr.nbytes)
         cuda.memcpy(adptr, ahptr, adptr.nbytes)
-       
-
         cublasgetrf = w.cublasDgetrfBatc
-        cublasgetri = w.cublasDgetriBatc
 
-        def getinv(stream):
+        def lu(stream):
             w.cublasSetStream(h, stream)
-            bd = bdptr
-            ad = adptr
-
-            bh = bhptr
-            ah = ahptr
-            aa = a
-            bb = b
-            cu = cuda
-            import pdb;pdb.set_trace()
-            cublasgetrf(h, n, adptr, n, None, c, batchsize)
-            
-            cublasgetri(h, n, adptr, n, None, bdptr, n, c, batchsize)
-
+            cublasgetrf(h, n, adptr, n, None, cdptr, batchsize)
         class LUKernel(CUDAKernel):
             def run(self, stream):
-                getinv(stream)
+                lu(stream)
 
-        return LUKernel(mats=[a, b, c])
+        return LUKernel(mats=[a])
     
-    def inv(self, a, b, c):
+    def inv(self, a, b):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
         sz = np.dtype(a.traits[-1]).itemsize
@@ -227,6 +210,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         batchsize = a.nrow
         n = int(np.sqrt(a.ncol))
 
+        cdptr = cuda.mem_alloc(np.dtype(np.uint32).itemsize)
         bdptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
         adptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
         bhptr = np.ascontiguousarray([b.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
@@ -239,12 +223,12 @@ class CUDACUBLASKernels(CUDAKernelProvider):
 
         def getinv(stream):
             w.cublasSetStream(h, stream)
-            cublasgetri(h, n, adptr, n, None, bdptr, n, c, batchsize)
+            cublasgetri(h, n, adptr, n, None, bdptr, n, cdptr, batchsize)
         class InvKernel(CUDAKernel):
             def run(self, stream):
                 getinv(stream)
 
-        return InvKernel(mats=[a, b, c])
+        return InvKernel(mats=[a, b])
             
     def amin(self, a, b):
         cuda = self.backend.cuda

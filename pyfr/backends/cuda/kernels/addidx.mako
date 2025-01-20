@@ -4,6 +4,7 @@
 __global__ void
 addidx(ixdtype_t ncolb, ixdtype_t ldim,
        fpdtype_t* __restrict__ x0, 
+       fpdtype_t* __restrict__ x1, 
        fpdtype_t* __restrict__ eid,
        ixdtype_t npt, ixdtype_t vi)
 {
@@ -13,6 +14,6 @@ addidx(ixdtype_t ncolb, ixdtype_t ldim,
    if (j < ncolb)
     {
         idx = npt*ldim + SOA_IX(j, vi, ${ncola});
-        x0[idx] += 1.0E-8f*eid[j];
+        x1[idx] = x0[idx] + 1.0E-8f*eid[j];
     }
 }

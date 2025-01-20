@@ -57,51 +57,47 @@ class GMRESmultip(BaseStdIntegrator):
 
 				def _eval_jac(self):
 					add, rhs = self._add, self.system.rhs
-					comm, rank, root = get_comm_rank_root()
 					rup, rrup = self._up_rup_regidx
 					r0, *r = self._pseudo_regidx
-					system = self.system
 
 					t, dt, dtfac = self.t, self.dt, self.dtfac
-					nupts, nvars, neles = system.nupts, system.nvars, system.neles
-					self.jac = jac = np.array(neles, (nvars*nupts)**2)
-					self.jac = backend.matrix(jac.shape, jac, tags={'align'})
+					self.jac = jac = self.jacinv = self.jacshuff = {}
 
 					for col, etp in sorted(self.system.celes.keys()):
 
 						celes = self.system.celes[col, etp]
-
-						kern = self.backend.kernel('addidx', *[rup, r0, celes])
-						kern2 = self.backend.kernel('preinvshuff', *[r0, jac])
-
 						nupts = self.system.ele_shapes[i][0]
+						neles = self.system.ele_shapes[i][-1]
+						nvars = self.system.ele_shapes[i][1]
+
+						self.jac[etp] = jac[etp] = np.empty((neles, (nvars*nupts)**2))
+						self.jacshuff[etp] = np.empty((nupts*nvars,
+													 	nupts, nvars, neles))
+						self.jac[etp] = backend.matrix(jac.shape, jac[etp], tags={'align'})
+						self.jacinv[etp] = backend.matrix(jac.shape, jac[etp], tags={'align'})
+						self.jacshuff[etp] = backend.matrix(self.jacshuff[etp].shape,
+										  	self.jacshuff[etp], tags={'align'})
+
 						for v in range(self.system.nvars):
 							for npt in range(nupts):
 
-								kern.bind(npt, v)
-								self.backend.run_kernels([kern])
-
+								self._addid(rup, r0, celes, npt, v)
 								rhs(t+dt, r0, r0)
-								self._add(-1.0/1e-8, r0, 1.0/1e-8, rrup)
 
-								self.backend.run_kernels([kern2])
+								self._add(-1.0/1e-8, r0, 1.0/1e-8, rrup)
+								self._init_jac(r0, jac, npt, v, dtfac/dt)
 
 					for i, eshape in enumerate(self.system.ele_shapes):
 						nele = eshape[-1]
 						etp = self.system.ele_types[i]
-						for e in range(nele):
-							shape = len(jac[etp, e])
+						krf = self.backend.kernel('lu', self.jac[etp])
+						kri = self.backend.kernel('inv', self.jac[etp], self.jacinv[etp])
 
-							jac[etp, e] = np.array(jac[etp, e]).T + (dtfac/dt)*np.eye(shape)
-							cond.append(np.linalg.cond(jac[etp, e]))
+						self.backend.run_kernels([krf, kri])	
 
-							jac[etp, e] = np.linalg.inv(jac[etp, e])
-
-					cond = comm.allreduce(cond, op=mpi.MAX)
-
-					if rank == root:
-						print(f'rank is {rank} cond number is {np.amax(cond)}')
-
+						self._shuff_jac(self.jacinv[etp], self.jacshuff[etp])
+						self.backend.wait()
+						import pdb;pdb.set_trace()	
 				
 				def richardson(self, nsmooth):
 					add = self._add

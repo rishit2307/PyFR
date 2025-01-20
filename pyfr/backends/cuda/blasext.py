@@ -138,7 +138,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Build the kernel
         kern = self._build_kernel('addidx', src,
-                                  [ixdtype]*2 + [np.uintp]*2 + [ixdtype]*2)
+                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*2)
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -146,7 +146,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         class AddidxKernel(CUDAKernel):
             def bind(self, *consts):
-                params.set_args(*consts, start=4)
+                params.set_args(*consts, start=5)
 
             def run(self, stream):
                 kern.exec_async(stream, params)

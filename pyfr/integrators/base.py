@@ -252,9 +252,10 @@ class BaseCommon:
 		return kerns
 	
 	@memoize
-	def _get_addidx_kerns(self, rs, eid):
+	def _get_addidx_kerns(self, r0, r1, eid):
 		em = self.system.ele_banks
-		kerns = [self.backend.kernel('addidx', *[em[rs], eid])]
+		kerns = [self.backend.kernel('addidx', 
+				*[em[r0], em[r1], eid])]
 
 		return kerns
 	
@@ -299,8 +300,8 @@ class BaseCommon:
 		self.backend.run_kernels(jackern)
 	
 
-	def _addid(self, rs, eid, npt, vi):
-		addidx = self._get_addidx_kerns(rs, eid)
+	def _addid(self, r0, r1, eid, npt, vi):
+		addidx = self._get_addidx_kerns(r0, r1, eid)
 
 		for k in addidx:
 			k.bind(npt, vi)
