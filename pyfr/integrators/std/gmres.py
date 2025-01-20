@@ -61,44 +61,67 @@ class GMRESmultip(BaseStdIntegrator):
 					r0, *r = self._pseudo_regidx
 
 					t, dt, dtfac = self.t, self.dt, self.dtfac
-					self.jac = jac = self.jacinv = self.jacshuff = {}
+					self.jac = jac = {}
+					self.jacinv = {}
+					self.jacshuff = {}
 
-					for col, etp in sorted(self.system.celes.keys()):
+					for etp in self.system.ele_types:
 
-						celes = self.system.celes[col, etp]
+						i = self.system.ele_types.index(etp)
 						nupts = self.system.ele_shapes[i][0]
 						neles = self.system.ele_shapes[i][-1]
 						nvars = self.system.ele_shapes[i][1]
 
-						self.jac[etp] = jac[etp] = np.empty((neles, (nvars*nupts)**2))
+						self.jac[etp] = jac[etp] = np.empty((neles, 
+										   				(nvars*nupts)**2))
 						self.jacshuff[etp] = np.empty((nupts*nvars,
 													 	nupts, nvars, neles))
-						self.jac[etp] = backend.matrix(jac.shape, jac[etp], tags={'align'})
-						self.jacinv[etp] = backend.matrix(jac.shape, jac[etp], tags={'align'})
+						self.jacinv[etp] = backend.matrix(jac[etp].shape, jac[etp],
+															 tags={'align'})
+						self.jac[etp] = backend.matrix(jac[etp].shape, jac[etp], 
+									 					tags={'align'})
 						self.jacshuff[etp] = backend.matrix(self.jacshuff[etp].shape,
 										  	self.jacshuff[etp], tags={'align'})
 
+					for col, etp in sorted(self.system.celes.keys()):
+						celes = self.system.celes[col, etp]
+	
 						for v in range(self.system.nvars):
 							for npt in range(nupts):
 
-								self._addid(rup, r0, celes, npt, v)
+								self._addid(celes, [rup, r0], npt, v)
 								rhs(t+dt, r0, r0)
 
 								self._add(-1.0/1e-8, r0, 1.0/1e-8, rrup)
-								self._init_jac(r0, jac, npt, v, dtfac/dt)
+								kerns = self._init_jac(r0, etp)
+								backend.run_kernels(kerns)
 
-					for i, eshape in enumerate(self.system.ele_shapes):
-						nele = eshape[-1]
-						etp = self.system.ele_types[i]
-						krf = self.backend.kernel('lu', self.jac[etp])
-						kri = self.backend.kernel('inv', self.jac[etp], self.jacinv[etp])
 
-						self.backend.run_kernels([krf, kri])	
+					krf = backend.kernel('lu', self.jac[etp])
+					kri = backend.kernel('inv', self.jac[etp], self.jacinv[etp])
 
-						self._shuff_jac(self.jacinv[etp], self.jacshuff[etp])
-						self.backend.wait()
-						import pdb;pdb.set_trace()	
-				
+					backend.run_kernels([krf, kri])	
+
+					shufkerns = self._shuff_jac(etp)
+					backend.run_kernels(shufkerns)
+					backend.wait()
+
+				def bind_kerns(self, kerns, *args):
+					for k in kerns:
+						k.bind(*args)
+	
+				def _init_jac(self, r0, etp):
+					jac = self.jac[etp]
+					kerns = [self.backend.kernel('jacinit', *[em[r0]] + [jac])
+							   for em in self.system.ele_banks]
+					return kerns
+
+				def _shuff_jac(self, etp):
+					jac0, jac1 = self.jacinv[etp], self.jacshuff[etp]
+					kerns = [self.backend.kernel('jacshuffle', *[jac0, jac1])]
+
+					return kerns
+
 				def richardson(self, nsmooth):
 					add = self._add
 					tau = mcfg.getfloat('solver-time-integrator', 'tau')
@@ -501,6 +524,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
+				self.pintg._eval_jac()
 
 
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
