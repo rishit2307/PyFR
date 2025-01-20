@@ -60,7 +60,8 @@ class CUBLASWrappers(LibWrapper):
         (c_int, 'cublasDgetriBatched', c_void_p, c_int, c_void_p, c_int, 
          c_void_p, c_void_p, c_int, c_void_p, c_int),
          (c_int, 'cublasGetVersion_v2',c_void_p,  c_void_p), 
-         (c_int, 'cublasIdamin_v2', c_void_p, c_int, c_void_p, c_int, c_void_p)
+         (c_int, 'cublasIdamin_v2', c_void_p, c_int, c_void_p, c_int, c_void_p), 
+         (c_int, 'cublasDasum_v2', c_void_p, c_int, c_void_p, c_int, c_void_p)
     ]
 
     def _transname(self, name):
