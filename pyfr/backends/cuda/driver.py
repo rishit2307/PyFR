@@ -145,6 +145,7 @@ class CUDAWrappers(LibWrapper):
         (c_int, 'cuMemcpy', c_void_p, c_void_p, c_size_t),
         (c_int, 'cuMemcpyAsync', c_void_p, c_void_p, c_size_t, c_void_p),
         (c_int, 'cuMemsetD8_v2', c_void_p, c_char, c_size_t),
+        (c_int, 'cuMemsetD32_v2', c_void_p, c_int, c_size_t),
         (c_int, 'cuStreamCreate', POINTER(c_void_p), c_uint),
         (c_int, 'cuStreamDestroy_v2', c_void_p),
         (c_int, 'cuStreamBeginCapture', c_void_p, c_uint),

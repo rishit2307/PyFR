@@ -40,7 +40,6 @@ class CUDAMatrixBase(_CUDAMatrixCommon, base.MatrixBase):
         # Copy
         self.backend.cuda.memcpy(self.data, buf, self.nbytes)
 
-
 class CUDAMatrixSlice(_CUDAMatrixCommon, base.MatrixSlice):
     @cached_property
     def data(self):

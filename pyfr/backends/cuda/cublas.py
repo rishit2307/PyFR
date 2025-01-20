@@ -1,4 +1,4 @@
-from ctypes import POINTER, c_int, c_double, c_float, c_void_p, c_uint64
+from ctypes import POINTER, c_int, c_double, c_float, c_void_p, c_uint64, byref, pointer
 
 import numpy as np
 
@@ -54,7 +54,13 @@ class CUBLASWrappers(LibWrapper):
         (c_int, 'cublasSetPointerMode_v2', c_void_p, c_int), 
         (c_int, 'cublasDaxpy_v2', c_void_p, c_int, POINTER(c_double), c_void_p, 
          c_int, c_void_p, c_int), 
-         (c_int, 'cublasDnrm2_v2', c_void_p, c_int, c_void_p, c_int, c_void_p)
+        (c_int, 'cublasDnrm2_v2', c_void_p, c_int, c_void_p, c_int, c_void_p),
+        (c_int, 'cublasDgetrfBatched', c_void_p, c_int, c_void_p, c_int, 
+         c_void_p, c_void_p, c_int),
+        (c_int, 'cublasDgetriBatched', c_void_p, c_int, c_void_p, c_int, 
+         c_void_p, c_void_p, c_int, c_void_p, c_int),
+         (c_int, 'cublasGetVersion_v2',c_void_p,  c_void_p), 
+         (c_int, 'cublasIdamin_v2', c_void_p, c_int, c_void_p, c_int, c_void_p)
     ]
 
     def _transname(self, name):
@@ -139,6 +145,110 @@ class CUDACUBLASKernels(CUDAKernelProvider):
                 return rhost
         
         return DotKernel(mats=[a, b])
+
+    def lu(self, a, b,c):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+        sz = np.dtype(a.traits[-1]).itemsize
+
+        
+        batchsize = a.nrow
+        n = int(np.sqrt(a.ncol))
+
+        adptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        bdptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
+        bhptr = np.ascontiguousarray([b.data + i*sz*b.leaddim for i in range(batchsize)], dtype=np.uintp)
+
+        cuda.memcpy(bdptr, bhptr, bdptr.nbytes)
+        cuda.memcpy(adptr, ahptr, adptr.nbytes)
+       
+
+        cublasgetrf = w.cublasDgetrfBatc
+        cublasgetri = w.cublasDgetriBatc
+
+        def getinv(stream):
+            w.cublasSetStream(h, stream)
+            bd = bdptr
+            ad = adptr
+
+            bh = bhptr
+            ah = ahptr
+            aa = a
+            bb = b
+            cu = cuda
+            import pdb;pdb.set_trace()
+            cublasgetrf(h, n, adptr, n, None, c, batchsize)
+            
+            cublasgetri(h, n, adptr, n, None, bdptr, n, c, batchsize)
+
+        class LUKernel(CUDAKernel):
+            def run(self, stream):
+                getinv(stream)
+
+        return LUKernel(mats=[a, b, c])
+    
+    def inv(self, a, b, c):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+        sz = np.dtype(a.traits[-1]).itemsize
+
+        
+        batchsize = a.nrow
+        n = int(np.sqrt(a.ncol))
+
+        bdptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        adptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        bhptr = np.ascontiguousarray([b.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
+        ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
+
+        cuda.memcpy(bdptr, bhptr, bdptr.nbytes)
+        cuda.memcpy(adptr, ahptr, adptr.nbytes)
+
+        cublasgetri = w.cublasDgetriBatc
+
+        def getinv(stream):
+            w.cublasSetStream(h, stream)
+            cublasgetri(h, n, adptr, n, None, bdptr, n, c, batchsize)
+        class InvKernel(CUDAKernel):
+            def run(self, stream):
+                getinv(stream)
+
+        return InvKernel(mats=[a, b, c])
+            
+    def amin(self, a, b):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+        n = a.ncol*a.nrow
+
+        cublasamin = w.cublasIdamin
+        w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_HOST)
+
+        # rdev = cuda.mem_alloc(np.dtype(np.int32).itemsize)
+        # rhost = cuda.pagelocked_empty((), np.int32)
+        
+
+
+        def ver(stream):
+            w.cublasSetStream(h, stream)
+            cublasamin(h, n, a, 1, b)
+        
+        class VKernel(CUDAKernel):
+            def run(self, stream):
+                ver(stream)
+                # cuda.memcpy(rhost, rdev, rdev.nbytes, stream)
+            
+            # @property
+            # def retval(self):
+            #     return rhost
+        
+        return VKernel()
+
+
+        
+
+
+
 
     # def mul(self, a, b, out, alpha=1.0, beta=0.0, gmres=False):
     #     cuda = self.backend.cuda

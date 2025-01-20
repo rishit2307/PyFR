@@ -163,7 +163,10 @@ class BaseSystem:
             celes[rcol, etp].append(rele)
         
         for col, etp in celes.keys():
-            celes[col, etp] = list(set(celes[col, etp]))
+            cmat = np.zeros((self.neles), dtype=bool)
+            cmat[celes[col, etp]] = True
+            
+            celes[col, etp] = self.backend.matrix(cmat[None].shape, cmat[None], tags={'align'})
         
         return celes
 

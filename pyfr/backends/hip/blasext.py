@@ -121,3 +121,59 @@ class HIPBlasExtKernels(HIPKernelProvider):
                            stream)
 
         return ReductionKernel(mats=regs)
+
+    
+
+    def addidx(self, *arr, npt, vi):
+        ncola, ncolb = arr[0].ioshape[1:]
+        nrow = 1
+
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, ncolb)
+
+        ixdtype = self.backend.ixdtype
+        fpdtype = self.backend.fpdtype
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('axnpby').render(
+            ncola=ncola)
+
+        # Build the kernel
+        kern = self._build_kernel('axnpby', src,
+                                  [ixdtype]*3 + [np.uintp]*2)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ncolb, *arr)
+
+    def jacmult(self, *arr):
+        ixdtype = self.backend.ixdtype
+        nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
+        ncola, ncolb = arr[0].ioshape[1:]
+
+        # Determine the grid/block
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, ncolb, nrow*ncola)
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('jacmult').render(
+              block=block, ncola=ncola)
+
+        # Build the kernel
+        kern = self._build_kernel('jacmult', src,
+                                  [ixdtype]*3 + [np.uintp]*3)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ncolb, ldim, *arr)
+
+        class JacMultKernel(HIPKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return JacMultKernel(mats=arr)
+
+

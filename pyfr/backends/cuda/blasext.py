@@ -121,3 +121,133 @@ class CUDABlasExtKernels(CUDAKernelProvider):
                             stream)
 
         return ReductionKernel(mats=regs)
+
+    def addidx(self, *arr):
+        nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
+        ncola, ncolb = arr[0].ioshape[1:]
+
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, ncolb)
+
+        ixdtype = self.backend.ixdtype
+        fpdtype = self.backend.fpdtype
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('addidx').render(
+            ncola=ncola)
+
+        # Build the kernel
+        kern = self._build_kernel('addidx', src,
+                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*2)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(ncolb, ldim, *arr)
+
+        class AddidxKernel(CUDAKernel):
+            def bind(self, *consts):
+                params.set_args(*consts, start=5)
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return AddidxKernel(mats=arr)
+    
+    def jacinit(self, *arr):
+        nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
+        ncola, ncolb = arr[0].ioshape[1:]
+
+        nrowj, ncolj, ldimj, fpdtypej = arr[1].traits[1:]
+
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, ncolb, int(np.sqrt(ldimj)))
+
+        ixdtype = self.backend.ixdtype
+        fpdtype = self.backend.fpdtype
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('jacinit').render(
+            ncola=ncola)
+
+        # Build the kernel
+        kern = self._build_kernel('jacinit', src,
+                                  [ixdtype]*4 + [np.uintp]*2 + [ixdtype]*2 + [fpdtype])
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ncolb, ldim, ldimj, *arr)
+
+        class JacInitKernel(CUDAKernel):
+            def bind(self, *consts):
+                params.set_args(*consts, start=6)
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return JacInitKernel(mats=arr)
+    
+    def jacshuffle(self, *arr):
+        nrow, ncol, ldim0, fpdtype = arr[0].traits[1:]
+        nrow, ncol, ldim1, fpdtype = arr[1].traits[1:]
+        nupts, ncola, ncolb = arr[1].ioshape[1:]
+
+
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, ncolb, nupts*ncola, nupts*ncola)
+
+        ixdtype = self.backend.ixdtype
+        fpdtype = self.backend.fpdtype
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('jacshuffle').render(
+            ncola=ncola)
+
+        # Build the kernel
+        kern = self._build_kernel('jacshuffle', src,
+                                  [ixdtype]*3 + [np.uintp]*2)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(ncolb, ldim0, ldim1, *arr)
+
+        class JacShuffleKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return JacShuffleKernel(mats=arr)
+    
+
+    def jacmul(self, *arr):
+        ixdtype = self.backend.ixdtype
+        nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
+        ncola, ncolb = arr[0].ioshape[1:]
+
+        # Determine the grid/block
+        block = (128, 1, 1)
+        grid = get_grid_for_block(block, ncolb, nrow*ncola)
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('jacmul').render(
+             ncola=ncola)
+
+        # Build the kernel
+        kern = self._build_kernel('jacmul', src,
+                                [ixdtype]*3 + [np.uintp]*3)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ncolb, ldim, *arr)
+
+        class JacMulKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return JacMulKernel(mats=arr)
+
+

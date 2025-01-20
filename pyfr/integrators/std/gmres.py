@@ -60,38 +60,31 @@ class GMRESmultip(BaseStdIntegrator):
 					comm, rank, root = get_comm_rank_root()
 					rup, rrup = self._up_rup_regidx
 					r0, *r = self._pseudo_regidx
+					system = self.system
 
 					t, dt, dtfac = self.t, self.dt, self.dtfac
-					self.jac = jac = defaultdict(list)
+					nupts, nvars, neles = system.nupts, system.nvars, system.neles
+					self.jac = jac = np.array(neles, (nvars*nupts)**2)
+					self.jac = backend.matrix(jac.shape, jac, tags={'align'})
 
 					for col, etp in sorted(self.system.celes.keys()):
-						i = self.system.ele_types.index(etp)
-						ur0 = self.system.ele_banks[i][rup].get()
-						dr1 = self.system.ele_banks[i][rrup].get()
+
+						celes = self.system.celes[col, etp]
+						kern = self.backend.kernel('addidx', *[rup, r0, celes])
+						kern2 = self.backend.kernel('preinvshuff', *[r0, jac])
 
 						nupts = self.system.ele_shapes[i][0]
 						for v in range(self.system.nvars):
 							for npt in range(nupts):
-								eidx = self.system.celes[col, etp]
-								
-								eps = np.zeros_like(ur0)
 
-								eps[npt, v, eidx] = 1e-8
-
-								ur = ur0+eps
-
-								self.system.ele_banks[i][r0].set(ur)
+								kern.bind(npt, v)
+								self.backend.run_kernels([kern])
 
 								rhs(t+dt, r0, r0)
-								self.backend.wait()
-						
-								dr2 = self.system.ele_banks[i][r0].get()
+								self._add(-1.0/1e-8, r0, 1.0/1e-8, rrup)
 
-								dr = (dr1 - dr2)/1e-8
+								self.backend.run_kernels([kern2])
 
-								for e in eidx:
-									jac[etp, e].append(dr[..., e].T.reshape(-1))
-					cond = []
 					for i, eshape in enumerate(self.system.ele_shapes):
 						nele = eshape[-1]
 						etp = self.system.ele_types[i]

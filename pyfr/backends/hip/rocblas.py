@@ -36,6 +36,8 @@ class RocBLASWrappers(LibWrapper):
     DATATYPE_F32_R = 151
     DATATYPE_F64_R = 152
     GEMM_ALGO_SOLUTION_INDEX = 1
+    FILL_FULL = 122
+    DIAGONAL_NON_UNIT = 131
 
     # Functions
     _functions = [
@@ -49,7 +51,9 @@ class RocBLASWrappers(LibWrapper):
         (c_int, 'rocblas_gemm_ex', c_void_p, c_int, c_int, c_int,
          c_int, c_int, c_void_p, c_void_p, c_int, c_int, c_void_p,
          c_int, c_int, c_void_p, c_void_p, c_int, c_int, c_void_p,
-         c_int, c_int, c_int, c_int, c_int, c_uint32)
+         c_int, c_int, c_int, c_int, c_int, c_uint32), 
+         (c_int, 'rocblas_dtrtri', c_void_p, c_int, c_int, 
+          c_int, c_void_p, c_int, c_void_p, c_int)
     ]
 
 
@@ -158,3 +162,31 @@ class HIPRocBLASKernels(HIPKernelProvider):
                 gemm(stream)
 
         return MulKernel(mats=[a, b, out], dt=dt)
+    
+
+    def inv(self, a, b):
+
+        h, w = self._handle, self._wrappers
+
+        opA = opB = w.OPERATION_NONE
+        rtype = w.DATATYPE_F64_R
+
+        n = 64
+        print(a.leaddim)
+        def inverse(stream):
+            w.rocblas_set_stream(h, stream)
+            w.rocblas_dtrtri(
+                h, w.FILL_FULL, w.DIAGONAL_NON_UNIT, n, a, a.leaddim, 
+                b, b.leaddim
+            )
+
+        class InvKernel(HIPKernel):
+            def add_to_graph(self, graph, deps):
+                pass
+
+            def run(self, stream):
+                inverse(stream)
+            
+        return InvKernel(mats=[a, b])
+
+
