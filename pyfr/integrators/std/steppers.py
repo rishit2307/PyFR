@@ -27,30 +27,18 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-	def _eval_mat_vec(self, rdU, rrhs, ev_rru=False):
+	def _eval_mat_vec(self, rdU, rrhs):
 
 		add, rhs = self._add, self.system.rhs
 		epsmc = self.epsmc
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
 		rU, rrU = self._up_rup_regidx
-
-		comm, rank, root = get_comm_rank_root()
-
-		if ev_rru:
-			rhs(t+dt, rU, rrU)
-			self.nfeval += 1
-
-			self.Un = self.eval_norm(rU)
-
-
-		# dkerns = self._get_reduction_kerns(rdU, method='gmresnorm', norm='l2')
-		# self.backend.run_kernels(dkerns, wait=True)
-		# dUn = np.array([sum(v for k in dkerns for v in k.retval)])
-		# comm.Allreduce(mpi.IN_PLACE, dUn, op=mpi.SUM)
+		dUn = self.eval_norm(rdU)
 
 		# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
-		eps = epsmc*np.sqrt(self.Un)
+		# eps = epsmc*np.sqrt(self.Un)
+		eps = self.epsmc*self.Un/dUn + self.epsmc
 
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
@@ -68,7 +56,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
 		self.rnorm= dict()
 
-		self.ltol = 1e-4
+		self.ltol = 1e-3
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
@@ -94,131 +82,6 @@ class StdEulerStepper(BaseStdStepper):
 		add(1.0, ut, dt, f)
 
 		return ut
-	
-class Euler(BaseStdStepper):
-	stepper_name = 'backward-euler'
-	stepper_has_errest = False
-	stepper_nregs = 5
-	stepper_order = 1
-
-	@property
-	def _stepper_nfevals(self):
-		return self.nsteps
-
-	def _res(self, t, dt, dtfac=1.0, eps=None):
-		add, rhs_with_postproc = self._add, self.system.rhs
-		eletype =  self.eletype
-		comm, rank, root = get_comm_rank_root()
-
-		r0, r1, r2, r3, *r4 = self._regidx
-		r4 = r4[0]
-
-		self.l2u = sum([np.linalg.norm(self.system.ele_scal_upts(r2)[i])**2 for 
-						i in range(len(self.system.ele_types))])
-		
-		self.l2u = np.sqrt(comm.allreduce(self.l2u, mpi.SUM))
-		
-		dUn = sum([np.linalg.norm(self.system.ele_scal_upts(r3)[i])**2
-				for i in range(len(self.system.ele_types))])
-		dUn = comm.allreduce(dUn, op=mpi.SUM)
-		dUn = np.sqrt(dUn)
-		
-		# max_etp = max(l2u, key=l2u.get)
-		eps = self.epsmc*np.sqrt(self.l2u+1)/(dUn + self.epsmc**2)
-
-		# r1 = Un+1,k + eps*DUn+1,k
-		add(0.0, r1, eps, r3, 1.0, r2)
-
-		# r1 = R(Un+1,k+1)
-		rhs_with_postproc(t+dt, r1, r1)
-
-		# r1 = R(Un+1,k+1)/eps + dUnk/dt
-		add(-1.0/eps, r1, dtfac/dt, r3)
-
-		# # r3 = R(Un)
-		# rhs_with_postproc(t, r0, r3)
-
-		# r4 = R(Un+1, k)
-		rhs_with_postproc(t+dt, r2, r4)
-
-		# r3 = r4 = R(Un+1, k)
-		add(0.0, r3, 1.0, r4)
-
-		# r1 = R(Un+1,k+1)/eps + dUnk/dt - R(Un+1,k)/eps
-		add(1.0, r1, 1.0/eps, r4)
-
-		# # r3 = R(Un)/2 + R(Un+1,k)/2 
-		# add(dtfac/2., r3, dtfac/2., r4)
-
-		# r3 = R(Un+1,k)  + Un+1,k/dt - Un/dt
-		add(1.0, r3, -dtfac/dt, r2, dtfac/dt, r0)
-
-		# r1 = b - Ax
-		add(-1.0, r1, 1.0, r3)
-
-	def newton_res(self, t, dt):
-		add, rhs_with_postproc = self._add, self.system.rhs
-		self.normele = dict()
-		comm, rank, root = get_comm_rank_root()
-
-		r0, r1, r2, r3, *r4 = self._regidx
-		r4 = r4[0]
-
-		# r1 = Du/Dt
-		add(0.0, r1, 1/dt, r2, -1/dt, r0)
-
-		# r4 = R(Un+1)
-		rhs_with_postproc(t+dt, r2, r4)
-
-		# r1 = Du/dt + R(Un+1)
-		add(1.0, r1, -1, r4)
-		# import pdb;pdb.set_trace()
-		self.normele = sum([np.linalg.norm(self.system.ele_banks[i][r1]
-							.get())**2 for i in range(len(self.system.ele_types))])
-		
-		self.normele = np.sqrt(comm.allreduce(self.normele, op=mpi.SUM))
-		return self.normele/self._get_gndofs()
-		# return self.normele
-	
-	def step(self, t, dt):
-		r0, r1, r2, r3, *r4 = self._regidx
-		r4 = r4[0]
-		add = self._add
-		nnorm = np.inf
-		s = 1.0
-		ntol = self.ntol = 1e-4
-
-		comm, rank, root = get_comm_rank_root()
-		print(f't is {t}, dt is {dt}')
-		nonlin_iter = 0
-
-		while nnorm > ntol:
-			self._init_gmres()
-
-			x = copy.deepcopy(self.system.ele_scal_upts(r3))
-
-			self._res(t, dt, dtfac=1.0)
-
-			self.solve_gmres(t, dt, x, dtfac=1.0)
-
-			# r2 = Un+1,k+1 = Un+1,k + s*dUk
-			add(1.0, r2, s, r3)
-
-			nnorm = self.newton_res(t, dt)
-
-			nonlin_iter+= 1
-			if rank == root:
-				print(f'Newton residual is {nnorm}')
-				print(nonlin_iter)
-
-		# r0 = Un+1 = r2
-		add(0.0, r0, 1.0, r2)
-
-		print("Step completed")
-
-		return r0
-
-
 class Trapezoidal(BaseStdStepper):
 	stepper_name = 'trapezium'
 	stepper_has_errest = False
@@ -230,32 +93,44 @@ class Trapezoidal(BaseStdStepper):
 	def _stepper_nfevals(self):
 		return self.nsteps
 	
-	def _res(self):
+	def _res(self, ev_rru=False):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
 		add, rhs_with_postproc = self._add, self.system.rhs
 		rmv = self._mvec_regidx
-
-		self._eval_mat_vec(self._duold_regidx, rmv, ev_rru=True)
-		
 		ru, rru = self._u_ru_regidx
 		rup, rrup = self._up_rup_regidx
-		rdu = self._gmres_j_regidx(0)
+		if ev_rru:
+			rhs_with_postproc(t+dt, rup, rrup)
 		
+			# rru = R(Un)
+			rhs_with_postproc(t, ru, rru)
+			self.nfeval += 2
+			rdu = self._du_regidx
 
-		# rru = R(Un)
-		rhs_with_postproc(t, ru, rru)
-		self.nfeval += 1
+			# rs = R(Un)/2 + R(Un+1,k)/2 
+			add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
 
-		# rdu0 = R(Un)/2 + R(Un+1,k)/2 
-		add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
+			# rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
+			add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
 
-		# rdu0 = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
-		add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
+			self.Un = self.eval_norm1(rup)/self._get_gndofs()
+			
 
-		# rdu0 = b - Ax
-		add(1.0, rdu, -1.0, rmv)
+			# if rank == root:
+			# 	print(f'during init, res is {ttp}')
 
+		else:
+			# rmv = A*rdu
+			self._eval_mat_vec(self._du_regidx, rmv)
+
+			add(-1.0, rmv, dtfac/2., rru, dtfac/2., rrup)
+
+			add(1.0, rmv, -dtfac/dt, rup, dtfac/dt, ru)
+
+			err = self.eval_norm2(rmv)
+
+			return err
 
 	def newton_res(self):
 		add, rhs_with_postproc = self._add, self.system.rhs
@@ -277,11 +152,9 @@ class Trapezoidal(BaseStdStepper):
 		add(1.0, rv, -dtfac/2, rrUp)
 
 		self.nfeval+=1
-
 		normele = self.eval_norm(rv)
 
-		
-		return normele/self._get_gndofs()
+		return normele/np.sqrt(self._get_gndofs())
 		# return self.normele
 
 class StdTVDRK3Stepper(BaseStdStepper):

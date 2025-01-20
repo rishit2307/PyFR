@@ -377,15 +377,15 @@ class GMRESmultip(BaseStdIntegrator):
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
 		
 		consts = [0.0]+list(y)
-		regidxs = [rdu] + [rj(j) for j in range(k+1)]
+		# regidxs = [rdu] + [rj(j) for j in range(k+1)]
+		rp = self.pintg._prec_regs
+		regidxs = [rdu] + [r for r in rp]
 		self._addv(consts, regidxs)
 
-		self.mg_vcycle()
-		
-		rduold = self.pintg._duold_regidx
-		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
-		self._add(0.0, rdu, 1.0, r0, 1.0, rduold)
 
+		# self.mg_vcycle()
+		
+		err = self.pintg._res()
 	def mg_vcycle(self):
 		if not self.mpniters:
 			return
@@ -395,7 +395,6 @@ class GMRESmultip(BaseStdIntegrator):
 		self.level = self._order
 		r0, *r = self.pintg._pseudo_regidx
 		self.pintg._add(0.0, r0, 0.0, self.pintg._du_regidx)
-		rdu = self.pintg._du_regidx
 
 		for i in range(self.mpniters):
 			for l in self.levels[1:]:
@@ -421,13 +420,14 @@ class GMRESmultip(BaseStdIntegrator):
 
 		h = np.zeros(k+1)
 		comm, rank, root = get_comm_rank_root()
-
+		rkp1 = self.pintg._gmres_j_regidx(k+1)
 		rdu = self.pintg._du_regidx
 		rmv = self.pintg._mvec_regidx
 		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
 
 		self.mg_vcycle()
-
+		rprec = self.pintg._prec_regidx
+		add(0.0, rprec, 1.0, r0)
 		self.pintg._eval_mat_vec(r0, rmv)
 		rji = self.pintg._gmres_j_regidx
 
@@ -444,7 +444,6 @@ class GMRESmultip(BaseStdIntegrator):
 		qnorm = self.pintg.eval_norm(rmv)
 
 		h = np.append(h, qnorm)
-		rkp1 = self.pintg._gmres_j_regidx(k+1)
 		add(0.0, rkp1, 1.0/qnorm, rmv)
 
 		return h
@@ -498,7 +497,7 @@ class GMRESmultip(BaseStdIntegrator):
 					print(f't is {self.tcurr}, dt is {dt}')
 
 				self.pintg._init_gmres()
-				self.pintg._res()
+				self.pintg._res(ev_rru=True)
 
 				self.pintg._eval_jac()
 
@@ -514,14 +513,14 @@ class GMRESmultip(BaseStdIntegrator):
 				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx
 				rdU = self.pintgs[self._order]._du_regidx
 				add(1.0, rUp, s, rdU)
-				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
+				# add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 
 				nnorm = self.pintg.newton_res()
 			
 				nonlin_iter += 1
 				if rank == root:
 					print(nnorm)
-					print(nonlin_iter)
+					print(f'newton iteration is {nonlin_iter}')
 
 			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2
