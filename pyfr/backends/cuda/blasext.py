@@ -122,19 +122,19 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return ReductionKernel(mats=regs)
 
-    def addidx(self, *arr):
+    def addidx(self, *arr, subdims=None):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[0].ioshape[1:]
 
         block = (128, 1, 1)
-        grid = get_grid_for_block(block, ncolb)
+        grid = get_grid_for_block(block, ncolb, nrow)
 
         ixdtype = self.backend.ixdtype
         fpdtype = self.backend.fpdtype
 
         # Render the kernel template
         src = self.backend.lookup.get_template('addidx').render(
-            ncola=ncola)
+            ncola=ncola, subdims=subdims or range(ncola))
 
         # Build the kernel
         kern = self._build_kernel('addidx', src,

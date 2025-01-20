@@ -58,7 +58,7 @@ class GMRESmultip(BaseStdIntegrator):
 				def _eval_jac(self):
 					add, rhs = self._add, self.system.rhs
 					rup, rrup = self._up_rup_regidx
-					r0, *r = self._pseudo_regidx
+					r0, r1, *r = self._pseudo_regidx
 
 					t, dt, dtfac = self.t, self.dt, self.dtfac
 					self.jac = jac = {}
@@ -90,11 +90,14 @@ class GMRESmultip(BaseStdIntegrator):
 							for npt in range(nupts):
 
 								self._addid(celes, [rup, r0], npt, v)
-								rhs(t+dt, r0, r0)
+								rhs(t+dt, r0, r1)
 
-								self._add(-1.0/1e-8, r0, 1.0/1e-8, rrup)
-								kerns = self._init_jac(r0, etp)
+								self._add(-1.0/1e-8, r1, 1.0/1e-8, rrup)
+								kerns = self._init_jac(r1, etp)
+								self.bind_kerns(kerns, npt, v, dtfac/dt)
 								backend.run_kernels(kerns)
+
+					backend.wait()
 
 					for etp in self.system.ele_types:
 						krf = backend.kernel('lu', self.jac[etp])
