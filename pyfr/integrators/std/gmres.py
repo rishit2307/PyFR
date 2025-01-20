@@ -339,7 +339,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		r0 = self.pintg._du_regidx
 
-		rnorm = self.pintg.eval_norm(r0)
+		rnorm = self.pintg.eval_norm2(r0)
 		
 		add(0.0, r0, 1/rnorm, r0)
 
