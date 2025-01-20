@@ -90,7 +90,36 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         w, h = self.lib, self.handle
         cublasadd = w.cublasDaxpy_v2
 
-    def norm(self, a):
+    
+    def norm1(self, a):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+        cublasnrm2 = w.cublasDasum
+        fpdtype = a.traits[-1]
+        n = a.nrow*a.ncol
+        x = a
+        w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
+        rdev = cuda.mem_alloc(np.dtype(float).itemsize)
+
+        rhost = cuda.pagelocked_empty((), fpdtype)
+
+        def l1(stream):
+            w.cublasSetStream(h, stream)
+            cublasnrm2(h, n, x, 1, rdev)
+
+        class NormKernel(CUDAKernel):
+            def run(self, stream):
+                l1(stream)
+                cuda.memcpy(rhost, rdev, rdev.nbytes, stream)
+            
+            @property
+            def retval(self):
+                return rhost
+
+        return NormKernel(mats=[a])
+
+
+    def norm2(self, a):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
         cublasnrm2 = w.cublasDnrm2

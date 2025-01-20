@@ -239,13 +239,20 @@ class BaseCommon:
 		return kerns
 	
 	@memoize
-	def _get_norm_kerns(self, *rs):
-		kerns = [self.backend.kernel('norm', *[em[r] for r in rs])
+	def _get_norm2_kerns(self, *rs):
+		kerns = [self.backend.kernel('norm2', *[em[r] for r in rs])
 				 for em in self.system.ele_banks]
 		return kerns
 	
-	def eval_norm(self, rs):
-		kerns = self._get_norm_kerns(rs)
+	@memoize
+	def _get_norm1_kerns(self, *rs):
+		kerns = [self.backend.kernel('norm1', *[em[r] for r in rs])
+				 for em in self.system.ele_banks]
+		
+		return kerns
+	
+	def eval_norm2(self, rs):
+		kerns = self._get_norm2_kerns(rs)
 
 		comm, rank, root = get_comm_rank_root()
 		self.backend.run_kernels(kerns, wait=True)
@@ -253,6 +260,18 @@ class BaseCommon:
 
 		comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
 		return np.sqrt(float(norm))
+	
+	def eval_norm1(self, rs):
+		kerns = self._get_norm1_kerns(rs)
+		comm, rank, root = get_comm_rank_root()
+
+		self.backend.run_kernels(kerns, wait=True)
+		norm = np.array([sum(k.retval for k in kerns)])
+
+		comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
+		return float(norm)
+
+
 
  
 	def _addv(self, consts, regidxs, subdims=None):
