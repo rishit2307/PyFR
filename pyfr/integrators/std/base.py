@@ -16,7 +16,7 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
             self.gmresniter =  self.cfg.getint('solver-time-integrator', 'gmres-iter')
         # Determine the amount of temp storage required by this method
             self.nregs = (self.gmresniter + self.stepper_nregs + self.eval_nreg
-                      + self.eval_src + self.uru_nreg + self.duold_nreg + self.aux_gmres)
+                      + self.eval_src + self.uru_nreg + self.duold_nreg + self.aux_gmres + self.gmresniter)
 
         else:
             self.nregs = self.stepper_nregs
@@ -74,6 +74,15 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
     @property
     def _src_regidx(self):
         return self.k if self.gmresniter else self.nregs - 1
+    
+    @property
+    def _prec_regidx(self):
+        return self.gmresniter+self.aux_gmres+self.stepper_nregs+self.uru_nreg+self.duold_nreg + self.eval_nreg + self.k
+
+    @property
+    def _prec_regs(self):
+        st = self.gmresniter+self.aux_gmres+self.stepper_nregs+self.uru_nreg+self.duold_nreg + self.eval_nreg
+        return range(st, st+self.gmresniter)
 
     def _gmres_j_regidx(self, j):
         return j
