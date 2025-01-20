@@ -114,7 +114,7 @@ class Trapezoidal(BaseStdStepper):
 			# rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
 			add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
 
-			self.Un = self.eval_norm1(rup)/self._get_gndofs()
+			self.Un = self.eval_norm(rup)/self._get_gndofs()
 			
 
 			# if rank == root:
@@ -128,7 +128,7 @@ class Trapezoidal(BaseStdStepper):
 
 			add(1.0, rmv, -dtfac/dt, rup, dtfac/dt, ru)
 
-			err = self.eval_norm2(rmv)
+			err = self.eval_norm(rmv)
 
 			return err
 

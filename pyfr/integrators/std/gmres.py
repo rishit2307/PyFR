@@ -499,7 +499,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 				self.pintg._res(ev_rru=True)
 
-				self.pintg._eval_jac()
+				# self.pintg._eval_jac()
 
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
 					if m is not None:
