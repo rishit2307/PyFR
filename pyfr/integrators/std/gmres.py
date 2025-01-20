@@ -109,7 +109,6 @@ class GMRESmultip(BaseStdIntegrator):
 					r0, r1, r2 = self._pseudo_regidx
 					rmv, rsrc = self._mvec_regidx, self._src_regidx
 					
-					ri = lambda j, M: 1 + math.cos((j - 0.5)*math.pi/M)
 					for j in range(nsmooth):
 						# rmv = A*r0
 						self._eval_mat_vec(r0, rmv)
@@ -276,7 +275,7 @@ class GMRESmultip(BaseStdIntegrator):
 		rhs(t+dt, r2up, rr2up)
 
 		comm, rank, root = get_comm_rank_root()
-		kerns = self.pintgs[l2]._get_norm_kerns(r2up)
+		kerns = self.pintgs[l2]._get_norm2_kerns(r2up)
 		self.backend.run_kernels(kerns, wait=True)
 		Un = np.array([sum(kern.retval**2 for kern in kerns)])
 
@@ -386,6 +385,12 @@ class GMRESmultip(BaseStdIntegrator):
 		# self.mg_vcycle()
 		
 		err = self.pintg._res()
+
+		if rank == root:
+			print(f'GMRES error beta is {beta[k+1]}')
+			# print(f'GMRES error rduolnorm is {rduoldnorm}')
+			print(f'actual error is {err}')
+
 	def mg_vcycle(self):
 		if not self.mpniters:
 			return
@@ -441,7 +446,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 		self._addv([1.0] + list(-h), [rmv] + [rji(j) for j in range(k+1)])
-		qnorm = self.pintg.eval_norm(rmv)
+		qnorm = self.pintg.eval_norm2(rmv)
 
 		h = np.append(h, qnorm)
 		add(0.0, rkp1, 1.0/qnorm, rmv)
@@ -497,15 +502,13 @@ class GMRESmultip(BaseStdIntegrator):
 					print(f't is {self.tcurr}, dt is {dt}')
 
 				self.pintg._init_gmres()
+
 				self.pintg._res(ev_rru=True)
 
-				# self.pintg._eval_jac()
 
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
 					if m is not None:
 						self._init_loworder(l, m)
-
-
 
 				self.solve_gmres() 
 
@@ -516,11 +519,10 @@ class GMRESmultip(BaseStdIntegrator):
 				# add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 
 				nnorm = self.pintg.newton_res()
-			
 				nonlin_iter += 1
 				if rank == root:
 					print(nnorm)
-					print(f'newton iteration is {nonlin_iter}')
+					print(f'Newton iteration is {nonlin_iter}')
 
 			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2
