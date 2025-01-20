@@ -251,6 +251,63 @@ class BaseCommon:
 		
 		return kerns
 	
+	@memoize
+	def _get_addidx_kerns(self, rs, eid):
+		em = self.system.ele_banks
+		kerns = [self.backend.kernel('addidx', *[em[rs], eid])]
+
+		return kerns
+	
+	@memoize
+	def _get_jacinit_kerns(self, rs, jac):
+		em = self.system.ele_banks
+		kerns = [self.backend.kernel('jacinit', *[em[rs], jac])]
+
+		return kerns
+	
+	@memoize
+	def _get_jacshuff_kernels(self, jac0, jac1):
+		kerns = [self.backend.kernel('jacshuffle', *[jac0, jac1])]
+
+		return kerns
+	
+	@memoize
+	def _get_jacmul_kernels(self, r0, r1, jac):
+		em = self.system.ele_banks
+		kerns = [self.backend.kernel('jacmul'), *[em[r0], em[r1], jac]]
+
+		return kerns
+	
+	def _mul_jac(self, r0, r1, jac):
+		jacmulkern = self._get_jacmul_kernels(r0, r1, jac)
+
+		self.backend.run_kernels(jacmulkern)
+
+	
+	def _shuff_jac(self, jac0, jac1):
+		jackern = self._get_jacshuff_kernels(jac0, jac1)
+
+		self.backend.run_kernels(jackern)
+
+	
+	def _init_jac(self, rs, jac, npt, vi, dtfac):
+		jackern = self._get_jacinit_kerns(rs, jac)
+
+		for k in jackern:
+			k.bind(npt, vi, dtfac)
+		
+		self.backend.run_kernels(jackern)
+	
+
+	def _addid(self, rs, eid, npt, vi):
+		addidx = self._get_addidx_kerns(rs, eid)
+
+		for k in addidx:
+			k.bind(npt, vi)
+		
+		self.backend.run_kernels(addidx)
+
+
 	def eval_norm2(self, rs):
 		kerns = self._get_norm2_kerns(rs)
 

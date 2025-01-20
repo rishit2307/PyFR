@@ -70,6 +70,7 @@ class GMRESmultip(BaseStdIntegrator):
 					for col, etp in sorted(self.system.celes.keys()):
 
 						celes = self.system.celes[col, etp]
+
 						kern = self.backend.kernel('addidx', *[rup, r0, celes])
 						kern2 = self.backend.kernel('preinvshuff', *[r0, jac])
 
