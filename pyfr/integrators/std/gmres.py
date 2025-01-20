@@ -359,7 +359,7 @@ class GMRESmultip(BaseStdIntegrator):
 			beta[k+1] = -sn[k] * beta[k]
 			beta[k] = cs[k] * beta[k]
 
-			err = abs(beta[k+1]) / abs(rnorm)
+			err = abs(beta[k+1])/abs(rnorm)
 
 			if err < ltol:
 				if rank == root:
