@@ -96,15 +96,15 @@ class GMRESmultip(BaseStdIntegrator):
 								kerns = self._init_jac(r0, etp)
 								backend.run_kernels(kerns)
 
+					for etp in self.system.ele_types:
+						krf = backend.kernel('lu', self.jac[etp])
+						kri = backend.kernel('inv', self.jac[etp], self.jacinv[etp])
 
-					krf = backend.kernel('lu', self.jac[etp])
-					kri = backend.kernel('inv', self.jac[etp], self.jacinv[etp])
+						backend.run_kernels([krf, kri])	
 
-					backend.run_kernels([krf, kri])	
-
-					shufkerns = self._shuff_jac(etp)
-					backend.run_kernels(shufkerns)
-					backend.wait()
+						shufkerns = self._shuff_jac(etp)
+						backend.run_kernels(shufkerns)
+						backend.wait()
 
 				def bind_kerns(self, kerns, *args):
 					for k in kerns:
