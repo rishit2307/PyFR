@@ -97,7 +97,6 @@ class GMRESmultip(BaseStdIntegrator):
 								self.bind_kerns(kerns, npt, v, dtfac/dt)
 								backend.run_kernels(kerns)
 
-					backend.wait()
 					for etp in self.system.ele_types:
 						krf = backend.kernel('lu', self.jac[etp])
 						kri = backend.kernel('inv', self.jac[etp], self.jacinv[etp])
@@ -106,7 +105,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 						shufkerns = self._shuff_jac(etp)
 						backend.run_kernels(shufkerns)
-						backend.wait()
 
 				def bind_kerns(self, kerns, *args):
 					for k in kerns:
@@ -462,6 +460,8 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 
 		self.backend.wait()
+		del self.pintgs[self._order].jac
+		del self.pintgs[self._order].jacinv
 
 		for i, kern in enumerate(kerns):
 			h[i] = sum([v.retval for v in kern])
