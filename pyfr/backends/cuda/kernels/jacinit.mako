@@ -4,6 +4,7 @@
 __global__ void
 jacinit(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim, ixdtype_t ldimj,
             fpdtype_t* __restrict__ r0, fpdtype_t* __restrict__ jac, 
+            fpdtype_t* __restrict__ eid, 
             ixdtype_t npt, ixdtype_t vi, fpdtype_t dtfac)
 
 {
@@ -17,7 +18,7 @@ jacinit(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim, ixdtype_t ldimj,
     if (blockIdx.y != cidj)
         dtfac = 0.0f;
 
-    if (j < ncolb){
+    if (j < ncolb && eid[j]){
         idx = uid*ldim + SOA_IX(j, vid, ${ncola});
         idxj = j*ldimj + cidj + gridDim.y*blockIdx.y;
         jac[idxj] = r0[idx] + dtfac;
