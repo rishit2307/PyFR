@@ -121,6 +121,22 @@ class GMRESmultip(BaseStdIntegrator):
 					kerns = [self.backend.kernel('jacshuffle', *[jac0, jac1])]
 
 					return kerns
+				
+				@memoize
+				def _mul_jac(self, *rs):
+					kern = []
+					em = self.system.ele_banks
+					for k, jac in self.jacshuff.items():
+						i = self.system.ele_types.index(k)
+						kern.append(self.backend.kernel('jacmul', 
+									  *[em[i][r] for r in rs] + [jac]))
+					
+					return kern
+
+
+
+
+
 
 				def richardson(self, nsmooth):
 					add = self._add
@@ -184,46 +200,25 @@ class GMRESmultip(BaseStdIntegrator):
 					# 	add(0.0, r0, 1.0, rmv)
 
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
-					r0, *r = self._pseudo_regidx
+					r0, r1, *r = self._pseudo_regidx
 					rmv = self._mvec_regidx
 					rsrc = self._src_regidx
-					
-					xi = [self.system.ele_banks[i][r0].get()
-							for i in range(len(self.system.ele_types))]
-					jac = self.jac
+					add = self._add
+
+					jac = self.jacshuff
 					for _ in range(nsmooth):
 
 						self._eval_mat_vec(r0, rmv)
-						
-						Axi = [self.system.ele_scal_upts(rmv)[i]
-							   for i in range(len(self.system.ele_types))]
 
-						for i in range(len(self.system.ele_types)):
-							etp = self.system.ele_types[i]
-							nupts = self.system.ele_shapes[i][0]
-							# nhpt = hclass.system.ele_shapes[i][0] 
-							neles = self.system.ele_shapes[i][-1]
-							nvars = self.system.nvars
-							b = self.system.ele_scal_upts(rsrc)[i]
-							
-							# pr = p[i].get()
-							# re = r[i].get()
+						# rmv = b - Axi
+						add(-1.0, rmv, 1.0, rsrc)
 
-							# ax = pr @ Axi[i].reshape(nupts, -1)
-							# ax = ax.reshape(nhpt, nvars, neles)
-							# b = pr @ b[i].reshape(nupts, -1)
-							# b = b.reshape(nhpt, nvars, neles)
+						# r1 = J^-1*(b - Axi)
+						kerns = self._mul_jac(rmv, r1, jac)
+						backend.run_kernels(kerns)
 
-							
-							for e in range(neles):
-								
-
-								tmp = jac[etp, e] @ Axi[i][..., e].T.reshape(-1)
-								xi[i][..., e] -= (2/3) * tmp.reshape(nvars, nupts).T
-
-								tmp2 = jac[etp, e] @ b[..., e].T.reshape(-1)
-								xi[i][... ,e] += (2/3) * tmp2.reshape(nvars, nupts).T 
-							self.system.ele_banks[i][r0].set(xi[i])
+						# r0 = r0 + w*r1
+						add(1.0, r0, 2/3, r1)
 
 				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
 					if f:
@@ -460,8 +455,11 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 
 		self.backend.wait()
-		del self.pintgs[self._order].jac
-		del self.pintgs[self._order].jacinv
+		try:
+			del self.pintgs[self._order].jac
+			del self.pintgs[self._order].jacinv
+		except AttributeError:
+			pass
 
 		for i, kern in enumerate(kerns):
 			h[i] = sum([v.retval for v in kern])
@@ -512,6 +510,7 @@ class GMRESmultip(BaseStdIntegrator):
 			comm, rank, root = get_comm_rank_root()
 
 			nonlin_iter = 0
+			nsteps = int(self.tcurr // dt)
 
 			while nnorm > ntol:
 
@@ -526,7 +525,8 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				self.pintg._eval_jac()
+				if self.tcurr == 0.0:
+					self.pintg._eval_jac()
 
 
 				for l, m in it.zip_longest(self.levels, self.levels[1:]):
