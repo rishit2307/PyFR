@@ -93,12 +93,11 @@ class GMRESmultip(BaseStdIntegrator):
 								rhs(t+dt, r0, r1)
 
 								self._add(-1.0/1e-8, r1, 1.0/1e-8, rrup)
-								kerns = self._init_jac(r1, etp)
+								kerns = self._init_jac(r1, etp, celes)
 								self.bind_kerns(kerns, npt, v, dtfac/dt)
 								backend.run_kernels(kerns)
 
 					backend.wait()
-
 					for etp in self.system.ele_types:
 						krf = backend.kernel('lu', self.jac[etp])
 						kri = backend.kernel('inv', self.jac[etp], self.jacinv[etp])
@@ -113,9 +112,9 @@ class GMRESmultip(BaseStdIntegrator):
 					for k in kerns:
 						k.bind(*args)
 	
-				def _init_jac(self, r0, etp):
+				def _init_jac(self, r0, etp, celes):
 					jac = self.jac[etp]
-					kerns = [self.backend.kernel('jacinit', *[em[r0]] + [jac])
+					kerns = [self.backend.kernel('jacinit', *[em[r0]] + [jac, celes])
 							   for em in self.system.ele_banks]
 					return kerns
 
