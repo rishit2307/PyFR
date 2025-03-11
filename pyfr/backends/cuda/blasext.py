@@ -1,4 +1,5 @@
 import numpy as np
+import math
 
 from pyfr.backends.cuda.provider import (CUDAKernel, CUDAKernelProvider,
                                          get_grid_for_block)
@@ -249,5 +250,142 @@ class CUDABlasExtKernels(CUDAKernelProvider):
                 kern.exec_async(stream, params)
 
         return JacMulKernel(mats=arr)
+    
+    def getf(self, *arr):
+        ixdtype = self.backend.ixdtype
+
+        nrow, ncola, ncolb = arr[0].ioshape[1:]
+        _, _, ldim, fpdtype=arr[0].traits[1:]
+        soasz = self.backend.soasz
+
+        # Determine the grid/block
+        block = (512, 1, 1)
+        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        grid = (-(-ncolb // soasz), 1, 1)
+        npts = block[0] // soasz
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('getf').render(
+             ncola=ncola)
+        
+         # Build the kernel
+        kern = self._build_kernel('getf', src,
+                                [ixdtype]*5 + [np.uintp]*2)
+        
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ncolb, ldim, npts, soasz, *arr)
+
+        class GetFKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return GetFKernel(mats=arr)
+    
+
+    def getf2(self, *arr):
+        ixdtype = self.backend.ixdtype
+        neles, nrow, ldim, fpdtype = arr[0].traits[1:]
+        nrow = math.isqrt(nrow)
+
+        # Determine the grid/block
+        block = (256, 1, 1)
+        
+        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        grid = (neles, 1, 1)
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('getf2').render()
+        
+         # Build the kernel
+        kern = self._build_kernel('getf2', src,
+                                [ixdtype]*2 + [np.uintp]*2)
+        
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ldim, *arr)
+
+        class GetF2Kernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return GetF2Kernel(mats=arr)
+
+    def getf3(self, *arr):
+        ixdtype = self.backend.ixdtype
+        neles, nrow, ldim, fpdtype = arr[0].traits[1:]
+        nrow = math.isqrt(nrow)
+
+        # Determine the grid/block
+        block = (256, 1, 1)
+        
+        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        grid = (neles, 1, 1)
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('getf3').render(
+            nrow=nrow
+        )
+         # Build the kernel
+        kern = self._build_kernel('getf3', src,
+                                [ixdtype]*2 + [np.uintp]*3)
+        
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ldim, *arr)
+
+        class GetF3Kernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return GetF3Kernel(mats=arr)
 
 
+
+    def tp(self, *arr):
+        ixdtype = self.backend.ixdtype
+        import pdb;pdb.set_trace()
+        nrow, ldim = arr[0].ioshape
+        # _, _, ldim, fpdtype=arr[0].traits[1:]
+        soasz = self.backend.soasz
+
+        # Determine the grid/block
+        block = (1024, 1, 1)
+        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        # grid = (-(-ncolb // soasz), 1, 1)
+        # npts = block[0] // soasz
+        grid = (1, 1, 1)
+        # Render the kernel template
+        src = self.backend.lookup.get_template('tp').render()
+        import pdb;pdb.set_trace()
+         # Build the kernel
+        kern = self._build_kernel('tp', src,
+                                [ixdtype]*2 + [np.uintp]*1)
+        
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(ldim, nrow,*arr)
+
+        class TpKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return TpKernel(mats=arr)
+
+
+
+
+
+    

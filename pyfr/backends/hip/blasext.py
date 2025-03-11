@@ -146,7 +146,7 @@ class HIPBlasExtKernels(HIPKernelProvider):
         params = kern.make_params(grid, block)
         params.set_args(nrow, ncolb, *arr)
 
-    def jacmult(self, *arr):
+    def jacmul(self, *arr):
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[0].ioshape[1:]
@@ -156,11 +156,11 @@ class HIPBlasExtKernels(HIPKernelProvider):
         grid = get_grid_for_block(block, ncolb, nrow*ncola)
 
         # Render the kernel template
-        src = self.backend.lookup.get_template('jacmult').render(
+        src = self.backend.lookup.get_template('jacmul').render(
               block=block, ncola=ncola)
 
         # Build the kernel
-        kern = self._build_kernel('jacmult', src,
+        kern = self._build_kernel('jacmul', src,
                                   [ixdtype]*3 + [np.uintp]*3)
 
         # Set the parameters
@@ -175,5 +175,40 @@ class HIPBlasExtKernels(HIPKernelProvider):
                 kern.exec_async(stream, params)
 
         return JacMultKernel(mats=arr)
+
+    def getf(self, *arr):
+        ixdtype = self.backend.ixdtype
+        nrow, ncola, ncolb = arr[0].ioshape[1:]
+        _, _, ldim, fpdtype=arr[0].traits[1:]
+        soasz = self.backend.soasz
+
+         # Determine the grid/block
+        block = (512, 1, 1)
+        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        grid = (-(-ncolb // soasz), 1, 1)
+        npts = block[0] // soasz
+
+         # Render the kernel template
+        src = self.backend.lookup.get_template('getf').render(
+             ncola=ncola, block=block)
+
+         # Build the kernel
+        kern = self._build_kernel('getf', src,
+                                [ixdtype]*5 + [np.uintp]*1)
+        
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nrow, ncolb, ldim, npts, soasz, *arr)
+
+        class GetFKernel(HIPKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return GetFKernel(mats=arr)
+
+
 
 

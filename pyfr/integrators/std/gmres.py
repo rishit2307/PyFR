@@ -64,6 +64,7 @@ class GMRESmultip(BaseStdIntegrator):
 					self.jac = jac = {}
 					self.jacinv = {}
 					self.jacshuff = {}
+					self.P = {}
 
 					for etp in self.system.ele_types:
 
@@ -76,12 +77,15 @@ class GMRESmultip(BaseStdIntegrator):
 										   				(nvars*nupts)**2))
 						self.jacshuff[etp] = np.empty((nupts*nvars,
 													 	nupts, nvars, neles))
+						self.P[etp] = np.zeros((neles, nupts*nvars))
 						self.jacinv[etp] = backend.matrix(jac[etp].shape, jac[etp],
 															 tags={'align'})
 						self.jac[etp] = backend.matrix(jac[etp].shape, jac[etp], 
 									 					tags={'align'})
 						self.jacshuff[etp] = backend.matrix(self.jacshuff[etp].shape,
 										  	self.jacshuff[etp], tags={'align'})
+						
+						self.P[etp] = backend.matrix(self.P[etp].shape, self.P[etp], tags={'align'})
 
 					for col, etp in sorted(self.system.celes.keys()):
 						celes = self.system.celes[col, etp]
@@ -98,8 +102,8 @@ class GMRESmultip(BaseStdIntegrator):
 								backend.run_kernels(kerns)
 
 					for etp in self.system.ele_types:
-						krf = backend.kernel('lu', self.jac[etp])
-						kri = backend.kernel('inv', self.jac[etp], self.jacinv[etp])
+						krf = backend.kernel('lu', *[self.jac[etp], self.P[etp]])
+						kri = backend.kernel('inv', *[self.jac[etp], self.jacinv[etp], self.P[etp]])
 
 						backend.run_kernels([krf, kri])	
 
@@ -214,7 +218,7 @@ class GMRESmultip(BaseStdIntegrator):
 						add(-1.0, rmv, 1.0, rsrc)
 
 						# r1 = J^-1*(b - Axi)
-						kerns = self._mul_jac(rmv, r1, jac)
+						kerns = self._mul_jac(rmv, r1)
 						backend.run_kernels(kerns)
 
 						# r0 = r0 + w*r1
@@ -401,10 +405,10 @@ class GMRESmultip(BaseStdIntegrator):
 		
 		err = self.pintg._res()
 
-		if rank == root:
-			print(f'GMRES error beta is {beta[k+1]}')
-			# print(f'GMRES error rduolnorm is {rduoldnorm}')
-			print(f'actual error is {err}')
+		# if rank == root:
+		# 	print(f'GMRES error beta is {beta[k+1]}')
+		# 	# print(f'GMRES error rduolnorm is {rduoldnorm}')
+		# 	print(f'actual error is {err}')
 
 	def mg_vcycle(self):
 		if not self.mpniters:
@@ -506,7 +510,7 @@ class GMRESmultip(BaseStdIntegrator):
 			add = self._add
 			nnorm = np.inf
 			s = 1.0
-			ntol = self.ntol = 1e-2
+			ntol = self.ntol = 0.01
 			comm, rank, root = get_comm_rank_root()
 
 			nonlin_iter = 0
@@ -528,10 +532,10 @@ class GMRESmultip(BaseStdIntegrator):
 				if self.tcurr == 0.0:
 					self.pintg._eval_jac()
 
-
-				for l, m in it.zip_longest(self.levels, self.levels[1:]):
-					if m is not None:
-						self._init_loworder(l, m)
+				# import pdb;pdb.set_trace()
+				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
+				# 	if m is not None:
+				# 		self._init_loworder(l, m)
 
 				self.solve_gmres() 
 
@@ -553,9 +557,9 @@ class GMRESmultip(BaseStdIntegrator):
 			add(0.0, rU, 1.0, rUp)
 
 			
-			for l in self.levels:
-				if rank == root:
-					print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
+			# for l in self.levels:
+			# 	if rank == root:
+			# 		print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
 
 			idxcurr = rU
 			self.pintg._accept_step(dt, idxcurr)

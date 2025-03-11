@@ -16,6 +16,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
 
     if (tid < ncolb){
         r1idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+        r1[r1idx] = 0.0;
         for (ixdtype_t i = 0; i < ${ncola}; ++i){
             for (ixdtype_t k=0; k < nrow; ++k){
                 r0idx = k*ldim + SOA_IX(tid, i, ${ncola});

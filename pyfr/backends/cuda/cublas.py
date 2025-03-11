@@ -176,12 +176,12 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         
         return DotKernel(mats=[a, b])
 
-    def lu(self, a):
+    def lu(self, *arr):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
+        a = arr[0]
+        P = arr[1]
         sz = np.dtype(a.traits[-1]).itemsize
-
-        
         batchsize = a.nrow
         n = int(np.sqrt(a.ncol))
 
@@ -194,17 +194,21 @@ class CUDACUBLASKernels(CUDAKernelProvider):
 
         def lu(stream):
             w.cublasSetStream(h, stream)
-            cublasgetrf(h, n, adptr, n, None, cdptr, batchsize)
+            # cublasgetrf(h, n, adptr, n,  cdptr, batchsize)
+            cublasgetrf(h, n, adptr, n, P, cdptr, batchsize)
         class LUKernel(CUDAKernel):
             def run(self, stream):
                 lu(stream)
 
         return LUKernel(mats=[a])
     
-    def inv(self, a, b):
+    def inv(self, *arr):
         cuda = self.backend.cuda
+        a, b, P = arr
         w, h = self.lib, self.handle
         sz = np.dtype(a.traits[-1]).itemsize
+
+        
 
         
         batchsize = a.nrow
@@ -223,7 +227,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
 
         def getinv(stream):
             w.cublasSetStream(h, stream)
-            cublasgetri(h, n, adptr, n, None, bdptr, n, cdptr, batchsize)
+            cublasgetri(h, n, adptr, n, P, bdptr, n, cdptr, batchsize)
         class InvKernel(CUDAKernel):
             def run(self, stream):
                 getinv(stream)
