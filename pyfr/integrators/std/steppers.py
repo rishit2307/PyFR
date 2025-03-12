@@ -38,7 +38,11 @@ class BaseStdStepper(BaseStdIntegrator):
 
 		# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
 		# eps = epsmc*np.sqrt(self.Un)
-		eps = self.epsmc*self.Un/dUn + self.epsmc
+		# eps = self.epsmc*self.Un/dUn + self.epsmc
+		if dUn > 1e-10:
+			eps = self.epsmc*self.Un/dUn + self.epsmc
+		else:
+			eps = self.epsmc*self.Un
 
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
@@ -56,7 +60,7 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
 		self.rnorm= dict()
 
-		self.ltol = 1e-2
+		self.ltol = 1e-3
 		self.e1 = np.zeros(self.m+1)
 		self.e1[0] = 1.0
 
@@ -97,40 +101,28 @@ class Trapezoidal(BaseStdStepper):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
 		add, rhs_with_postproc = self._add, self.system.rhs
-		rmv = self._mvec_regidx
+		rmv, rdu = self._mvec_regidx, self._du_regidx
+		rduold = self._duold_regidx
+
 		ru, rru = self._u_ru_regidx
 		rup, rrup = self._up_rup_regidx
-		if ev_rru:
-			rhs_with_postproc(t+dt, rup, rrup)
-		
-			# rru = R(Un)
-			rhs_with_postproc(t, ru, rru)
-			self.nfeval += 2
-			rdu = self._du_regidx
 
-			# rs = R(Un)/2 + R(Un+1,k)/2 
-			add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
+		rhs_with_postproc(t+dt, rup, rrup)
+		self.Un = self.eval_norm1(rup)/self._get_gndofs()
+		self._eval_mat_vec(rduold, rmv)
+	
+		# rru = R(Un)
+		rhs_with_postproc(t, ru, rru)
+		self.nfeval += 2
 
-			# rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
-			add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
+		# rs = R(Un)/2 + R(Un+1,k)/2 
+		add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
 
-			self.Un = self.eval_norm1(rup)/self._get_gndofs()
-			
+		# rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
+		add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
 
-			# if rank == root:
-			# 	print(f'during init, res is {ttp}')
-
-		else:
-			# rmv = A*rdu
-			self._eval_mat_vec(self._du_regidx, rmv)
-
-			add(-1.0, rmv, dtfac/2., rru, dtfac/2., rrup)
-
-			add(1.0, rmv, -dtfac/dt, rup, dtfac/dt, ru)
-
-			err = self.eval_norm2(rmv)
-
-			return err
+		# rs = b - Ax
+		add(1.0, rdu, -1, rmv)
 
 	def newton_res(self):
 		add, rhs_with_postproc = self._add, self.system.rhs

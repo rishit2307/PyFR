@@ -84,7 +84,7 @@ class GMRESmultip(BaseStdIntegrator):
 									 					tags={'align'})
 						self.jacshuff[etp] = backend.matrix(self.jacshuff[etp].shape,
 										  	self.jacshuff[etp], tags={'align'})
-						
+
 						self.P[etp] = backend.matrix(self.P[etp].shape, self.P[etp], tags={'align'})
 
 					for col, etp in sorted(self.system.celes.keys()):
@@ -218,11 +218,24 @@ class GMRESmultip(BaseStdIntegrator):
 						add(-1.0, rmv, 1.0, rsrc)
 
 						# r1 = J^-1*(b - Axi)
+
 						kerns = self._mul_jac(rmv, r1)
 						backend.run_kernels(kerns)
+						
+						# self._mul_jac(rmv, r1)
 
 						# r0 = r0 + w*r1
 						add(1.0, r0, 2/3, r1)
+
+				# def _mul_jac(self, rmv, r1):
+				# 	jacinv = self.jacinv['hex']
+				# 	jacinv = jacinv.get().reshape(4096, 320, 320)
+				# 	usol = self.system.ele_banks[0][rmv].get().transpose(2, 1, 0).reshape(4096, 320)
+				# 	tp = jacinv @ usol[..., None]
+
+				# 	self.system.ele_banks[0][r1].set(
+                #                                 tp.reshape(4096, 5, 64).transpose(2, 1, 0)
+                #                         )
 
 				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
 					if f:
@@ -380,14 +393,14 @@ class GMRESmultip(BaseStdIntegrator):
 			err = abs(beta[k+1])/abs(rnorm)
 
 			if err < ltol:
-				if rank == root:
-					print(f'GMRES converged in {k} iterations, error is {err}')
+				# if rank == root:
+				# 	print(f'GMRES converged in {k} iterations, error is {err}')
 					
 				break
 
-		if k == m-1 and err > ltol:
-			if rank == root:
-				print(f'GMRES did not converge in {m} iterations, error is {err}')
+		# if k == m-1 and err > ltol:
+			# if rank == root:
+			# 	print(f'GMRES did not converge in {m} iterations, error is {err}')
 
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 
@@ -403,7 +416,8 @@ class GMRESmultip(BaseStdIntegrator):
 
 		# self.mg_vcycle()
 		
-		err = self.pintg._res()
+		# err = self.pintg._res()
+		self._add(1.0, rdu, 1.0, self.pintg._duold_regidx)
 
 		# if rank == root:
 		# 	print(f'GMRES error beta is {beta[k+1]}')
@@ -459,11 +473,11 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 
 		self.backend.wait()
-		try:
-			del self.pintgs[self._order].jac
-			del self.pintgs[self._order].jacinv
-		except AttributeError:
-			pass
+		# try:
+		# 	del self.pintgs[self._order].jac
+		# 	del self.pintgs[self._order].jacinv
+		# except AttributeError:
+		# 	pass
 
 		for i, kern in enumerate(kerns):
 			h[i] = sum([v.retval for v in kern])
@@ -510,7 +524,7 @@ class GMRESmultip(BaseStdIntegrator):
 			add = self._add
 			nnorm = np.inf
 			s = 1.0
-			ntol = self.ntol = 0.01
+			ntol = self.ntol =1e-2
 			comm, rank, root = get_comm_rank_root()
 
 			nonlin_iter = 0
@@ -523,13 +537,13 @@ class GMRESmultip(BaseStdIntegrator):
 					self.pintg._init_step(self.tcurr, dt)
 				
 				self.level = self._order
-				if rank == root:
-					print(f't is {self.tcurr}, dt is {dt}')
+				# if rank == root:
+				# 	print(f't is {self.tcurr}, dt is {dt}')
 
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				if self.tcurr == 0.0:
+				if self.tcurr == 0.0 and nonlin_iter==0:
 					self.pintg._eval_jac()
 
 				# import pdb;pdb.set_trace()
@@ -543,13 +557,13 @@ class GMRESmultip(BaseStdIntegrator):
 				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx
 				rdU = self.pintgs[self._order]._du_regidx
 				add(1.0, rUp, s, rdU)
-				# add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
+				add(0.0, self.pintg._duold_regidx, 1.0, self.pintg._du_regidx)
 
 				nnorm = self.pintg.newton_res()
 				nonlin_iter += 1
-				if rank == root:
-					print(nnorm)
-					print(f'Newton iteration is {nonlin_iter}')
+				# if rank == root:
+				# 	print(nnorm)
+				# 	print(f'Newton iteration is {nonlin_iter}')
 
 			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2
