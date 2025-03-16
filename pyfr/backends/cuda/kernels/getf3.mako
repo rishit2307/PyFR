@@ -117,7 +117,7 @@ getf3(ixdtype_t nrow, ixdtype_t ldim, fpdtype_t *__restrict__ jac,
         }
 
         // Initialize shared memory for L21
-        for (int j=0; j < 1024; j+=blockDim.x)
+        for (int j=0; j < 256; j+=blockDim.x)
             smv[threadIdx.x + j] = 0;
 
         __syncthreads();
