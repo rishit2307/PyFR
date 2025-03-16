@@ -110,14 +110,14 @@ getf3(ixdtype_t nrow, ixdtype_t ldim, fpdtype_t *__restrict__ jac,
                 idx = blockIdx.x*ldim + (tidrow+k)*nrow + tidcol + j + 1;
                 idx0 = blockIdx.x*ldim + (tidrow+k)*nrow + j;
 
-                if (tidcol < min(i + nb, nrow) - j - 1)
+                if (tidcol < min(i + nb, nrow) - j - 1 && tidrow + k < nrow)
                     jac[idx] -= jac[idx1]*jac[idx0];
             }
             __syncthreads();
         }
 
         // Initialize shared memory for L21
-        for (int j=0; j < 256; j+=blockDim.x)
+        for (int j=0; j < 1024; j+=blockDim.x)
             smv[threadIdx.x + j] = 0;
 
         __syncthreads();
