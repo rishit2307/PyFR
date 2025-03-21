@@ -108,6 +108,7 @@ class Trapezoidal(BaseStdStepper):
 		rup, rrup = self._up_rup_regidx
 
 		rhs_with_postproc(t+dt, rup, rrup)
+		self.backend.wait()
 		self.Un = self.eval_norm1(rup)/self._get_gndofs()
 		self._eval_mat_vec(rduold, rmv)
 	

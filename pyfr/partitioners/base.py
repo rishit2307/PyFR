@@ -313,14 +313,14 @@ class BasePartitioner:
 
         # Generate the face connectivity
         for i, (l, r) in enumerate(mesh['con_p0'].T.tolist()):
-            letype, leidxg, lfidx, lflags = l
-            retype, reidxg, rfidx, rflags = r
+            letype, leidxg, lfidx, lflags, lcol = l
+            retype, reidxg, rfidx, rflags, rcol = r
 
             lpart, leidxl = eleglmap[letype, leidxg]
             rpart, reidxl = eleglmap[retype, reidxg]
 
-            conl = (letype, leidxl, lfidx, lflags)
-            conr = (retype, reidxl, rfidx, rflags)
+            conl = (letype, leidxl, lfidx, lflags, lcol)
+            conr = (retype, reidxl, rfidx, rflags, rcol)
 
             if lpart == rpart:
                 # If this face is periodic, then tag it as such
@@ -342,7 +342,7 @@ class BasePartitioner:
                     bcon_px[m[1], lpart].append(conl)
 
         # Output data type
-        dtype = 'S4,i8,i1,i2'
+        dtype = 'S4,i8,i1,i2,S1'
 
         # Output
         con = {}
@@ -354,7 +354,7 @@ class BasePartitioner:
             con[f'con_p{px}p{py}'] = np.array(v, dtype=dtype)
 
         for (etype, px), v in bcon_px.items():
-            con[f'bcon_{etype}_p{px}'] = np.array(v, dtype=dtype)
+            con[f'bcon_{etype}_p{px}'] = np.array(v, dtype='S4,i8,i1,i2')
 
         for px, v in con_px_periodic.items():
             for name, idxs in v.items():

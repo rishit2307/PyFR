@@ -393,14 +393,14 @@ class GMRESmultip(BaseStdIntegrator):
 			err = abs(beta[k+1])/abs(rnorm)
 
 			if err < ltol:
-				# if rank == root:
-				# 	print(f'GMRES converged in {k} iterations, error is {err}')
+				if rank == root:
+					print(f'GMRES converged in {k} iterations, error is {err}')
 					
 				break
 
-		# if k == m-1 and err > ltol:
-			# if rank == root:
-			# 	print(f'GMRES did not converge in {m} iterations, error is {err}')
+		if k == m-1 and err > ltol:
+			if rank == root:
+				print(f'GMRES did not converge in {m} iterations, error is {err}')
 
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 
@@ -473,11 +473,11 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 
 		self.backend.wait()
-		# try:
-		# 	del self.pintgs[self._order].jac
-		# 	del self.pintgs[self._order].jacinv
-		# except AttributeError:
-		# 	pass
+		try:
+			del self.pintgs[self._order].jac
+			del self.pintgs[self._order].jacinv
+		except AttributeError:
+			pass
 
 		for i, kern in enumerate(kerns):
 			h[i] = sum([v.retval for v in kern])
@@ -537,8 +537,8 @@ class GMRESmultip(BaseStdIntegrator):
 					self.pintg._init_step(self.tcurr, dt)
 				
 				self.level = self._order
-				# if rank == root:
-				# 	print(f't is {self.tcurr}, dt is {dt}')
+				if rank == root:
+					print(f't is {self.tcurr}, dt is {dt}')
 
 				self.pintg._init_gmres()
 

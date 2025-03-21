@@ -330,8 +330,9 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Render the kernel template
         src = self.backend.lookup.get_template('getf3').render(
-            nrow=nrow
+            nrow=nrow, blksz=block[0]
         )
+
          # Build the kernel
         kern = self._build_kernel('getf3', src,
                                 [ixdtype]*2 + [np.uintp]*3)

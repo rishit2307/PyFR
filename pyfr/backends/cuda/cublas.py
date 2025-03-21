@@ -61,7 +61,19 @@ class CUBLASWrappers(LibWrapper):
          c_void_p, c_void_p, c_int, c_void_p, c_int),
          (c_int, 'cublasGetVersion_v2',c_void_p,  c_void_p), 
          (c_int, 'cublasIdamin_v2', c_void_p, c_int, c_void_p, c_int, c_void_p), 
-         (c_int, 'cublasDasum_v2', c_void_p, c_int, c_void_p, c_int, c_void_p)
+         (c_int, 'cublasDasum_v2', c_void_p, c_int, c_void_p, c_int, c_void_p),
+
+
+         (c_int, 'cublasSnrm2_v2', c_void_p, c_int, c_void_p, c_int, c_void_p),
+        (c_int, 'cublasSgetrfBatched', c_void_p, c_int, c_void_p, c_int, 
+         c_void_p, c_void_p, c_int),
+        (c_int, 'cublasSgetriBatched', c_void_p, c_int, c_void_p, c_int, 
+         c_void_p, c_void_p, c_int, c_void_p, c_int),
+         (c_int, 'cublasSasum_v2', c_void_p, c_int, c_void_p, c_int, c_void_p),
+         (c_int, 'cublasSdot_v2', c_void_p, c_int, c_void_p, c_int, c_void_p, 
+        c_int, c_void_p),
+        (c_int, 'cublasSaxpy_v2', c_void_p, c_int, POINTER(c_double), c_void_p, 
+         c_int, c_void_p, c_int), 
     ]
 
     def _transname(self, name):
@@ -95,13 +107,13 @@ class CUDACUBLASKernels(CUDAKernelProvider):
     def norm1(self, a):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
-        cublasnrm2 = w.cublasDasum
         fpdtype = a.traits[-1]
+        cublasnrm2 = w.cublasDasum if fpdtype == np.float64 else w.cublasSasum
+
         n = a.nrow*a.ncol
         x = a
         w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
-        rdev = cuda.mem_alloc(np.dtype(float).itemsize)
-
+        rdev = cuda.mem_alloc(np.dtype(fpdtype).itemsize)
         rhost = cuda.pagelocked_empty((), fpdtype)
 
         def l1(stream):
@@ -123,12 +135,13 @@ class CUDACUBLASKernels(CUDAKernelProvider):
     def norm2(self, a):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
-        cublasnrm2 = w.cublasDnrm2
+
         fpdtype = a.traits[-1]
+        cublasnrm2 = w.cublasDnrm2 if fpdtype == np.float64 else w.cublasSnrm2
         n = a.nrow*a.ncol
         x = a
         w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
-        rdev = cuda.mem_alloc(np.dtype(float).itemsize)
+        rdev = cuda.mem_alloc(np.dtype(fpdtype).itemsize)
 
         rhost = cuda.pagelocked_empty((), fpdtype)
 
@@ -151,7 +164,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         cuda = self.backend.cuda
         fpdtype = a.traits[-1]
         w, h = self.lib, self.handle
-        cublasdot = w.cublasDdot
+        cublasdot = w.cublasDdot if fpdtype == np.float64 else w.cublasSdot
         n = a.nrow*a.ncol
         x, y = a, b
         w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
@@ -180,6 +193,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         cuda = self.backend.cuda
         w, h = self.lib, self.handle
         a = arr[0]
+        fpdtype = a.traits[-1]
         P = arr[1]
         sz = np.dtype(a.traits[-1]).itemsize
         batchsize = a.nrow
@@ -190,7 +204,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
 
         cuda.memcpy(adptr, ahptr, adptr.nbytes)
-        cublasgetrf = w.cublasDgetrfBatc
+        cublasgetrf = w.cublasDgetrfBatc if fpdtype == np.float64 else w.cublasSgetrfBatc
 
         def lu(stream):
             w.cublasSetStream(h, stream)
@@ -206,7 +220,8 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         cuda = self.backend.cuda
         a, b, P = arr
         w, h = self.lib, self.handle
-        sz = np.dtype(a.traits[-1]).itemsize
+        sz = np.dtype(a.traits[-1]).itemsize    
+        fpdtype = a.traits[-1]
 
         
 
@@ -223,7 +238,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         cuda.memcpy(bdptr, bhptr, bdptr.nbytes)
         cuda.memcpy(adptr, ahptr, adptr.nbytes)
 
-        cublasgetri = w.cublasDgetriBatc
+        cublasgetri = w.cublasDgetriBatc if fpdtype == np.float64 else w.cublasSgetriBatc
 
         def getinv(stream):
             w.cublasSetStream(h, stream)
