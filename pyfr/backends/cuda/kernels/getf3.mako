@@ -108,7 +108,7 @@ getf3(ixdtype_t nrow, ixdtype_t ldim, fpdtype_t *__restrict__ jac,
 
             // Factorize the Panel
             idx1 = blockIdx.x*ldim + j*nrow + tidcol + j + 1;
-            for (int k=j+1; k < nrow; k+=nb){
+            for (int k=j+1; k < nrow; k+=nby){
                 idx = blockIdx.x*ldim + (tidrow+k)*nrow + tidcol + j + 1;
                 idx0 = blockIdx.x*ldim + (tidrow+k)*nrow + j;
 
