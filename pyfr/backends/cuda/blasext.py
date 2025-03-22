@@ -319,27 +319,32 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
     def getf3(self, *arr):
         ixdtype = self.backend.ixdtype
-        neles, nrow, ldim, fpdtype = arr[0].traits[1:]
-        nrow = math.isqrt(nrow)
-
+        # neles, nrow, ldim, fpdtype = arr[0].traits[1:]
+        # nrow = math.isqrt(nrow)
+        # ncol = 1
+        neles, ncol, ldim, fpdytype = arr[0].traits[1:]
+        nrow = ldim // ncol
+        import pdb;pdb.set_trace()
         # Determine the grid/block
         block = (256, 1, 1)
-        
+
         # grid = get_grid_for_block(block, ncolb, nrow*ncola)
         grid = (neles, 1, 1)
+        tplargs = dict()
+        tplargs['_macros'] = {}
 
         # Render the kernel template
         src = self.backend.lookup.get_template('getf3').render(
-            nrow=nrow, blksz=block[0]
+            nrow=nrow, blksz=block[0], **tplargs
         )
 
          # Build the kernel
         kern = self._build_kernel('getf3', src,
-                                [ixdtype]*2 + [np.uintp]*3)
+                                [ixdtype]*3 + [np.uintp]*3)
         
         # Set the parameters
         params = kern.make_params(grid, block)
-        params.set_args(nrow, ldim, *arr)
+        params.set_args(nrow, ncol, ldim, *arr)
 
         class GetF3Kernel(CUDAKernel):
             def bind(self, *consts):

@@ -32,6 +32,15 @@ class MatrixBase:
 
             nblocks = (ncol - (ncol % -leaddim)) // leaddim
             datashape = [nblocks, nrow, leaddim]
+        
+        elif tags == {'jac'}:
+            nrow, nrowi = shape[:-1]
+            ldmod = csubsz
+            ncol = nrowi - (nrowi % -ldmod)
+            leaddim = nrowi*ncol
+            nblocks = 1
+
+            datashape = [1, shape[0], 1, nrowi, ncol]
         else:
             nvar, narr, k = shape[-2], shape[-1], soasz
             nparr = narr - narr % -csubsz
@@ -92,6 +101,8 @@ class MatrixBase:
 
         if ary.ndim == 2:
             ary = np.pad(ary, [(0, 0)] + [(0, -n % self.leaddim)])
+        elif self.tags == {'jac'}:
+            ary = np.pad(ary, [(0, 0)]*2 + [(0, -n % csubsz)])
         else:
             ary = np.pad(ary, [(0, 0)]*(ary.ndim - 1) + [(0, -n % csubsz)])
             ary = ary.reshape(ary.shape[:-1] + (-1, k)).swapaxes(-2, -3)
