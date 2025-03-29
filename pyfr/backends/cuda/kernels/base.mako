@@ -4,6 +4,10 @@
 #define SOA_SZ ${soasz}
 #define SOA_IX(a, v, nv) ((((a) / SOA_SZ)*(nv) + (v))*SOA_SZ + (a) % SOA_SZ)
 
+//Constants
+#define PYFR_ONE 1.0;
+#define PYFR_ZERO 0.0;
+
 // Typedefs
 typedef unsigned int uint32_t;
 typedef long long int64_t;

@@ -41,6 +41,15 @@ class MatrixBase:
             nblocks = 1
 
             datashape = [1, shape[0], 1, nrowi, ncol]
+
+        elif tags == {'jac2'}:
+            narr, ncol, k = shape[0], shape[1], soasz
+            nparr = narr - narr % -csubsz
+            leaddim = ncol
+            nblocks = (ncol - (ncol % -leaddim)) // leaddim
+
+            datashape = [nblocks, nrow, leaddim]
+
         else:
             nvar, narr, k = shape[-2], shape[-1], soasz
             nparr = narr - narr % -csubsz

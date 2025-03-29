@@ -1,7 +1,8 @@
 <%inherit file='base'/>
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
-## <%include file='pyfr.backends.cuda.kernels.gemm'/>
-
+<%include file='pyfr.backends.cuda.kernels.gemm'/>
+<%include file='pyfr.backends.cuda.kernels.ltrmm'/>
+<%include file='pyfr.backends.cuda.kernels.utrtri'/>
 
 __global__ void
 getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim, 
@@ -17,8 +18,10 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
     __shared__ fpdtype_t mv;
     __shared__ ixdtype_t mix;
     __shared__ fpdtype_t sC[nb*nb];
-    __shared__ fpdtype_t sA[${blksz}];
+    __shared__ fpdtype_t sA[nb*nb];
     __shared__ fpdtype_t sB[nb*nb];
+    __shared__ fpdtype_t sD[nb*nb];
+    __shared__ fpdtype_t sE[nb*nb];
     __shared__ ixdtype_t ix;
 
     ixdtype_t tidrow = threadIdx.x / nb;
@@ -43,7 +46,7 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
 
             // Reduce to find the maximum in column j
             for (int k=j; k < nrow; k += blockDim.x){
-                idx = blockIdx.x*ldim + (threadIdx.x + k)*ncol + j;
+                idx = blockIdx.x*ldim + (threadIdx.x + k)*nrow + j;
                 if (threadIdx.x < nrow - k)
                     acc = fabs(jac[idx]);
 
@@ -70,13 +73,14 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
                 __syncthreads();
             }
             for (int k=j; k < nrow; k+=blockDim.x){
-                idx = blockIdx.x*ldim + (threadIdx.x + k)*ncol + j;
+                idx = blockIdx.x*ldim + (threadIdx.x + k)*nrow + j;
                 if (threadIdx.x < nrow - k){
                     if (jac[idx] == mv || jac[idx] == -mv){
-                        mix = threadIdx.x + k;
-                        ix = P[blockIdx.x*nrow + j];
-                        P[blockIdx.x*nrow + j] = P[mix + blockIdx.x*nrow];
-                        P[threadIdx.x + k + blockIdx.x*nrow] = ix;
+                        P[blockIdx.x*nrow + j] = tid + k;
+                        mix = tid + k;
+                        ## ix = P[blockIdx.x*nrow + j];
+                        ## P[blockIdx.x*nrow + j] = P[mix + blockIdx.x*nrow];
+                        ## P[threadIdx.x + k + blockIdx.x*nrow] = ix;
                     }
                 }
             }
@@ -85,11 +89,11 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
 
             // Swap the corresponding rows
             for (int k=0; k < nrow; k+= blockDim.x){
-                idx = blockIdx.x*ldim + j*ncol + threadIdx.x + k;
+                idx = blockIdx.x*ldim + j*nrow + threadIdx.x + k;
 
                 if (threadIdx.x < nrow - k){
-                    temp = jac[idx + (mix-j)*ncol];
-                    jac[idx +  (mix-j)*ncol] = jac[idx];
+                    temp = jac[idx + (mix-j)*nrow];
+                    jac[idx +  (mix-j)*nrow] = jac[idx];
                     jac[idx] = temp;
                 }
             }
@@ -98,8 +102,8 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
 
             // Divide the column by maximum
             for (int k=j + 1; k < nrow; k += blockDim.x){
-                idx = blockIdx.x*ldim + (threadIdx.x + k)*ncol + j;
-                idx0 = blockIdx.x*ldim + j*ncol + j;
+                idx = blockIdx.x*ldim + (threadIdx.x + k)*nrow + j;
+                idx0 = blockIdx.x*ldim + j*nrow + j;
 
                 if (threadIdx.x < nrow - k)
                     jac[idx] /= jac[idx0];
@@ -107,10 +111,10 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
             __syncthreads();
 
             // Factorize the Panel
-            idx1 = blockIdx.x*ldim + j*ncol + tidcol + j + 1;
+            idx1 = blockIdx.x*ldim + j*nrow + tidcol + j + 1;
             for (int k=j+1; k < nrow; k+=nby){
-                idx = blockIdx.x*ldim + (tidrow+k)*ncol + tidcol + j + 1;
-                idx0 = blockIdx.x*ldim + (tidrow+k)*ncol + j;
+                idx = blockIdx.x*ldim + (tidrow+k)*nrow + tidcol + j + 1;
+                idx0 = blockIdx.x*ldim + (tidrow+k)*nrow + j;
 
                 if (tidcol < min(i + nb, nrow) - j - 1 && tidrow + k < nrow)
                     jac[idx] -= jac[idx1]*jac[idx0];
@@ -128,7 +132,7 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         // Load L21 into shared memory
         idx = tidrow*nb + tidcol;
         for (ixdtype_t j=i; j < min(i+nb, nrow); j+=nby){
-            idx1 = blockIdx.x*ldim + (tidrow+j)*ncol + tidcol + i;
+            idx1 = blockIdx.x*ldim + (tidrow+j)*nrow + tidcol + i;
             if (tidcol + i < nrow)
                 sC[idx + (j-i)*nb] = jac[idx1];
         }
@@ -140,6 +144,9 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         if (tid < nb-1)
             sB[idx] = -sC[idx];
         
+        if (tid < nb)
+            sB[tid*nb + tid] = 1.0;
+
         for (ixdtype_t j=tid+2; j < nb; j++){
             idx = j*nb + tid;
 
@@ -152,103 +159,93 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         }
 
         __syncthreads();
-
-        for (ixdtype_t j=i; j < min(nrow, i+nb); j+=nby){
-            idx1 = blockIdx.x*ldim + (tidrow + j)*ncol + tidcol + i;
-            idx0 = (tidrow + j-i)*nb + tidcol;
-
-            ## if (tidcol + i < nrow && tidrow + j < nrow)
-            ##     jacinv[idx1] = sB[idx0];
+        //Writing jacinv has bugs, writes full matrix instead of just lower triangular part
+        ${pyfr.expand('write', 'i', 'i', 'sB', 'jacinv')};
+        for (ixdtype_t j=i+nb; j < nrow; j+=nb){
+            ${pyfr.expand('read', 'i', 'j', 'sA', 'jac')};
+            ${pyfr.expand('l1trmm', 'sB', 'sA', 'sC')};
+            ${pyfr.expand('write', 'i', 'j', 'sC', 'jac')}
         }
 
-        for (ixdtype_t l =0; l < nb; l+=nby)
-            sC[(tidrow+l)*nb + tidcol] = 0.0;
+        for (ixdtype_t j=i-nb; j > -nb; j-=nb){
+           ${pyfr.expand('read', 'i', 'j', 'sA', 'jac')};
+           ${pyfr.expand('l1trmm', 'sB', 'sA', 'sC')}
 
-        for (ixdtype_t j=i+nb; j< nrow; j+=nb){
-            for (ixdtype_t k=i; k < i+nb; k+=nby){
-                idx = blockIdx.x*ldim + (tidrow + k)*ncol + tidcol + j;
-                idx0 = (tidrow + k-i)*nb + tidcol;
-
-                if (tidcol + j < nrow)
-                    sA[tidrow*nb + tidcol] = jac[idx];
-
-                __syncthreads();
-
-                for (ixdtype_t l=0; l < tidrow; l++){
-                    ## if (tidcol + j < nrow){
-                        idx1 = (tidrow+k-i)*nb + l+k-i;
-                        sC[idx0] += sB[idx1]*sA[tidcol + l*nb];
-                    ## }
-                }
-                sC[idx0] += sA[tidrow*nb + tidcol];
-
-                if (tidcol + j < nrow)
-                    jac[idx] = sC[idx0];
-
-                for (ixdtype_t l=nby + k-i; l < nb; l+=nby){
-                    for (ixdtype_t m=0; m < nby; m++){
-                        idx1 = (tidrow + l)*nb + tidcol;
-                        ## if(tidcol + j < nrow)
-                        sC[idx1] += sA[m*nb + tidcol]*sB[(tidrow+l)*nb + m+k-i];
-                    }
-                }
-                __syncthreads();
-            }
-
-            for (ixdtype_t l =0; l < nb; l+=nby)
-                sC[(tidrow+l)*nb + tidcol] = 0.0;
+           for (ixdtype_t k=i-nb; k > j; k-=nb){
+                ${pyfr.expand('read', 'i', 'k', 'sA', 'jacinv')};
+                ${pyfr.expand('read', 'k', 'j', 'sD', 'jac')};
+                ${pyfr.expand('gemm', 'sA', 'sD', 'sE')};
+            
+                for (ixdtype_t l=0; l < nb; l+=nby)
+                    sC[(tidrow + l)*nb + tidcol] += sE[(tidrow + l)*nb + tidcol];
+           }
+           ${pyfr.expand('read', 'j', 'j', 'sA', 'jacinv')};
+           ${pyfr.expand('l2trmm','sC','sA','sD')};
+           ${pyfr.expand('write', 'i', 'j', '-sD', 'jacinv')}
         }
-
-        ## for (ixdtype_t j=i+nb; j < nrow; j+=nb){
-        ##     for(ixdtype_t k=i+nb; k < nrow; k+=nb){
-        ##         ${pyfr.expand('gemm', 'i', 'k', 'j', 'i')};
-
-        ##     for(ixdtype_t l=0; l < nb; l+=nby){
-        ##         idx = blockIdx.x*ldim + (tidrow + l + j)*ncol + (tidcol + k);
-        ##         if (tidrow + l + j < nrow && tidcol +k < nrow)
-        ##             jac[idx] -= sC[(tidrow+l)*nb + tidcol];
-                
-        ##         sC[(tidrow+l)*nb + tidcol] = 0.0;
-        ##     }
-        ##     }
-        ## }
 
         for (ixdtype_t j=i+nb; j < nrow; j+=nb){
-            for (ixdtype_t k=j; k < min(nrow, j+nb); k+=nby){
-                idx = blockIdx.x*ldim + (tidrow + k)*ncol + tidcol + i;
-                idx0 = (tidrow + k-j)*nb + tidcol;
+            ${pyfr.expand('read','j', 'i', 'sB', 'jac')};
+            for(ixdtype_t k=i+nb; k < nrow; k+=nb){
+                ${pyfr.expand('read', 'i', 'k', 'sA', 'jac')}
+                ${pyfr.expand('gemm', 'sB', 'sA', 'sC')};
 
-                if (tidrow + k < nrow)
-                    sB[idx0] = jac[idx];    
-            }
-            __syncthreads();
-
-            for (ixdtype_t k=i+nb; k < nrow; k+=nb){
-                for (ixdtype_t l=i; l < i+nb; l+=nby){
-                    idx = blockIdx.x*ldim + (tidrow + l)*ncol + (tidcol + k);
-                    idx0 = tidrow*nb + tidcol;
-
-                    if(tidcol + k < nrow)
-                        sA[idx0] = jac[idx];
-
-                    __syncthreads();
-
-                    for (ixdtype_t m=0; m < nb; m+=nby){
-                        for (ixdtype_t n=0; n < nby; n++){
-                            idx1 = (tidrow+m)*nb + n + l - i;
-                            sC[(tidrow+m)*nb + tidcol] += sB[idx1]*sA[n*nb + tidcol];
-                        }
-                    }
-                    __syncthreads();
-                }
-                for (ixdtype_t l=0; l < nb; l+=nby){
-                    idx = blockIdx.x*ldim + (tidrow + l + j)*ncol + (tidcol + k);
+                for(ixdtype_t l=0; l < nb; l+=nby){
+                    idx = blockIdx.x*ldim + (tidrow + l + j)*nrow + (tidcol + k);
                     if (tidrow + l + j < nrow && tidcol +k < nrow)
                         jac[idx] -= sC[(tidrow+l)*nb + tidcol];
-
-                    sC[(tidrow+l)*nb + tidcol] = 0.0;
                 }
             }
-        }  
+        }
+    }
+
+    // Swap the columns
+    for (ixdtype_t i=nrow-1; i >=0; i--){
+        if (tid == 0)
+            ix = P[blockIdx.x*nrow + i];
+
+    __syncthreads();
+        for (ixdtype_t j=min(ix, i); j < nrow; j+=blockDim.x){
+            idx = blockIdx.x*ldim + (tid + j)*nrow + i;
+            idx1 = blockIdx.x*ldim + (tid + j)*nrow + ix;
+
+            if (tid + j < nrow){
+                temp = jacinv[idx];
+                jacinv[idx] = jacinv[idx1];
+                jacinv[idx1] = temp;
+            } 
+        }
+    }
+
+    // Solve TRSM Ux = L^(-1)*P
+
+    for (ixdtype_t i=nrow; i > 0; i-=nb){
+        ${pyfr.expand('read', 'max(i-nb, 0)', 'max(i-nb, 0)', 'sA', 'jac')};
+        ${pyfr.expand('utrtri', 'sA', 'sB', 'min(nb, i)')};
+        
+        for (ixdtype_t j=i; j < nrow; j+=nb){
+            ${pyfr.expand('read', 'max(i-nb, 0)', 'j', 'sC', 'jac')};
+            for (ixdtype_t k=0; k < nrow; k+=nb){
+                ${pyfr.expand('read', 'j', 'k', 'sD', 'jacinv')};
+                ${pyfr.expand('gemm', 'sC', 'sD', 'sE')};
+                for (ixdtype_t l=0; l < min(nb, i); l+=nby){
+                    idx = blockIdx.x*ldim + (tidrow + l + max(i-nb, 0))*nrow + tidcol + k;
+                    if (tidrow + l + max(i-nb, 0) < i && tidcol + k < nrow)
+                        jacinv[idx] -= sE[(tidrow + l)*nb + tidcol] ;
+                }
+            }
+        }
+
+        for (ixdtype_t j=0; j < nrow; j+=nb){
+            ${pyfr.expand('read', 'max(i-nb, 0)', 'j', 'sD', 'jacinv')};
+            ${pyfr.expand('gemm', 'sB', 'sD', 'sE')};
+
+            for (ixdtype_t k=0; k < min(nb, i); k+=nby){
+                idx = blockIdx.x*ldim + (tidrow + k + max(i-nb, 0))*nrow + (tidcol + j);
+                if (tidcol + j < nrow && tidrow + k + max(i-nb, 0) < i)
+                    jacinv[idx] = sE[(tidrow + k)*nb + tidcol];
+            }
+            __syncthreads();
+        }
     }
 }
