@@ -74,20 +74,16 @@ class GMRESmultip(BaseStdIntegrator):
 						nvars = self.system.ele_shapes[i][1]
 
 						self.jac[etp] = jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles))
-						# self.jacshuff[etp] = np.empty((nupts*nvars,
-						# 							 	nupts, nvars, neles))
 						self.P[etp] = np.zeros((neles, nupts*nvars))
 						self.jacinv[etp] = jacinv[etp] = np.zeros((neles, (nupts*nvars)**2))
 						self.jacinv[etp] = backend.matrix(jacinv[etp].shape, jacinv[etp])
 						self.jac[etp] = backend.matrix(jac[etp].shape, jac[etp])
-						# self.jacshuff[etp] = backend.matrix(self.jacshuff[etp].shape,
-						# 				  	self.jacshuff[etp], tags={'align'})
 
 						self.P[etp] = backend.matrix(self.P[etp].shape, self.P[etp], dtype=self.backend.ixdtype)
 
 					for col, etp in sorted(self.system.celes.keys()):
 						celes = self.system.celes[col, etp]
-	
+
 						for v in range(self.system.nvars):
 							for npt in range(nupts):
 
@@ -100,6 +96,7 @@ class GMRESmultip(BaseStdIntegrator):
 								backend.run_kernels(kerns)
 
 					for etp in self.system.ele_types:
+
 						kern = backend.kernel('getf3', *[jac[etp], jacinv[etp], self.P[etp]])
 
 						backend.run_kernels([kern])	
@@ -122,7 +119,7 @@ class GMRESmultip(BaseStdIntegrator):
 					kerns = [self.backend.kernel('jacshuffle', *[jac0, jac1])]
 
 					return kerns
-				
+
 				@memoize
 				def _mul_jac(self, *rs):
 					kern = []
@@ -133,11 +130,6 @@ class GMRESmultip(BaseStdIntegrator):
 									  *[em[i][r] for r in rs] + [jac]))
 					
 					return kern
-
-
-
-
-
 
 				def richardson(self, nsmooth):
 					add = self._add
@@ -156,57 +148,11 @@ class GMRESmultip(BaseStdIntegrator):
 						# r0 = x + tau(b - A*r1)
 						add(1.0, r0, tau, rmv)
 
-					# for _ in range(nsmooth):
-					# 	## First stage
-					# 	# rmv = A*r0
-					# 	self._eval_mat_vec(r0, rmv)
-					# 	# rmv = b - A*r0
-					# 	add(-1.0, rmv, 1.0, rsrc)
-
-					# 	## Second stage
-					# 	# r1 = rmv*dtau/2 + r0
-					# 	add(0.0, r1, 1.0, r0, tau/2.0, rmv)
-					# 	# r2 = A*r1
-					# 	self._eval_mat_vec(r1, r2)
-					# 	# r2 = b - A*r1
-					# 	add(-1.0, r2, 1.0, rsrc)
-
-					# 	## Accumulate
-					# 	# rmv = r0 + dtau/6(rmv + 2*r2)
-					# 	add(tau/6.0, rmv, 1.0, r0, tau/3.0, r2)
-
-					# 	## Third stage
-					# 	# r1 = r2*dtau/2.0  + r0
-					# 	add(0.0, r1, tau/2.0, r2, 1.0, r0)
-					# 	# r2 = A*r1
-					# 	self._eval_mat_vec(r1, r2)
-					# 	# r2 = b - A*r1
-					# 	add(-1.0, r2, 1.0, rsrc)
-
-					# 	## Accumulate
-					# 	# rmv = rmv + dtau/3*r2
-					# 	add(1.0, rmv, tau/3.0, r2)
-
-					# 	## Fourth stage
-					# 	# r1 = dtau*r2 + r0
-					# 	add(0.0, r1, tau, r2, 1.0, r0)
-					# 	# r2 = A*r1
-					# 	self._eval_mat_vec(r1, r2)
-					# 	# r2 = b - A*r1
-					# 	add(-1.0, r2, 1.0, rsrc)
-
-					# 	# rmv = rmv + dtau/6*r2
-					# 	add(1.0, rmv, tau/6.0, r2)
-
-					# 	add(0.0, r0, 1.0, rmv)
-
 				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
 					r0, r1, *r = self._pseudo_regidx
 					rmv = self._mvec_regidx
 					rsrc = self._src_regidx
 					add = self._add
-
-					jac = self.jacshuff
 					for _ in range(nsmooth):
 
 						self._eval_mat_vec(r0, rmv)
@@ -223,16 +169,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 						# r0 = r0 + w*r1
 						add(1.0, r0, 2/3, r1)
-
-				# def _mul_jac(self, rmv, r1):
-				# 	jacinv = self.jacinv['hex']
-				# 	jacinv = jacinv.get().reshape(4096, 320, 320)
-				# 	usol = self.system.ele_banks[0][rmv].get().transpose(2, 1, 0).reshape(4096, 320)
-				# 	tp = jacinv @ usol[..., None]
-
-				# 	self.system.ele_banks[0][r1].set(
-                #                                 tp.reshape(4096, 5, 64).transpose(2, 1, 0)
-                #                         )
 
 				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
 					if f:
@@ -439,7 +375,6 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 				self.level = l
-				# self.pintg.jac_mult(n)
 				self.pintg.jac_mult(n, f='jacobi')
 
 				if m is not None and l > m:
@@ -471,7 +406,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 		self.backend.wait()
 		try:
-			del self.pintgs[self._order].jac
 			del self.pintgs[self._order].jacinv
 		except AttributeError:
 			pass
@@ -558,9 +492,9 @@ class GMRESmultip(BaseStdIntegrator):
 
 				nnorm = self.pintg.newton_res()
 				nonlin_iter += 1
-				# if rank == root:
-				# 	print(nnorm)
-				# 	print(f'Newton iteration is {nonlin_iter}')
+				if rank == root:
+					print(nnorm)
+					print(f'Newton iteration is {nonlin_iter}')
 
 			rU, rrU = self.pintgs[self._order]._u_ru_regidx
 			# r0 = Un+1 = r2

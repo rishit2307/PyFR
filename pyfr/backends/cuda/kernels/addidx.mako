@@ -5,7 +5,7 @@ __global__ void
 addidx(ixdtype_t ncolb, ixdtype_t ldim,
        fpdtype_t* __restrict__ x0, 
        fpdtype_t* __restrict__ x1, 
-       fpdtype_t* __restrict__ eid,
+       ixdtype_t* __restrict__ eid,
        ixdtype_t npt, ixdtype_t vi)
 {
     ixdtype_t j = ixdtype_t(blockIdx.x)*blockDim.x + threadIdx.x;
