@@ -199,12 +199,14 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         batchsize = a.nrow
         n = int(np.sqrt(a.ncol))
 
-        cdptr = cuda.mem_alloc(np.dtype(np.uint32).itemsize)
+        cdptr = cuda.mem_alloc(np.dtype(np.uintp).itemsize)
         adptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
         ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
 
         cuda.memcpy(adptr, ahptr, adptr.nbytes)
         cublasgetrf = w.cublasDgetrfBatc if fpdtype == np.float64 else w.cublasSgetrfBatc
+        # cublasgetrf = w.cublasSgetrfBatc
+        print(fpdtype)
 
         def lu(stream):
             w.cublasSetStream(h, stream)
@@ -239,6 +241,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         cuda.memcpy(adptr, ahptr, adptr.nbytes)
 
         cublasgetri = w.cublasDgetriBatc if fpdtype == np.float64 else w.cublasSgetriBatc
+        # cublasgetri=  w.cublasSgetriBatc
 
         def getinv(stream):
             w.cublasSetStream(h, stream)

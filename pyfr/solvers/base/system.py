@@ -166,7 +166,7 @@ class BaseSystem:
             cmat = np.zeros((self.neles), dtype=bool)
             cmat[celes[col, etp]] = True
             
-            celes[col, etp] = self.backend.matrix(cmat[None].shape, cmat[None], tags={'align'})
+            celes[col, etp] = self.backend.matrix(cmat[None].shape, cmat[None], tags={'align'}, dtype=self.backend.ixdtype)
         
         return celes
 

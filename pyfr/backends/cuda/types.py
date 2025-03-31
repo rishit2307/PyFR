@@ -27,6 +27,7 @@ class CUDAMatrixBase(_CUDAMatrixCommon, base.MatrixBase):
     def _get(self):
         # Allocate an empty buffer
         buf = np.empty((self.nrow, self.leaddim), dtype=self.dtype)
+        # import pdb;pdb.set_trace()
 
         # Copy
         self.backend.cuda.memcpy(buf, self.data, self.nbytes)
