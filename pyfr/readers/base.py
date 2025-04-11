@@ -1,5 +1,5 @@
 from collections import defaultdict
-from itertools import chain
+from itertools import chain, islice
 from uuid import UUID
 
 import numpy as np
@@ -147,7 +147,7 @@ class NodalMeshAssembler:
         return fofaces
 
     def _pair_fluid_faces(self, ffofaces):
-        pairs = defaultdict(list)
+        pairs, nbele = defaultdict(list), defaultdict(list)
         resid = {}
 
         for pftype, faces in ffofaces.items():
@@ -156,14 +156,18 @@ class NodalMeshAssembler:
 
                 # See if the nodes are in resid
                 if sn in resid:
-                    pairs[pftype].append([resid.pop(sn), f])
+                    lele = resid.pop(sn)
+                    pairs[pftype].append([lele, f])
+                    nbele[lele[:2]].append(f[:2])
+                    nbele[f[:2]].append(lele[:2])
+
                 # Otherwise add them to the unpaired dict
                 else:
                     resid[sn] = f
 
-        return pairs, resid
+        return pairs, resid, nbele
 
-    def _pair_periodic_fluid_faces(self, bpart, resid):
+    def _pair_periodic_fluid_faces(self, bpart, resid, nbele):
         pfaces, pmap = defaultdict(list), {}
 
         for k, (lpent, rpent) in self._pfacespents.items():
@@ -184,7 +188,22 @@ class NodalMeshAssembler:
                     pfaces[pftype].append([lf, rf])
                     pmap[lf, rf] = k
 
+                    # nbele[lf[:2]].append(rf[:2])
+                    # nbele[rf[:2]].append(lf[:2])
+
         return pfaces, pmap
+    
+    def _get_nnb(self, nbeles):
+        nnbele = defaultdict(list)
+        for ele, nbele in nbeles.items():
+            nnbele[ele] += nbele
+            for eleid in nbele:
+                nnbele[ele] += nbeles[eleid]
+            
+            nnbele[ele] = list(set(nnbele[ele]))
+
+        return nnbele
+
 
     def _ident_boundary_faces(self, bpart, resid):
         bfaces = defaultdict(list)
@@ -197,6 +216,43 @@ class NodalMeshAssembler:
                     bfaces[epent].append(resid.pop(tuple(sorted(fn))))
 
         return bfaces
+    
+    def _colour_mesh(self, nnbele):
+
+        celes = defaultdict(list)
+        ktoix = {k:i for i, k in enumerate(nnbele)}
+
+        for etype, pent in self._elenodes:
+            if pent != self._felespent:
+                continue
+                
+            petype, nnodes = self._etype_map[etype]
+            celes[petype] = [-1]*len(self._elenodes[etype, pent])
+        
+        colour = [False]*len(nnbele)
+
+        etype0, eid0 = next(iter(nnbele))
+        celes[etype0][eid0] = 0
+
+        for k in islice(nnbele.keys(), 1, None):
+
+            for etype, eid in nnbele[k]:
+                if celes[etype][eid] != -1:
+                    colour[celes[etype][eid]] = True
+            
+            cr = 0
+            while cr < len(nnbele):
+                if colour[cr] == False:
+                    break
+                    
+                cr += 1    
+            celes[k[0]][k[1]] = cr
+
+            for etype, eid in nnbele[k]:
+                if celes[etype][eid] != -1:
+                    colour[celes[etype][eid]] = False
+
+        return celes
 
     def get_connectivity(self, spinner=NullProgressSpinner()):
         # For connectivity a first-order representation is sufficient
@@ -213,12 +269,16 @@ class NodalMeshAssembler:
         spinner()
 
         # Pair the fluid-fluid faces
-        fpairs, resid = self._pair_fluid_faces(ffaces)
+        fpairs, resid, nbele = self._pair_fluid_faces(ffaces)
         spinner()
 
         # Tag and pair periodic boundary faces
-        pfpairs, pmap = self._pair_periodic_fluid_faces(bpart, resid)
+        pfpairs, pmap = self._pair_periodic_fluid_faces(bpart, resid, nbele)
         spinner()
+        
+        # Get neighbours of neighbour
+        nnbele = self._get_nnb(nbele)
+        celes = self._colour_mesh(nbele)
 
         # Identify the fixed boundary faces
         bf = self._ident_boundary_faces(bpart, resid)
@@ -233,15 +293,14 @@ class NodalMeshAssembler:
 
         # Generate the internal connectivity array
         con = list(pairs)
+        # celes2 = self.color_mesh(con)
 
-        celes = self.color_mesh(con)
-        import pdb;pdb.set_trace()
 
-        for i, (l, r) in enumerate(con):
-            lcol = 'r' if l[1] in celes[0] else 'b'
-            rcol = 'r' if r[1] in celes[0] else 'b'
-            con[i][0] = (l[0], l[1], l[2], l[3], lcol)
-            con[i][1]  = (r[0], r[1], r[2], r[3], rcol)
+        # for i, (l, r) in enumerate(con):
+        #     lcol = 'r' if l[1] in celes[0] else 'b'
+        #     rcol = 'r' if r[1] in celes[0] else 'b'
+        #     con[i][0] = (l[0], l[1], l[2], l[3], lcol)
+        #     con[i][1]  = (r[0], r[1], r[2], r[3], rcol)
         
  
         # for col, eles in celes.items():
@@ -265,13 +324,17 @@ class NodalMeshAssembler:
         spinner()
 
         # Output
-        ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2,S1').T}
+        # ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2,S1').T}
+        ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2').T}
 
         for k, v in con_pnames.items():
             ret['con_p0', f'periodic_{k}'] = np.array(v, dtype=np.int64)
 
         for k, v in bcon.items():
             ret[f'bcon_{k}_p0'] = np.array(v, dtype='S4,i8,i1,i2')
+
+        for k, v in celes.items():
+            ret[f'col_{k}_p0'] = np.array(v, dtype=np.int64)
 
         return ret
 

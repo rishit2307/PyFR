@@ -73,6 +73,9 @@ class GMRESmultip(BaseStdIntegrator):
 						neles = self.system.ele_shapes[i][-1]
 						nvars = self.system.ele_shapes[i][1]
 
+						# self.jac[etp] = jac[etp] = np.random.rand(nupts*nvars, nupts, nvars, neles)
+
+
 						self.jac[etp] = jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles))
 						self.P[etp] = np.zeros((neles, nupts*nvars))
 						self.jacinv[etp] = jacinv[etp] = np.zeros((neles, (nupts*nvars)**2))
@@ -81,19 +84,19 @@ class GMRESmultip(BaseStdIntegrator):
 
 						self.P[etp] = backend.matrix(self.P[etp].shape, self.P[etp], dtype=self.backend.ixdtype)
 
-					for col, etp in sorted(self.system.celes.keys()):
-						celes = self.system.celes[col, etp]
+					for etp in sorted(self.system.ele_types):
+						celes = self.system.celes[etp]
+						for col in range(self.system.ncolours[etp] + 1):
+							for v in range(self.system.nvars):
+								for npt in range(nupts):
 
-						for v in range(self.system.nvars):
-							for npt in range(nupts):
+									self._addid(celes, [rup, r0], npt, v, col)
+									rhs(t+dt, r0, r1)
 
-								self._addid(celes, [rup, r0], npt, v)
-								rhs(t+dt, r0, r1)
-
-								self._add(-1.0/1e-8, r1, 1.0/1e-8, rrup)
-								kerns = self._init_jac(r1, etp, celes)
-								self.bind_kerns(kerns, npt, v, dtfac/dt)
-								backend.run_kernels(kerns)
+									self._add(-1.0/1e-8, r1, 1.0/1e-8, rrup)
+									kerns = self._init_jac(r1, etp, celes)
+									self.bind_kerns(kerns, npt, v, col, dtfac/dt)
+									backend.run_kernels(kerns)
 
 					for etp in self.system.ele_types:
 
@@ -131,6 +134,8 @@ class GMRESmultip(BaseStdIntegrator):
 					
 					return kern
 
+				def _verify_jac(self):
+					pass
 				def richardson(self, nsmooth):
 					add = self._add
 					tau = mcfg.getfloat('solver-time-integrator', 'tau')
@@ -164,8 +169,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 						kerns = self._mul_jac(rmv, r1)
 						backend.run_kernels(kerns)
-						
-						# self._mul_jac(rmv, r1)
 
 						# r0 = r0 + w*r1
 						add(1.0, r0, 2/3, r1)
@@ -474,8 +477,9 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				if self.tcurr == 0.0 and nonlin_iter==0:
+				if (nsteps == 0) and nonlin_iter==0:
 					self.pintg._eval_jac()
+					print('Jacobian evaluated')
 
 				# import pdb;pdb.set_trace()
 				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
@@ -502,9 +506,9 @@ class GMRESmultip(BaseStdIntegrator):
 			add(0.0, rU, 1.0, rUp)
 
 			
-			# for l in self.levels:
-			# 	if rank == root:
-			# 		print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
+			for l in self.levels:
+				if rank == root:
+					print(f'nfeval at {l} is {self.pintgs[l].nfeval}')
 
 			idxcurr = rU
 			self.pintg._accept_step(dt, idxcurr)

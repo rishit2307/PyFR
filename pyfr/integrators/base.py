@@ -273,11 +273,11 @@ class BaseCommon:
 
 		self.backend.run_kernels(jacmulkern)
 
-	def _addid(self, eid, rs, npt, vi):
+	def _addid(self, eid, rs, npt, vi, col):
 		addidx = self._get_addidx_kerns(eid, *rs)
 
 		for k in addidx:
-			k.bind(npt, vi)
+			k.bind(npt, vi, col)
 		
 		self.backend.run_kernels(addidx)
 

@@ -59,7 +59,9 @@ class BaseSystem:
         self.ndims = eles[0].ndims
         self.nvars = eles[0].nvars
         self.neles = eles[0].neles
-        self.celes = self.color_mesh(mesh, rallocs)
+        # self.celes = self.color_mesh(mesh, rallocs)
+        self.celes, self.ncolours = self._load_colours(rallocs, mesh)
+
         # Load the interfaces
         self._int_inters = self._load_int_inters(rallocs, mesh, elemap)
         self._mpi_inters = self._load_mpi_inters(rallocs, mesh, elemap)
@@ -140,6 +142,15 @@ class BaseSystem:
             ele.set_backend(self.backend, nregs, nonce, linoff)
 
         return eles, elemap
+
+    def _load_colours(self, rallocs, mesh):
+        celes, ncols = {}, {}
+        for etype in self.ele_types:
+            col = mesh[f'col_{etype}_p{rallocs.prank}']
+            ncols[etype] = np.amax(col)
+            celes[etype] = self.backend.matrix(col[None].shape, col[None], dtype=self.backend.ixdtype)
+        
+        return celes, ncols
 
     def _load_int_inters(self, rallocs, mesh, elemap):
         key = f'con_p{rallocs.prank}'

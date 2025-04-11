@@ -634,6 +634,19 @@ class VTKWriter(BaseWriter):
         name = self.mesh_inf[mk][0]
         mesh = self.mesh[mk].astype(self.dtype)
         soln = self.soln[sk].swapaxes(0, 1).astype(self.dtype)
+        
+        # lhs, rhs = self.mesh[f'con_p{pn}'][...]
+
+        # ltp, lele, *linfo , lcol = zip(*lhs)
+        # rtp, rele, *rinfo,  rcol = zip(*rhs)
+
+        # col = np.zeros((mesh.shape[1]))
+
+        # for leid, lc, reid, rc in zip(lele, lcol, rele, rcol):
+        #     col[leid] = 1 if lc == 'r' else 0
+        #     col[reid] = 1 if rc == 'r' else 0
+
+        # soln[:, :] = col
 
         # Handle the case of partial solution files
         if soln.shape[2] != mesh.shape[1]:

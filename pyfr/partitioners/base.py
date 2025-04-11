@@ -43,6 +43,7 @@ class BasePartitioner:
         linf = defaultdict(list)
         offs = defaultdict(dict)
         rnum = defaultdict(dict)
+        cols = defaultdict(list)
 
         for en, pn in pinf.items():
             for i, n in enumerate(pn):
@@ -50,6 +51,7 @@ class BasePartitioner:
                     offs[en][i] = off = sum(s.shape[1] for s in spts[en])
                     spts[en].append(mesh[f'spt_{en}_p{i}'])
                     linf[en].append(mesh[f'spt_{en}_p{i}', 'linear'])
+                    cols[en].append(mesh[f'col_{en}_p{i}'])
                     rnum[en].update(((i, j), (0, off + j)) for j in range(n))
 
         def offset_con(con, pr):
@@ -93,6 +95,7 @@ class BasePartitioner:
         for en in spts:
             newmesh[f'spt_{en}_p0'] = np.hstack(spts[en])
             newmesh[f'spt_{en}_p0', 'linear'] = np.hstack(linf[en])
+            newmesh[f'col_{en}_p0'] = np.hstack(cols[en])
 
         for k, v in intcon_p.items():
             newmesh['con_p0', k] = np.hstack(v)
@@ -271,19 +274,24 @@ class BasePartitioner:
     def _partition_spts(self, mesh, vetimap, vparts):
         spt_px = defaultdict(list)
         lin_px = defaultdict(list)
+        col_px = defaultdict(list)
 
         for (etype, eidxg), part in zip(vetimap, vparts):
             f = f'spt_{etype}_p0'
+            fc = f'col_{etype}_p0'
 
             spt_px[etype, part].append(mesh[f][:, eidxg, :])
             lin_px[etype, part].append(mesh[f, 'linear'][eidxg])
+            col_px[etype, part].append(mesh[fc][eidxg])
 
         newmesh = {}
         for etype, pn in spt_px:
             f = f'spt_{etype}_p{pn}'
+            fc = f'col_{etype}_p{pn}'
 
             newmesh[f] = np.array(spt_px[etype, pn]).swapaxes(0, 1)
             newmesh[f, 'linear'] = np.array(lin_px[etype, pn])
+            newmesh[fc] = np.array(col_px[etype, pn])
 
         return newmesh
 
@@ -313,14 +321,14 @@ class BasePartitioner:
 
         # Generate the face connectivity
         for i, (l, r) in enumerate(mesh['con_p0'].T.tolist()):
-            letype, leidxg, lfidx, lflags, lcol = l
-            retype, reidxg, rfidx, rflags, rcol = r
+            letype, leidxg, lfidx, lflags = l
+            retype, reidxg, rfidx, rflags = r
 
             lpart, leidxl = eleglmap[letype, leidxg]
             rpart, reidxl = eleglmap[retype, reidxg]
 
-            conl = (letype, leidxl, lfidx, lflags, lcol)
-            conr = (retype, reidxl, rfidx, rflags, rcol)
+            conl = (letype, leidxl, lfidx, lflags)
+            conr = (retype, reidxl, rfidx, rflags)
 
             if lpart == rpart:
                 # If this face is periodic, then tag it as such
@@ -342,7 +350,7 @@ class BasePartitioner:
                     bcon_px[m[1], lpart].append(conl)
 
         # Output data type
-        dtype = 'S4,i8,i1,i2,S1'
+        dtype = 'S4,i8,i1,i2'
 
         # Output
         con = {}
@@ -354,7 +362,7 @@ class BasePartitioner:
             con[f'con_p{px}p{py}'] = np.array(v, dtype=dtype)
 
         for (etype, px), v in bcon_px.items():
-            con[f'bcon_{etype}_p{px}'] = np.array(v, dtype='S4,i8,i1,i2')
+            con[f'bcon_{etype}_p{px}'] = np.array(v, dtype=dtype)
 
         for px, v in con_px_periodic.items():
             for name, idxs in v.items():
