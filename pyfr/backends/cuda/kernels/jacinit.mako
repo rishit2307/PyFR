@@ -23,4 +23,5 @@ jacinit(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim, ixdtype_t ldimj,
         idxj = j*ldimj + cidj + gridDim.y*blockIdx.y;
         jac[idxj] = r0[idx] + dtfac;
     }
+  
 }

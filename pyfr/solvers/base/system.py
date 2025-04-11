@@ -6,6 +6,7 @@ import statistics
 
 import numpy as np
 from pyfr.nputil import addEdge, greedyColoring
+from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.backends.base import NullKernel
 from pyfr.inifile import Inifile
 from pyfr.shapes import BaseShape
@@ -61,7 +62,6 @@ class BaseSystem:
         self.neles = eles[0].neles
         # self.celes = self.color_mesh(mesh, rallocs)
         self.celes, self.ncolours = self._load_colours(rallocs, mesh)
-
         # Load the interfaces
         self._int_inters = self._load_int_inters(rallocs, mesh, elemap)
         self._mpi_inters = self._load_mpi_inters(rallocs, mesh, elemap)
@@ -145,10 +145,13 @@ class BaseSystem:
 
     def _load_colours(self, rallocs, mesh):
         celes, ncols = {}, {}
+        comm, rank, root = get_comm_rank_root()
         for etype in self.ele_types:
             col = mesh[f'col_{etype}_p{rallocs.prank}']
-            ncols[etype] = np.amax(col)
+            ncols[etype] = np.amax(col) + 1
             celes[etype] = self.backend.matrix(col[None].shape, col[None], dtype=self.backend.ixdtype)
+            ncols[etype] = comm.allreduce(ncols[etype], op=mpi.MAX)
+        print(f'rank iss {rank}, ncols is {ncols}')
         
         return celes, ncols
 

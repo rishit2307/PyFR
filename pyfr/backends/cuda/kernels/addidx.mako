@@ -12,14 +12,17 @@ addidx(ixdtype_t ncolb, ixdtype_t ldim,
     int i = blockIdx.y*blockDim.y + threadIdx.y;
     ixdtype_t idx, idx1;
 
-   if (j < ncolb && eid[j] == col)
+   if (j < ncolb)
     {
         % for k in subdims:
             idx = i*ldim + SOA_IX(j, ${k}, ${ncola});
             x1[idx] = x0[idx];
         % endfor
 
-        idx1 = npt*ldim + SOA_IX(j, vi, ${ncola});
-        x1[idx1] = x0[idx1] + 1.0E-8f;
+        if (eid[j] == col){
+            idx1 = npt*ldim + SOA_IX(j, vi, ${ncola});
+            x1[idx1] = x0[idx1] + 1.0E-8f;
+        }
+        
     }
 }

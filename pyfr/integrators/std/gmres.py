@@ -65,6 +65,7 @@ class GMRESmultip(BaseStdIntegrator):
 					self.jacinv = jacinv = {}
 					self.jacshuff = {}
 					self.P = {}
+					comm, rank, root = get_comm_rank_root()
 
 					for etp in self.system.ele_types:
 
@@ -86,18 +87,22 @@ class GMRESmultip(BaseStdIntegrator):
 
 					for etp in sorted(self.system.ele_types):
 						celes = self.system.celes[etp]
-						for col in range(self.system.ncolours[etp] + 1):
+						for col in range(self.system.ncolours[etp]):
 							for v in range(self.system.nvars):
 								for npt in range(nupts):
 
 									self._addid(celes, [rup, r0], npt, v, col)
+									self.backend.wait()
 									rhs(t+dt, r0, r1)
+									self.backend.wait()
 
 									self._add(-1.0/1e-8, r1, 1.0/1e-8, rrup)
 									kerns = self._init_jac(r1, etp, celes)
 									self.bind_kerns(kerns, npt, v, col, dtfac/dt)
 									backend.run_kernels(kerns)
+									self.backend.wait()
 
+					print(f'jacinit is done mpi , rank is {rank}')
 					for etp in self.system.ele_types:
 
 						kern = backend.kernel('getf3', *[jac[etp], jacinv[etp], self.P[etp]])
