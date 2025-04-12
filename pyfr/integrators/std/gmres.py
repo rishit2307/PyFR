@@ -101,8 +101,6 @@ class GMRESmultip(BaseStdIntegrator):
 									self.bind_kerns(kerns, npt, v, col, dtfac/dt)
 									backend.run_kernels(kerns)
 									self.backend.wait()
-
-					print(f'jacinit is done mpi , rank is {rank}')
 					for etp in self.system.ele_types:
 
 						kern = backend.kernel('getf3', *[jac[etp], jacinv[etp], self.P[etp]])
@@ -141,24 +139,8 @@ class GMRESmultip(BaseStdIntegrator):
 
 				def _verify_jac(self):
 					pass
-				def richardson(self, nsmooth):
-					add = self._add
-					tau = mcfg.getfloat('solver-time-integrator', 'tau')
 
-					r0, r1, r2 = self._pseudo_regidx
-					rmv, rsrc = self._mvec_regidx, self._src_regidx
-					
-					for j in range(nsmooth):
-						# rmv = A*r0
-						self._eval_mat_vec(r0, rmv)
-
-						# rmv = b - A*r0
-						add(-1.0, rmv, 1.0, rsrc)
-
-						# r0 = x + tau(b - A*r1)
-						add(1.0, r0, tau, rmv)
-
-				def jacobi(self, nsmooth, hclass=None,r=None,p=None):
+				def jacobi(self, nsmooth):
 					r0, r1, *r = self._pseudo_regidx
 					rmv = self._mvec_regidx
 					rsrc = self._src_regidx
@@ -178,17 +160,14 @@ class GMRESmultip(BaseStdIntegrator):
 						# r0 = r0 + w*r1
 						add(1.0, r0, 2/3, r1)
 
-				def jac_mult(self, nsmooth, f=None, hclass=None, r=None, p=None):
-					if f:
-						self.jacobi(nsmooth, hclass=hclass, p=p, r=r)
-					else:
-						self.richardson(nsmooth)
+				def jac_mult(self, nsmooth):
+						self.jacobi(nsmooth)
+
 
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
 									mesh, initsoln, mcfg)
 		
-		self.system = self.pintgs[order].system	
-		self._init_projmats()
+		self.system = self.pintgs[order].system
 	
 	def plugins(self):
 		return self.pintgs[self._order].plugins
@@ -212,94 +191,6 @@ class GMRESmultip(BaseStdIntegrator):
 	@property
 	def pintg(self):
 		return self.pintgs[self.level]
-	
-	def _init_projmats(self):
-		self.projmats = defaultdict(list)
-		cmat = lambda m: self.backend.const_matrix(m, tags={'align'}) 
-
-		for l in self.levels[1:]:
-			for i in range(len(self.pintg.system.ele_types)):
-				b1 = self.pintgs[l].system.ubasis[i]
-				b2 = self.pintgs[l + 1].system.ubasis[i]
-
-				self.projmats[l, l + 1].append(cmat(b1.proj_to(b2)))
-				self.projmats[l + 1, l].append(cmat(b2.proj_to(b1)))
-		
-		for l in self.levels:
-			for i in range(len(self.system.ele_types)):
-				b1 = self.pintgs[self._order].system.ubasis[i]
-				b2 = self.pintgs[l].system.ubasis[i]
-				if not self.projmats[self._order, l]:
-					self.projmats[self._order, l].append(cmat(b1.proj_to(b2)))
-					self.projmats[l, self._order].append(cmat(b2.proj_to(b1)))
-
-	def _init_loworder(self, l1, l2):
-
-		r1up, rr1up = self.pintgs[l1]._up_rup_regidx
-		r2up, rr2up = self.pintgs[l2]._up_rup_regidx
-
-		self.backend.run_kernels(
-		self.mgproject(l1, r1up ,l2, r2up)
-		)
-		t, dt = self.pintg.t, self.pintg.dt
-
-		# rr2up = R(Un+1, k)
-		rhs = self.pintgs[l2].system.rhs
-		rhs(t+dt, r2up, rr2up)
-
-		comm, rank, root = get_comm_rank_root()
-		kerns = self.pintgs[l2]._get_norm2_kerns(r2up)
-		self.backend.run_kernels(kerns, wait=True)
-		Un = np.array([sum(kern.retval**2 for kern in kerns)])
-
-		comm.Allreduce(mpi.IN_PLACE, Un, op=mpi.SUM)
-		self.pintgs[l2].Un = np.sqrt(float(Un))
-
-		for i in range(len(self.system.ele_types)):
-			nuptl2, nvarl2, nelel2 = self.pintgs[l2].system.ele_shapes[i]
-			etp = self.system.ele_types[i]
-			self.pintgs[l2].jac = jac = defaultdict(list)
-			for e in range(nelel2):
-				jac[etp, e] = self.projmats[l1, l2] @ self.pintgs[l1].jac[etp, e]
-
-		self.pintgs[l2].nfeval += 1
-		
-	@memoize
-	def mgproject(self, l1, l1reg, l2, l2reg):
-		projk = []
-		for i, a in enumerate(self.projmats[l1, l2]):
-			b = self.pintgs[l1].system.ele_banks[i][l1reg]
-			c = self.pintgs[l2].system.ele_banks[i][l2reg]
-			projk.append(self.backend.kernel('mul', a, b, out=c))
-
-		return projk
-
-	def restrict(self, l1, l2):
-		# r0, r1, r2, r3, r4, *r5 = self.pintgs[l1]._regidx
-		# r5 = r5[0]
-		self.level = l1
-		rmv = self.pintg._mvec_regidx
-		r0, *r = self.pintg._pseudo_regidx
-		rsl1 = self.pintg._src_regidx
-		
-		# rmv = A*r0
-		self.pintg._eval_mat_vec(r0, rmv)
-		# rmv = b - A*r0
-		self.pintg._add(-1.0, rmv, 1.0, rsl1)
-
-		self.level = l2
-		rsl2 = self.pintg._src_regidx
-
-		self.backend.run_kernels(self.mgproject(l1, rmv, l2, rsl2))
-
-	def prolongate(self, l1, l2):
-
-		r0, r1, r2 = self.pintgs[l1]._pseudo_regidx
-		rl0, rl1, rl2 = self.pintgs[l2]._pseudo_regidx
-		self.backend.run_kernels(self.mgproject(l1, r0, l2, rl1))
-
-		self.pintgs[l2]._add(1.0, rl0, 1.0, rl1)
-
 
 	def solve_gmres(self):
 		comm, rank, root = get_comm_rank_root()
@@ -349,21 +240,12 @@ class GMRESmultip(BaseStdIntegrator):
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
 		
 		consts = [0.0]+list(y)
-		# regidxs = [rdu] + [rj(j) for j in range(k+1)]
+
 		rp = self.pintg._prec_regs
 		regidxs = [rdu] + [r for r in rp]
 		self._addv(consts, regidxs)
 
-
-		# self.mg_vcycle()
-		
-		# err = self.pintg._res()
 		self._add(1.0, rdu, 1.0, self.pintg._duold_regidx)
-
-		# if rank == root:
-		# 	print(f'GMRES error beta is {beta[k+1]}')
-		# 	# print(f'GMRES error rduolnorm is {rduoldnorm}')
-		# 	print(f'actual error is {err}')
 
 	def mg_vcycle(self):
 		if not self.mpniters:
@@ -383,7 +265,7 @@ class GMRESmultip(BaseStdIntegrator):
 			
 			for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
 				self.level = l
-				self.pintg.jac_mult(n, f='jacobi')
+				self.pintg.jac_mult(n)
 
 				if m is not None and l > m:
 					self.restrict(l, m)
@@ -467,8 +349,6 @@ class GMRESmultip(BaseStdIntegrator):
 			comm, rank, root = get_comm_rank_root()
 
 			nonlin_iter = 0
-			nsteps = int(self.tcurr // dt)
-
 			while nnorm > ntol:
 
 				for l in self.levels:
@@ -485,11 +365,6 @@ class GMRESmultip(BaseStdIntegrator):
 				if (self.pintg.nacptsteps == 0) and nonlin_iter==0:
 					self.pintg._eval_jac()
 					print('Jacobian evaluated')
-
-				# import pdb;pdb.set_trace()
-				# for l, m in it.zip_longest(self.levels, self.levels[1:]):
-				# 	if m is not None:
-				# 		self._init_loworder(l, m)
 
 				self.solve_gmres() 
 
