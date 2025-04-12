@@ -482,7 +482,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				if (nsteps == 0) and nonlin_iter==0:
+				if (self.pintg.nacptsteps == 0) and nonlin_iter==0:
 					self.pintg._eval_jac()
 					print('Jacobian evaluated')
 

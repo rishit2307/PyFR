@@ -11,9 +11,9 @@ jacinit(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim, ixdtype_t ldimj,
     ixdtype_t j = ixdtype_t(blockIdx.x)*blockDim.x + threadIdx.x;
     ixdtype_t idx, idxj;
 
-    ixdtype_t cidj = vi*nrow + npt;
-    ixdtype_t uid = blockIdx.y % nrow;
-    ixdtype_t vid = blockIdx.y / nrow;
+    ixdtype_t cidj = npt*${ncola} + vi;
+    ixdtype_t vid = blockIdx.y % ${ncola};
+    ixdtype_t uid = blockIdx.y / ${ncola};
 
     if (blockIdx.y != cidj)
         dtfac = 0.0f;

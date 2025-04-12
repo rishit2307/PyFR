@@ -10,11 +10,11 @@ jacshuffle(ixdtype_t ncolb, ixdtype_t ldim0, ixdtype_t ldim1,
     ixdtype_t idxj0, idxj1;
     int nupts = gridDim.y / ${ncola};
 
-    ixdtype_t uid = blockIdx.z % nupts;
-    ixdtype_t vid = blockIdx.z / nupts;
+    ixdtype_t vid = blockIdx.z % ${ncola};
+    ixdtype_t uid = blockIdx.z / ${ncola};
     
-    ixdtype_t uidy = blockIdx.y % nupts;
-    ixdtype_t vidy = blockIdx.y / nupts;
+    ixdtype_t vidy = blockIdx.y % ${ncola};
+    ixdtype_t uidy = blockIdx.y / ${ncola};
 
     if (j < ncolb){
         idxj0 = blockIdx.z + gridDim.y*blockIdx.y + j*ldim0;
