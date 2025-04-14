@@ -254,7 +254,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 
-
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
 		
 		consts = [0.0]+list(y)

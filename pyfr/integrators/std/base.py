@@ -82,7 +82,7 @@ class BaseStdIntegrator(BaseCommon, BaseIntegrator):
     @property
     def _prec_regs(self):
         st = self.gmresniter+self.aux_gmres+self.stepper_nregs+self.uru_nreg+self.duold_nreg + self.eval_nreg
-        return range(st, st+self.gmresniter)
+        return range(st, st+self.k+1)
 
     def _gmres_j_regidx(self, j):
         return j
