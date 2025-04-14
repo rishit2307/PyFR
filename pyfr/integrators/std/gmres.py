@@ -4,6 +4,7 @@ import copy
 import itertools as it
 import time
 import math
+import nvtx
 from pyfr.inifile import Inifile
 from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.integrators.std.controllers import BaseStdController
@@ -55,27 +56,18 @@ class GMRESmultip(BaseStdIntegrator):
 				duold_nreg = 1 if l == self._order else 0
 				aux_gmres = 1 if l == self._order else 0
 
-				def _eval_jac(self):
-					add, rhs = self._add, self.system.rhs
-					rup, rrup = self._up_rup_regidx
-					r0, r1, *r = self._pseudo_regidx
+				def _init_jacobians(self):
+					backend = self.backend
 
-					t, dt, dtfac = self.t, self.dt, self.dtfac
 					self.jac = jac = {}
 					self.jacinv = jacinv = {}
 					self.jacshuff = {}
 					self.P = {}
-					comm, rank, root = get_comm_rank_root()
-
 					for etp in self.system.ele_types:
-
 						i = self.system.ele_types.index(etp)
 						nupts = self.system.ele_shapes[i][0]
 						neles = self.system.ele_shapes[i][-1]
 						nvars = self.system.ele_shapes[i][1]
-
-						# self.jac[etp] = jac[etp] = np.random.rand(nupts*nvars, nupts, nvars, neles)
-
 
 						self.jac[etp] = jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles))
 						self.P[etp] = np.zeros((neles, nupts*nvars))
@@ -85,22 +77,32 @@ class GMRESmultip(BaseStdIntegrator):
 
 						self.P[etp] = backend.matrix(self.P[etp].shape, self.P[etp], dtype=self.backend.ixdtype)
 
+				def _eval_jac(self):
+					add, rhs = self._add, self.system.rhs
+					rup, rrup = self._up_rup_regidx
+					r0, r1, *r = self._pseudo_regidx
+					jac, jacinv = self.jac, self.jacinv
+
+					t, dt, dtfac = self.t, self.dt, self.dtfac
+						
+					# self.jac[etp] = jac[etp] = np.random.rand(nupts*nvars, nupts, nvars, neles)
+					h = self.eval_norm2(rup)*self.epsmc
 					for etp in sorted(self.system.ele_types):
+						i = self.system.ele_types.index(etp)
+						nupts = self.system.ele_shapes[i][0]
+
 						celes = self.system.celes[etp]
 						for col in range(self.system.ncolours[etp]):
 							for v in range(self.system.nvars):
 								for npt in range(nupts):
 
-									self._addid(celes, [rup, r0], npt, v, col)
-									self.backend.wait()
+									self._addid(celes, [rup, r0], npt, v, col, h)
 									rhs(t+dt, r0, r1)
-									self.backend.wait()
-
-									self._add(-1.0/1e-8, r1, 1.0/1e-8, rrup)
+									self._add(-1.0/h, r1, 1.0/h, rrup)
 									kerns = self._init_jac(r1, etp, celes)
 									self.bind_kerns(kerns, npt, v, col, dtfac/dt)
 									backend.run_kernels(kerns)
-									self.backend.wait()
+
 					for etp in self.system.ele_types:
 
 						kern = backend.kernel('getf3', *[jac[etp], jacinv[etp], self.P[etp]])
@@ -109,6 +111,8 @@ class GMRESmultip(BaseStdIntegrator):
 
 						shufkerns = self._shuff_jac(etp)
 						backend.run_kernels(shufkerns)
+
+					self.backend.wait()
 
 				def bind_kerns(self, kerns, *args):
 					for k in kerns:
@@ -158,16 +162,29 @@ class GMRESmultip(BaseStdIntegrator):
 						backend.run_kernels(kerns)
 
 						# r0 = r0 + w*r1
-						add(1.0, r0, 2/3, r1)
+						add(1.0, r0, 1.0, r1)
+
+				def _jacobi_direct(self):
+					r0, r1, *r = self._pseudo_regidx
+					rmv  = self._mvec_regidx
+					rsrc = self._src_regidx
+
+					# rmv = D^(-1) * rsrc
+					kerns = self._mul_jac(rsrc, rmv)
+					backend.run_kernels(kerns)
+					
+					# r0 = A*rmv
+					self._eval_mat_vec(rmv, r0)
 
 				def jac_mult(self, nsmooth):
-						self.jacobi(nsmooth)
+					self.jacobi(nsmooth)
 
 
 			self.pintgs[l] = lpsint(backend, systemcls, rallocs, 
 									mesh, initsoln, mcfg)
 		
 		self.system = self.pintgs[order].system
+		self.pintg._init_jacobians()
 	
 	def plugins(self):
 		return self.pintgs[self._order].plugins
@@ -192,6 +209,7 @@ class GMRESmultip(BaseStdIntegrator):
 	def pintg(self):
 		return self.pintgs[self.level]
 
+	@nvtx.annotate(color='red')
 	def solve_gmres(self):
 		comm, rank, root = get_comm_rank_root()
 		self.level = self._order
@@ -247,6 +265,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		self._add(1.0, rdu, 1.0, self.pintg._duold_regidx)
 
+	@nvtx.annotate(color='yellow')
 	def mg_vcycle(self):
 		if not self.mpniters:
 			return
@@ -267,14 +286,11 @@ class GMRESmultip(BaseStdIntegrator):
 				self.level = l
 				self.pintg.jac_mult(n)
 
-				if m is not None and l > m:
-					self.restrict(l, m)
-				elif m is not None and l < m:
-					self.prolongate(l, m)
-			
-			self.level = self._order
 
+	@nvtx.annotate(color='magenta')
 	def arnoldi(self, k):
+		self.mg_vcycle()
+
 		self.level = self._order
 		add = self.pintg._add
 
@@ -285,7 +301,6 @@ class GMRESmultip(BaseStdIntegrator):
 		rmv = self.pintg._mvec_regidx
 		r0 = self.pintg._pseudo_regidx[0] if self.mpniters else rdu
 
-		self.mg_vcycle()
 		rprec = self.pintg._prec_regidx
 		add(0.0, rprec, 1.0, r0)
 		self.pintg._eval_mat_vec(r0, rmv)
@@ -295,23 +310,21 @@ class GMRESmultip(BaseStdIntegrator):
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 
 		self.backend.wait()
-		try:
-			del self.pintgs[self._order].jacinv
-		except AttributeError:
-			pass
 
 		for i, kern in enumerate(kerns):
 			h[i] = sum([v.retval for v in kern])
+		
+		with nvtx.annotate("MPI_DOT_CALL", color='green'):
+			comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 
-		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 		self._addv([1.0] + list(-h), [rmv] + [rji(j) for j in range(k+1)])
 		qnorm = self.pintg.eval_norm2(rmv)
-
-		h = np.append(h, qnorm)
 		add(0.0, rkp1, 1.0/qnorm, rmv)
 
+		h = np.append(h, qnorm)
 		return h
 
+	@nvtx.annotate(color='orange')
 	def giv_rot(self, h, cs, sn, k):
 		for i in range(k):
 			temp = cs[i] * h[i] + sn[i] * h[i+1]
@@ -327,6 +340,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		return h, cs_k, sn_k
 
+	@nvtx.annotate(color='blue')
 	def giv(self, v1, v2):
 		tt = np.sqrt(v1**2 + v2**2)
 		cs = v1/tt
@@ -362,7 +376,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				if (self.pintg.nacptsteps == 0) and nonlin_iter==0:
+				if (self.pintg.nacptsteps == 0) and nonlin_iter == 0:
 					self.pintg._eval_jac()
 					print('Jacobian evaluated')
 
@@ -385,7 +399,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 			add(0.0, rU, 1.0, rUp)
 
-			
 			for l in self.levels:
 				if rank == root:
 					print(f'nfeval at {l} is {self.pintgs[l].nfeval}')

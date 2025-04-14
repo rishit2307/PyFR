@@ -139,7 +139,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Build the kernel
         kern = self._build_kernel('addidx', src,
-                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*3)
+                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*3
+                                  + [fpdtype])
 
         # Set the parameters
         params = kern.make_params(grid, block)

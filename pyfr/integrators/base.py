@@ -5,6 +5,7 @@ import sys
 import time
 
 import numpy as np
+import nvtx
 
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root, mpi
@@ -273,15 +274,15 @@ class BaseCommon:
 
 		self.backend.run_kernels(jacmulkern)
 
-	def _addid(self, eid, rs, npt, vi, col):
+	def _addid(self, eid, rs, npt, vi, col, h):
 		addidx = self._get_addidx_kerns(eid, *rs)
 
 		for k in addidx:
-			k.bind(npt, vi, col)
+			k.bind(npt, vi, col, h)
 		
 		self.backend.run_kernels(addidx)
 
-
+	@nvtx.annotate(color='black')
 	def eval_norm2(self, rs):
 		kerns = self._get_norm2_kerns(rs)
 
@@ -289,7 +290,8 @@ class BaseCommon:
 		self.backend.run_kernels(kerns, wait=True)
 		norm = np.array([sum(k.retval**2 for k in kerns)])
 
-		comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
+		with nvtx.annotate("MPI_NORM2_CALL", color='green'):
+			comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
 		return np.sqrt(float(norm))
 	
 	def eval_norm1(self, rs):
@@ -304,17 +306,18 @@ class BaseCommon:
 
 
 
- 
+	@nvtx.annotate(color='cyan')
 	def _addv(self, consts, regidxs, subdims=None):
 		# Get a suitable set of axnpby kernels
 		axnpby = self._get_axnpby_kerns(*regidxs, subdims=subdims)
 
 		# Bind the arguments
-		for k in axnpby:
-			k.bind(*consts)
+		with nvtx.annotate("BINDING in axnpby", color="brown"):
+			for k in axnpby:
+				k.bind(*consts)
 
 		self.backend.run_kernels(axnpby)
-
+	@nvtx.annotate(color='white')
 	def _add(self, *args, subdims=None):
 		self._addv(args[::2], args[1::2], subdims=subdims)
 

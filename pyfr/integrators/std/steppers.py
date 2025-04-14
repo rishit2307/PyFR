@@ -4,6 +4,7 @@ from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.util import memoize, subclass_where
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from collections import defaultdict
+import nvtx
 
 class BaseStdStepper(BaseStdIntegrator):
 	def collect_stats(self, stats):
@@ -34,15 +35,17 @@ class BaseStdStepper(BaseStdIntegrator):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
 		rU, rrU = self._up_rup_regidx
-		dUn = self.eval_norm2(rdU)
+		# dUn = self.eval_norm2(rdU)
 
 		# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
 		# eps = epsmc*np.sqrt(self.Un)
 		# eps = self.epsmc*self.Un/dUn + self.epsmc
-		if dUn > 1e-10:
-			eps = self.epsmc*self.Un/dUn + self.epsmc
-		else:
-			eps = self.epsmc*self.Un
+		# if dUn> 1e-10:
+		# 	eps = self.epsmc*self.Un/dUn + self.epsmc
+		# else:
+		# 	eps = self.epsmc*self.Un
+		# eps = self.epsmc*self.Un
+		eps = self.epsmc*self.Un
 
 		# rrhs = rU + eps*rdU
 		add(0.0, rrhs, 1.0, rU, eps, rdU)
@@ -96,7 +99,7 @@ class Trapezoidal(BaseStdStepper):
 	@property
 	def _stepper_nfevals(self):
 		return self.nsteps
-	
+
 	def _res(self, ev_rru=False):
 		t, dt, dtfac = self.t, self.dt, self.dtfac
 
@@ -109,7 +112,8 @@ class Trapezoidal(BaseStdStepper):
 
 		rhs_with_postproc(t+dt, rup, rrup)
 		self.backend.wait()
-		self.Un = self.eval_norm1(rup)/self._get_gndofs()
+		# self.Un = self.eval_norm1(rup)/self._get_gndofs()
+		self.Un = self.eval_norm1(rup)
 		self._eval_mat_vec(rduold, rmv)
 	
 		# rru = R(Un)
