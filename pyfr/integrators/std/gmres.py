@@ -225,7 +225,6 @@ class GMRESmultip(BaseStdIntegrator):
 		
 		add(0.0, r0, 1/rnorm, r0)
 
-
 		H = np.zeros((m+1, m))
 	
 		beta = rnorm*self.pintg.e1	
@@ -367,7 +366,7 @@ class GMRESmultip(BaseStdIntegrator):
 				for l in self.levels:
 					self.level = l
 					self.pintg._init_step(self.tcurr, dt)
-				
+
 				self.level = self._order
 				if rank == root:
 					print(f't is {self.tcurr}, dt is {dt}')
@@ -375,7 +374,7 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				if (self.pintg.nacptsteps == 0) and nonlin_iter == 0:
+				if self.pintg.nacptsteps == 0 and self.mpniters > 0:
 					self.pintg._eval_jac()
 					print('Jacobian evaluated')
 
