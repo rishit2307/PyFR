@@ -221,7 +221,7 @@ def process_export(args):
     else:
         extn = os.path.splitext(args.outf)[1]
         writer = get_writer_by_extn(extn, args)
-
+    import pdb;pdb.set_trace()
     # Write the output file
     with args.progress.start_with_bar('Write output') as pbar:
         writer.write_out(pbar)

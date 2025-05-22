@@ -73,7 +73,9 @@ class CUBLASWrappers(LibWrapper):
          (c_int, 'cublasSdot_v2', c_void_p, c_int, c_void_p, c_int, c_void_p, 
         c_int, c_void_p),
         (c_int, 'cublasSaxpy_v2', c_void_p, c_int, POINTER(c_double), c_void_p, 
-         c_int, c_void_p, c_int), 
+         c_int, c_void_p, c_int),
+         (c_int, 'cublasDgemv_v2', c_void_p, c_int, c_int, c_int, POINTER(c_double), 
+          c_void_p, c_int, c_void_p, c_int, POINTER(c_double), c_void_p, c_int)
     ]
 
     def _transname(self, name):
@@ -130,6 +132,27 @@ class CUDACUBLASKernels(CUDAKernelProvider):
                 return rhost
 
         return NormKernel(mats=[a])
+
+    def gemv(self, a, b, c):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+
+        cublasgemv = w.cublasDgemv
+        alpha = 1
+        m, n = a.nrow, a.ncol
+        lda = n
+        beta=  1.0
+
+        def mv(stream):
+            w.cublasSetStream(h, stream)
+            cublasgemv(h, w.OP_N, m, n, c_double(alpha), a, lda, b, 1, c_double(beta), c, 1)
+        
+        class GEMVKernel(CUDAKernel):
+            def run(self, stream):
+                mv(stream)
+        
+        return GEMVKernel(mats=[a, b, c])
+
 
 
     def norm2(self, a):

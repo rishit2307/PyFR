@@ -420,7 +420,7 @@ class GmshReader(BaseReader):
         maps = self._etype_map, self._petype_fnmap, self._nodemaps
         pents = self._felespent, self._bfacespents, self._pfacespents
         mesh = NodalMeshAssembler(self._nodepts, self._elenodes, pents, maps)
-
+        import pdb;pdb.set_trace()
         with self.progress.start_with_spinner('Processing connectivity') as p:
             pyfrm = mesh.get_connectivity(p)
 

@@ -1,6 +1,7 @@
 from functools import cached_property
 
 import numpy as np
+import nvtx
 
 import pyfr.backends.base as base
 
@@ -115,5 +116,6 @@ class CUDAGraph(base.Graph):
             event.synchronize()
             req.Start()
 
-        # Wait for all of the MPI requests to finish
-        self._waitall(self.mpi_reqs)
+        with nvtx.annotate(message = "START_MPI_REQS", color='blue'):
+            # Wait for all of the MPI requests to finish
+            self._waitall(self.mpi_reqs)

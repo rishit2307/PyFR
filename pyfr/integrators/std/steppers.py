@@ -136,15 +136,13 @@ class Trapezoidal(BaseStdStepper):
 
 		rU, rrU = self._u_ru_regidx
 		rUp, rrUp = self._up_rup_regidx
-
-		# rhs_with_postproc(t, rU, rrU)
+		rhs_with_postproc(t+dt, rUp, rrUp)
 
 		rv = self._mvec_regidx
 		add(0.0, rv, -dtfac/2, rrU, dtfac/dt, rUp, -dtfac/dt, rU)
 
 		# add(-1/2, rv, 1/dt, rUp, -1/dt, rU)
 
-		rhs_with_postproc(t+dt, rUp, rrUp)
 		add(1.0, rv, -dtfac/2, rrUp)
 
 		self.nfeval+=1

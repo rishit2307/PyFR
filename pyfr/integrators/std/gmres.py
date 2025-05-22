@@ -184,7 +184,8 @@ class GMRESmultip(BaseStdIntegrator):
 									mesh, initsoln, mcfg)
 		
 		self.system = self.pintgs[order].system
-		self.pintg._init_jacobians()
+		if self.mpniters > 0:
+			self.pintg._init_jacobians()
 	
 	def plugins(self):
 		return self.pintgs[self._order].plugins
@@ -251,7 +252,8 @@ class GMRESmultip(BaseStdIntegrator):
 			if rank == root:
 				print(f'GMRES did not converge in {m} iterations, error is {err}')
 
-		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
+		with nvtx.annotate(message="LINALG_SOLVE", color='blue'):
+			y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 
 		rdu, rj = self.pintg._du_regidx, self._gmres_j_regidx
 		
@@ -263,7 +265,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		self._add(1.0, rdu, 1.0, self.pintg._duold_regidx)
 
-	@nvtx.annotate(color='yellow')
+	# @nvtx.annotate(color='yellow')
 	def mg_vcycle(self):
 		if not self.mpniters:
 			return
@@ -306,7 +308,6 @@ class GMRESmultip(BaseStdIntegrator):
 
 		kerns = [self._get_dot_kerns(rji(j), rmv) for j in range(k+1)]
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
-
 		self.backend.wait()
 
 		for i, kern in enumerate(kerns):
@@ -322,7 +323,7 @@ class GMRESmultip(BaseStdIntegrator):
 		h = np.append(h, qnorm)
 		return h
 
-	@nvtx.annotate(color='orange')
+	# @nvtx.annotate(color='orange')
 	def giv_rot(self, h, cs, sn, k):
 		for i in range(k):
 			temp = cs[i] * h[i] + sn[i] * h[i+1]
@@ -338,7 +339,7 @@ class GMRESmultip(BaseStdIntegrator):
 
 		return h, cs_k, sn_k
 
-	@nvtx.annotate(color='blue')
+	# @nvtx.annotate(color='blue')
 	def giv(self, v1, v2):
 		tt = np.sqrt(v1**2 + v2**2)
 		cs = v1/tt
