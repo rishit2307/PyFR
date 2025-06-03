@@ -7,7 +7,7 @@ from pyfr.writers.native import NativeWriter
 class WriterPlugin(PostactionMixin, RegionMixin, BaseSolnPlugin):
     name = 'writer'
     systems = ['*']
-    formulations = ['dual', 'std']
+    formulations = ['dual', 'std', 'implicit']
     dimensions = [2, 3]
 
     def __init__(self, intg, cfgsect, suffix=None):

@@ -6,7 +6,7 @@ from pyfr.plugins.base import BaseSolnPlugin
 class NaNCheckPlugin(BaseSolnPlugin):
     name = 'nancheck'
     systems = ['*']
-    formulations = ['dual', 'std']
+    formulations = ['dual', 'std', 'implicit']
     dimensions = [2, 3]
 
     def __init__(self, *args, **kwargs):

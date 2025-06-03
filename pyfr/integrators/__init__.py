@@ -3,6 +3,8 @@ import re
 from pyfr.integrators.dual.phys import BaseDualController, BaseDualStepper
 from pyfr.integrators.std import BaseStdController, BaseStdStepper
 from pyfr.integrators.std.gmres import GMRESmultip
+from pyfr.integrators.implicit import BaseImplicitController, BaseImplicitStepper
+from pyfr.integrators.implicit.newton import BaseNonLinearSolver
 from pyfr.util import subclass_where
 
 
@@ -29,8 +31,12 @@ def get_integrator(backend, systemcls, rallocs, mesh, initsoln, cfg):
 
         cc = subclass_where(BaseDualController, controller_name=cn)
         sc = subclass_where(BaseDualStepper, stepper_name=sn)
-    else:
-        raise ValueError('Invalid integrator formulation')
+    elif form == 'implicit':
+        cn = cfg.get('solver-time-integrator', 'controller')
+        sn = cfg.get('solver-time-integrator', 'scheme')
+
+        cc = subclass_where(BaseImplicitController, controller_name=cn)
+        sc = subclass_where(BaseImplicitStepper, stepper_name=sn)    
 
     # Determine the integrator name
     name = '_'.join([form, cn, sn, 'integrator'])
