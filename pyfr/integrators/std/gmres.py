@@ -84,7 +84,7 @@ class GMRESmultip(BaseStdIntegrator):
 					jac, jacinv = self.jac, self.jacinv
 
 					t, dt, dtfac = self.t, self.dt, self.dtfac
-						
+					import pdb;pdb.set_trace()
 					# self.jac[etp] = jac[etp] = np.random.rand(nupts*nvars, nupts, nvars, neles)
 					h = self.eval_norm2(rup)*self.epsmc
 					for etp in sorted(self.system.ele_types):

@@ -10,14 +10,11 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg):
 		super().__init__(backend, rallocs, mesh, initsoln, cfg)
 
-		dtjac_out = cfg.get('solver-time-integrator', 'dt-jac')
-		self.call_plugin_dt(dtjac_out)
-		
 		newtonsolver = subclass_where(BaseNonLinearSolver, solver_name='newton')
 		self.newtonsolver = newtonsolver(backend, systemcls, 
 										 rallocs, mesh, initsoln, cfg, 
 										 self.nstages, self.stepper_nregs, 
-										 self.tstart, self.dtmin, dtjac_out)
+										 self.tstart)
 		
 		self.system = self.newtonsolver.system
 		

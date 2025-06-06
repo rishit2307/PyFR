@@ -10,10 +10,10 @@ class BaseNonLinearSolver(BaseCommon):
 		self.backend = backend
 		
 		sect = 'solver-time-integrator'
-		niters = cfg.getint(sect, 'niters', 10)
-		self.ntol = cfg.get(sect, 'ntol', 1e-2)
+		niters = cfg.getint(sect, 'gmres-niters', 10)
+		self.ntol = cfg.getfloat(sect, 'ntol', 1e-2)
 
-		self.register = Register(stage_nregs, stepper_nregs, niters, self.solver_nregs)
+		self.register = Register(stage_nregs, stepper_nregs, niters, self.solver_nregs, cfg)
 
 		# Construct the relevant system
 		self.system = system = systemcls(backend, rallocs, 
@@ -22,82 +22,137 @@ class BaseNonLinearSolver(BaseCommon):
 
 		self.gmres_solver = gmres_solver = GMRESSolver(backend, system, cfg, 
 												 	   self.register, tstart)
-		
-		self._idxcurr = self.register._idxcurr
 
-		# Global degree of freedom count
-		self._gndofs = self._get_gndofs()
+		self._idxcurr = 0
 
+	def obtain_solution(self, bcoeffs):
+		regs = self.register
+		regidxs = [regs._curr_regidx] + [regs._prev_regidx]
+		regidxs += regs._stage_regidx
+
+		coeffs = [0.0, 1.0] + bcoeffs
+
+		self._addv(coeffs, regidxs)
+		self._add(0.0, regs._prev_regidx, 1.0, regs._curr_regidx)
 
 class NewtonSolver(BaseNonLinearSolver):
 	solver_name = 'newton'
 	solver_nregs = 1
 
-	def _update_rhs(self, currstg, stepper_coeffs, dt):
-		stepper_coeffs = [sc*dt for sc in stepper_coeffs]
-		consts = [0.0, *stepper_coeffs, 1.0, -1.0]
+	def init_step(self, t):
+		rhs = self.system.rhs
+		rprev = self.register._prev_regidx
+		rprev_rhs = self.register._stage_regidx[0]
 
-		iter = self.gmres_solver.iter
-		rdu = self._gmres_regidx[iter]
-		regidxs = [rdu] + self._stage_regidx[:currstg]
-		regidxs += self._stepper_regidx
-		
+		rhs(t, rprev, rprev_rhs)
+
+	def _update_rhs(self, tc, acoeffs, currstg):
+		rhs = self.system.rhs
+		gndofs = self._get_gndofs()
+
+		rcurr_rhs = self.register._stage_regidx[currstg]
+		rcurr = self.register._curr_regidx
+		rprev = self.register._prev_regidx
+		rdu = self.register._gmres_idx(0)
+
+		rhs(tc, rcurr, rcurr_rhs)
+
+		consts = [0.0, *acoeffs, 1.0, -1.0]
+		regidxs = [rdu] + self.register._stage_regidx[:currstg+1]
+		regidxs += [rprev, rcurr]
+
 		self._addv(consts, regidxs)
 
-	def solve(self, currstg, stepper_coeffs, tcurr, dt):
+		return self.eval_norm2(rdu)/np.sqrt(gndofs)
+
+	def solve(self, tc, acoeffs, currstg):
+		rcurr = self.register._curr_regidx
+		rduold = self.register._duold_regidx
+
+		nnorm = self._update_rhs(tc, acoeffs, currstg)
 		nnorm = np.inf
-		gmres_solver = self.gmres_solver
-		self.register.currstg = currstg
-		
+		newtoniter = 0
 		while nnorm > self.ntol:
-			self._update_rhs(currstg, stepper_coeffs, dt)
-			gmres_solver.solve(tcurr, dt)
-			
+			rdu = self.gmres_solver.solve(tc, acoeffs[-1], currstg)
 
-	def init_stage(self, currstg, t):
-		rhs = self.system.rhs
-		rU = self._stage_regidx[currstg]
+			self._add(1.0, rcurr, 1.0, rdu)
+			self._add(0.0, rduold, 1.0, rdu)
 
-		rhs(t, self._idxcurr, rU)
+			nnorm = self._update_rhs(tc, acoeffs, currstg)
+			newtoniter += 1 
+			print(f'stage is {currstg}')
+			print(f'nnorm is {nnorm}, newton is {newtoniter}')
 
 class Register:
-	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs):
+	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):
 		self.stage_nregs = stage_nregs
 		self.stepper_nregs = stepper_nregs
 		self.solver_nregs = solver_nregs
+		
+		sect = 'solver-time-integrator'
+		prec =  cfg.get(sect, 'precondition', None)
 
 		self.aux_nregs = 1
+		self.jacobi_nregs = 2
+		self.niters = niters
+		self.gmres_nregs = self.niters + 1
 		self.nregs = (self.solver_nregs + self.stage_nregs + 
-					  self.stepper_nregs + niters +  
-					  self.aux_nregs)
+					  self.stepper_nregs + self.gmres_nregs
+					  + self.aux_nregs + self.jacobi_nregs)
 		
-		self._idxcurr = 0
-		self.currstg = 0
+		if prec:
+			self.nregs += self.gmres_nregs
 
 		self._regidx = list(range(self.nregs))
+	
+	@property
+	def _gmres_regidx(self):
+		return self._regidx[:self.gmres_nregs]
+
+	@property
+	def _stepper_regidx(self):
+		ix = self.gmres_nregs
+		return self._regidx[ix:ix + self.stepper_nregs]
 
 	@property
 	def _stage_regidx(self):
-		return self._regidx[:self.stage_nregs]
-	
-	@property
-	def _stepper_regidx(self):
-		return self._regidx[self.stage_nregs:self.stepper_nregs]
-	
-	@property
-	def _du_regidx(self):
-		ix = self.stepper_nregs + self.stage_nregs
-		return self._regidx[ix:ix+self.solver_nregs]
+		ix = self.gmres_nregs + self.stepper_nregs
+		return self._regidx[ix : ix + self.stage_nregs]
 
 	@property
-	def _gmres_regidx(self):
-		ix = self.stage_nregs + self.stepper_nregs + self.solver_nregs
-		return self._regidx[ix:]
+	def _duold_regidx(self):
+		return (self.stepper_nregs + self.stage_nregs 
+		  		+ self.gmres_nregs)
 
 	@property
-	def _currstg_regidx(self):
-		return self._stage_regidx[self.currstg]
-	
+	def _curr_regidx(self):
+		return self._stepper_regidx[0]
+
+	@property
+	def _prev_regidx(self):
+		return self._stepper_regidx[1]
+
 	@property
 	def _aux_regidx(self):
-		return self._regidx[-1]
+		return (self.stepper_nregs + self.stage_nregs
+		  		+ self.gmres_nregs + self.solver_nregs
+				+ self.jacobi_nregs)
+
+	@property
+	def _jacobi_regidx(self):
+		ix =  (self.stepper_nregs + self.stage_nregs
+		  		+ self.gmres_nregs + self.solver_nregs)
+		return self._regidx[ix : ix + self.jacobi_nregs]
+
+	def _prec_idx(self, gmres_iter):
+		return self.nregs - self.gmres_nregs + gmres_iter
+
+	def _prec_regidx(self, gmres_iter):
+		ix = self.nregs - self.gmres_nregs
+		return range(ix, ix + gmres_iter + 1)
+
+	def _gmres_idx(self, gmres_iter):
+		return self._gmres_regidx[gmres_iter]
+	
+	def _currstg_rhs_regidx(self, currstg):
+		return self._stage_regidx[currstg]
