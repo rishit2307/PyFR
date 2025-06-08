@@ -2,10 +2,11 @@ import numpy as np
 from pyfr.integrators.base import BaseCommon, BaseIntegrator
 from pyfr.integrators.implicit.gmres import GMRESSolver
 from pyfr.integrators.implicit.jacobi import BlockJacobi
+from pyfr.mpiutil import get_comm_rank_root
 
 class BaseNonLinearSolver(BaseCommon):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg, 
-				 stage_nregs, stepper_nregs, tstart):
+				 stage_nregs, stepper_nregs, tstart, dt):
 		
 		self.backend = backend
 		
@@ -21,7 +22,7 @@ class BaseNonLinearSolver(BaseCommon):
 							   cfg=cfg)
 
 		self.gmres_solver = gmres_solver = GMRESSolver(backend, system, cfg, 
-												 	   self.register, tstart)
+												 	   self.register, tstart, dt)
 
 		self._idxcurr = 0
 
@@ -29,11 +30,15 @@ class BaseNonLinearSolver(BaseCommon):
 		regs = self.register
 		regidxs = [regs._curr_regidx] + [regs._prev_regidx]
 		regidxs += regs._stage_regidx
-
 		coeffs = [0.0, 1.0] + bcoeffs
 
 		self._addv(coeffs, regidxs)
+
+	def store_current_solution(self):
+		regs = self.register
 		self._add(0.0, regs._prev_regidx, 1.0, regs._curr_regidx)
+
+		return regs._prev_regidx
 
 class NewtonSolver(BaseNonLinearSolver):
 	solver_name = 'newton'
@@ -72,6 +77,8 @@ class NewtonSolver(BaseNonLinearSolver):
 		nnorm = self._update_rhs(tc, acoeffs, currstg)
 		nnorm = np.inf
 		newtoniter = 0
+		comm, rank, root = get_comm_rank_root()
+
 		while nnorm > self.ntol:
 			rdu = self.gmres_solver.solve(tc, acoeffs[-1], currstg)
 
@@ -80,8 +87,10 @@ class NewtonSolver(BaseNonLinearSolver):
 
 			nnorm = self._update_rhs(tc, acoeffs, currstg)
 			newtoniter += 1 
-			print(f'stage is {currstg}')
-			print(f'nnorm is {nnorm}, newton is {newtoniter}')
+
+			if rank == root:
+				print(f'stage is {currstg}')
+				print(f'nnorm is {nnorm}, newton is {newtoniter}')
 
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):

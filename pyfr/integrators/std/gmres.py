@@ -84,7 +84,6 @@ class GMRESmultip(BaseStdIntegrator):
 					jac, jacinv = self.jac, self.jacinv
 
 					t, dt, dtfac = self.t, self.dt, self.dtfac
-					import pdb;pdb.set_trace()
 					# self.jac[etp] = jac[etp] = np.random.rand(nupts*nvars, nupts, nvars, neles)
 					h = self.eval_norm2(rup)*self.epsmc
 					for etp in sorted(self.system.ele_types):
@@ -98,9 +97,9 @@ class GMRESmultip(BaseStdIntegrator):
 
 									self._addid(celes, [rup, r0], npt, v, col, h)
 									rhs(t+dt, r0, r1)
-									self._add(-1.0/h, r1, 1.0/h, rrup)
+									self._add(-dt/(dtfac*h), r1, dt/(dtfac*h), rrup)
 									kerns = self._init_jac(r1, etp, celes)
-									self.bind_kerns(kerns, npt, v, col, dtfac/dt)
+									self.bind_kerns(kerns, npt, v, col, 1.0)
 									backend.run_kernels(kerns)
 
 					for etp in self.system.ele_types:
@@ -375,11 +374,10 @@ class GMRESmultip(BaseStdIntegrator):
 				self.pintg._init_gmres()
 
 				self.pintg._res(ev_rru=True)
-				if self.pintg.nacptsteps == 0 and self.mpniters > 0:
+				if self.pintg.nacptsteps == 0 and nonlin_iter == 0:
 					self.pintg._eval_jac()
 					print('Jacobian evaluated')
-
-				self.solve_gmres() 
+				self.solve_gmres()
 
 				# rU = Un+1,k+1 = Un+1,k + s*dUk
 				rUp, rrUp = self.pintgs[self._order]._up_rup_regidx

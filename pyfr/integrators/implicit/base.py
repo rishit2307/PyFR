@@ -14,7 +14,7 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 		self.newtonsolver = newtonsolver(backend, systemcls, 
 										 rallocs, mesh, initsoln, cfg, 
 										 self.nstages, self.stepper_nregs, 
-										 self.tstart)
+										 self.tstart, self._dt)
 		
 		self.system = self.newtonsolver.system
 		

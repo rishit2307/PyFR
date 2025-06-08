@@ -4,7 +4,7 @@ from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
 
 class GMRESSolver(BaseCommon):
-	def __init__(self, backend, system, cfg, register, tstart):
+	def __init__(self, backend, system, cfg, register, tstart, dt):
 
 		self.system = system
 		self.backend = backend
@@ -20,6 +20,7 @@ class GMRESSolver(BaseCommon):
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
 		self.register = register
+		self._dt = dt
 
 		self.prec = cfg.get(sect, 'precondition', None)
 		if self.prec in ['left', 'right']:
@@ -99,8 +100,8 @@ class GMRESSolver(BaseCommon):
 
 		h = np.zeros(self.iter+1)
 
-		# if self.prec:
-		# 	r0 = self._jacobi_prec()
+		if self.prec:
+			r0 = self._jacobi_prec()
 
 		self._add(0.0, rprec, 1.0, r0)
 		self._eval_mat_vec(r0, rmv)
@@ -135,6 +136,11 @@ class GMRESSolver(BaseCommon):
 		# 	print(f'jacobian evaluated')
 		# 	self.dtjac_start = tc
 		# 	self.dtjac_out_init = self.dtjac_out
+		if self.prec and tc <= self._dt + self.dtjac_start:
+			self.jacobi_prec._eval_jac(tc, acoeff, currstg)
+
+			if rank == root:
+				print(f'jacobian evaluated')
 
 		rdu, rduold = reg._gmres_idx(self.iter), reg._duold_regidx
 		rmv = reg._aux_regidx

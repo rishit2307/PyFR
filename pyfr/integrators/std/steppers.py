@@ -55,7 +55,8 @@ class BaseStdStepper(BaseStdIntegrator):
 		self.nfeval += 1
 
 		# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
-		add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
+		# add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
+		add(-dt/(dtfac*eps), rrhs, dt/(eps*dtfac), rrU, 1.0, rdU)
 
 
 	def _init_gmres(self):
@@ -119,11 +120,15 @@ class Trapezoidal(BaseStdStepper):
 		rhs_with_postproc(t, ru, rru)
 		self.nfeval += 2
 
-		# rs = R(Un)/2 + R(Un+1,k)/2 
-		add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
+		# # rs = R(Un)/2 + R(Un+1,k)/2 
+		# add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
 
-		# rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
-		add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
+		# # rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
+		# add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
+
+		add(0.0, rdu, dt/dtfac, rrup, dt/dtfac, rru)
+		
+		add(1.0, rdu, 1.0, ru, -1.0, rup)
 
 		# rs = b - Ax
 		add(1.0, rdu, -1, rmv)
@@ -139,11 +144,15 @@ class Trapezoidal(BaseStdStepper):
 		rhs_with_postproc(t+dt, rUp, rrUp)
 
 		rv = self._mvec_regidx
-		add(0.0, rv, -dtfac/2, rrU, dtfac/dt, rUp, -dtfac/dt, rU)
+		# add(0.0, rv, -dtfac/2, rrU, dtfac/dt, rUp, -dtfac/dt, rU)
 
 		# add(-1/2, rv, 1/dt, rUp, -1/dt, rU)
 
-		add(1.0, rv, -dtfac/2, rrUp)
+		# add(1.0, rv, -dtfac/2, rrUp)
+
+		add(0.0, rv,  dt/dtfac, rrUp, dt/dtfac, rrU)
+
+		add(1.0, rv, 1.0, rU, -1.0, rUp)
 
 		self.nfeval+=1
 		normele = self.eval_norm2(rv)
