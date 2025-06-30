@@ -37,6 +37,14 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
     ixdtype_t rloc;
 
 
+    for (ixdtype_t i=zero; i < nrow; i+=nby){
+        for (ixdtype_t j=i+1; j < nrow; j+=nb){
+            idx = blockIdx.x*ldim + (tidrow + i)*nrow + (tidcol + j);
+            if (tidrow + i < nrow && tidcol + j < nrow)
+                jacinv[idx] = 0.0;
+        }
+    }
+
     for (ixdtype_t j=zero; j < nrow; j+=blockDim.x)
     {
         if (tid < nrow - j)
@@ -227,7 +235,7 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
     for (ixdtype_t i=nrow; i > zero; i-=nb){
         ${pyfr.expand('read', 'max(i-nb, zero)', 'max(i-nb, zero)', 'sA', 'jac')};
         ${pyfr.expand('utrtri', 'sA', 'sB', 'min(nb, i)')};
-        
+
         for (ixdtype_t j=i; j < nrow; j+=nb){
             ${pyfr.expand('read', 'max(i-nb, zero)', 'j', 'sC', 'jac')};
             for (ixdtype_t k=zero; k < nrow; k+=nb){
@@ -236,7 +244,7 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
                 for (ixdtype_t l=zero; l < min(nb, i); l+=nby){
                     idx = blockIdx.x*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
                     if (tidrow + l + max(i-nb, zero) < i && tidcol + k < nrow)
-                        jacinv[idx] -= sE[(tidrow + l)*nb + tidcol] ;
+                        jacinv[idx] -= sE[(tidrow + l)*nb + tidcol];
                 }
             }
         }

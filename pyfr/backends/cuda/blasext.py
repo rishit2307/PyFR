@@ -265,7 +265,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
 
         # Determine the grid/block
-        block = (1024, 1, 1)
+        block = (512, 1, 1)
 
 
         # grid = get_grid_for_block(block, ncolb, nrow*ncola)
