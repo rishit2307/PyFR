@@ -34,13 +34,10 @@ class ESDIRK32Stepper(BaseESDIRKStepper):
     nstages = 3
     gamma = (2 - math.sqrt(2))/2
     b2 = math.sqrt(2)/4
-    fsal = False
+    fsal = True
 
     a = [[gamma, gamma],
          [1 - b2 - gamma, b2, gamma]]
-    
-    b = [1 - b2 - gamma, b2, gamma]
-
     c = [2*gamma, 1]
 
 

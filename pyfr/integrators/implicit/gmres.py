@@ -56,7 +56,7 @@ class GMRESSolver(BaseCommon):
 		currstg = self.currstg
 
 		rcurr = reg._curr_regidx
-		rcurr_rhs = reg._currstg_rhs_regidx(currstg)
+		rcurr_rhs = reg._stage_regidx[currstg]
 
 		xabs = self.eval_norm2(rdu)
 
@@ -71,7 +71,7 @@ class GMRESSolver(BaseCommon):
 		add(-a/eps, rmv, a/eps, rcurr_rhs, 1.0, rdu)
 
 	def _jacobi_prec(self):
-		rdu = self.register._gmres_idx(self.iter)
+		rdu = self.register._gmres_regidx[self.iter]
 		raux = self.register._aux_regidx
 		r0, r1 = self.register._jacobi_regidx
 
@@ -92,10 +92,10 @@ class GMRESSolver(BaseCommon):
 	def _arnoldi(self):
 		comm, rank, root = get_comm_rank_root()
 
-		rdu = self.register._gmres_idx(self.iter)
+		rdu = self.register._gmres_regidx[self.iter]
 		rmv = self.register._aux_regidx
-		rprec = self.register._prec_idx(self.iter)
-		rkp1 = self.register._gmres_idx(self.iter+1)
+		rprec = self.register._prec_regidx[self.iter]
+		rkp1 = self.register._gmres_regidx[self.iter+1]
 		r0 = rdu
 
 		h = np.zeros(self.iter+1)
@@ -105,9 +105,9 @@ class GMRESSolver(BaseCommon):
 
 		self._add(0.0, rprec, 1.0, r0)
 		self._eval_mat_vec(r0, rmv)
-		rji = self.register._gmres_idx
+		rji = self.register._gmres_regidx
 
-		kerns = [self._get_dot_kerns(rji(j), rmv) for j in range(self.iter+1)]
+		kerns = [self._get_dot_kerns(rji[j], rmv) for j in range(self.iter+1)]
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 		self.backend.wait()
 
@@ -116,7 +116,7 @@ class GMRESSolver(BaseCommon):
 
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 
-		self._addv([1.0] + list(-h), [rmv] + [rji(j) for j in range(self.iter+1)])
+		self._addv([1.0] + list(-h), [rmv] + [rji[j] for j in range(self.iter+1)])
 		qnorm = self.eval_norm2(rmv)
 		self._add(0.0, rkp1, 1.0/qnorm, rmv)
 
@@ -131,18 +131,13 @@ class GMRESSolver(BaseCommon):
 
 		comm, rank, root = get_comm_rank_root()
 
-		# if self.prec and (tc - self.dtjac_start) >= self.dtjac_out_init:
-		# 	self.jacobi_prec._eval_jac(tc, acoeff, currstg)
-		# 	print(f'jacobian evaluated')
-		# 	self.dtjac_start = tc
-		# 	self.dtjac_out_init = self.dtjac_out
 		if self.prec and tc <= self._dt + self.dtjac_start:
 			self.jacobi_prec._eval_jac(tc, acoeff, currstg)
 
 			if rank == root:
 				print(f'jacobian evaluated')
 
-		rdu, rduold = reg._gmres_idx(self.iter), reg._duold_regidx
+		rdu, rduold = reg._gmres_regidx[self.iter], reg._duold_regidx
 		rmv = reg._aux_regidx
 
 		self._eval_mat_vec(rduold, rmv)
@@ -178,11 +173,11 @@ class GMRESSolver(BaseCommon):
 				print(f'GMRES did not converge in {self.niters} iterations, error is {err}')
 
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
-		rdu = reg._gmres_idx(self.iter)
+		rdu = reg._gmres_regidx[self.iter]
 		rduold = reg._duold_regidx
 
 		consts = [0.0]+list(y)
-		rp = self.register._prec_regidx(self.iter)
+		rp = self.register._prec_regidx
 		regidxs = [rdu] + [r for r in rp]
 
 		self._addv(consts, regidxs)

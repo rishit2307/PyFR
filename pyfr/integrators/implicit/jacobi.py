@@ -65,7 +65,7 @@ class BlockJacobi(BaseCommon):
 
         raux = reg._aux_regidx
         rcurr = reg._curr_regidx
-        rcurr_rhs = reg._currstg_rhs_regidx(currstg)
+        rcurr_rhs = reg._stage_regidx[currstg]
 
         h = self.eval_norm2(rcurr)*self.epsmc
         

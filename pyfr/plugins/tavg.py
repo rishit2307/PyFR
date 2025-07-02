@@ -36,7 +36,7 @@ class TavgMixin:
 class TavgPlugin(PostactionMixin, RegionMixin, TavgMixin, BaseSolnPlugin):
     name = 'tavg'
     systems = ['*']
-    formulations = ['dual', 'std']
+    formulations = ['dual', 'std', 'implicit']
     dimensions = [2, 3]
 
     def __init__(self, intg, cfgsect, suffix=None):

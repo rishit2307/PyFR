@@ -58,17 +58,17 @@ class NewtonSolver(BaseNonLinearSolver):
 		rcurr_rhs = self.register._stage_regidx[currstg]
 		rcurr = self.register._curr_regidx
 		rprev = self.register._prev_regidx
-		rdu = self.register._gmres_idx(0)
+		rdu0 = self.register._gmres_regidx[0]
 
 		rhs(tc, rcurr, rcurr_rhs)
 
 		consts = [0.0, *acoeffs, 1.0, -1.0]
-		regidxs = [rdu] + self.register._stage_regidx[:currstg+1]
+		regidxs = [rdu0] + self.register._stage_regidx[:currstg+1]
 		regidxs += [rprev, rcurr]
 
 		self._addv(consts, regidxs)
 
-		return self.eval_norm2(rdu)/np.sqrt(gndofs)
+		return self.eval_norm2(rdu0)/np.sqrt(gndofs)
 
 	def solve(self, tc, acoeffs, currstg):
 		rcurr = self.register._curr_regidx
@@ -153,15 +153,7 @@ class Register:
 		  		+ self.gmres_nregs + self.solver_nregs)
 		return self._regidx[ix : ix + self.jacobi_nregs]
 
-	def _prec_idx(self, gmres_iter):
-		return self.nregs - self.gmres_nregs + gmres_iter
-
-	def _prec_regidx(self, gmres_iter):
+	@property
+	def _prec_regidx(self):
 		ix = self.nregs - self.gmres_nregs
-		return range(ix, ix + gmres_iter + 1)
-
-	def _gmres_idx(self, gmres_iter):
-		return self._gmres_regidx[gmres_iter]
-	
-	def _currstg_rhs_regidx(self, currstg):
-		return self._stage_regidx[currstg]
+		return self._regidx[ix:ix+self.gmres_nregs]

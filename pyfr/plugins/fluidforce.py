@@ -9,7 +9,7 @@ from pyfr.plugins.base import BaseSolnPlugin, SurfaceMixin, init_csv
 class FluidForcePlugin(SurfaceMixin, BaseSolnPlugin):
     name = 'fluidforce'
     systems = ['ac-euler', 'ac-navier-stokes', 'euler', 'navier-stokes']
-    formulations = ['dual', 'std']
+    formulations = ['dual', 'std', 'implicit']
     dimensions = [2, 3]
 
     def __init__(self, intg, cfgsect, suffix):

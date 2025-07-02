@@ -5,7 +5,7 @@ from pyfr.plugins.base import BaseSolnPlugin, init_csv
 class DtStatsPlugin(BaseSolnPlugin):
     name = 'dtstats'
     systems = ['*']
-    formulations = ['std']
+    formulations = ['std', 'implicit']
     dimensions = [2, 3]
 
     def __init__(self, intg, cfgsect, prefix):
