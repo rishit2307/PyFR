@@ -14,15 +14,17 @@ class BaseNonLinearSolver(BaseCommon):
 		niters = cfg.getint(sect, 'gmres-niters', 10)
 		self.ntol = cfg.getfloat(sect, 'ntol', 1e-2)
 
-		self.register = Register(stage_nregs, stepper_nregs, niters, self.solver_nregs, cfg)
+		self.register = Register(stage_nregs, stepper_nregs,
+						         niters, self.solver_nregs, cfg)
+		nregs = self.register.nregs
 
 		# Construct the relevant system
 		self.system = system = systemcls(backend, rallocs, 
-							   mesh, initsoln, nregs=self.register.nregs, 
+							   mesh, initsoln, nregs=nregs, 
 							   cfg=cfg)
 
-		self.gmres_solver = gmres_solver = GMRESSolver(backend, system, cfg, 
-												 	   self.register, tstart, dt)
+		self.gmres_solver = GMRESSolver(backend, system, cfg, 
+										self.register, tstart, dt)
 
 		self._idxcurr = 0
 
@@ -61,8 +63,9 @@ class NewtonSolver(BaseNonLinearSolver):
 		rdu0 = self.register._gmres_regidx[0]
 
 		rhs(tc, rcurr, rcurr_rhs)
+		ac0 = acoeffs[0]
 
-		consts = [0.0, *acoeffs, 1.0, -1.0]
+		consts = [0.0, *acoeffs[1:], 1.0/ac0, -1.0/ac0]
 		regidxs = [rdu0] + self.register._stage_regidx[:currstg+1]
 		regidxs += [rprev, rcurr]
 
@@ -80,7 +83,7 @@ class NewtonSolver(BaseNonLinearSolver):
 		comm, rank, root = get_comm_rank_root()
 
 		while nnorm > self.ntol:
-			rdu = self.gmres_solver.solve(tc, acoeffs[-1], currstg)
+			rdu = self.gmres_solver.solve(tc, acoeffs[0], currstg)
 
 			self._add(1.0, rcurr, 1.0, rdu)
 			self._add(0.0, rduold, 1.0, rdu)

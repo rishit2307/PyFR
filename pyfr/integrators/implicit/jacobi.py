@@ -3,6 +3,7 @@ import numpy as np
 from pyfr.integrators.base import BaseCommon
 from pyfr.util import memoize
 
+
 class BlockJacobi(BaseCommon):
     def __init__(self, system, backend, register, cfg, epsmc):
         self.system = system
@@ -10,6 +11,13 @@ class BlockJacobi(BaseCommon):
         self.register = register
         self.cfg = cfg
         self.epsmc = epsmc
+
+        sect = 'solver-time-integrator'
+        precision = cfg.get('backend', 'precision')
+        if precision == 'double':
+            self.fpdtype = np.float64
+        else:
+            self.fpdtype = np.float32
 
         self.jac = jac = {}
         self.jacinv = jacinv = {}
@@ -22,9 +30,9 @@ class BlockJacobi(BaseCommon):
             neles = self.system.ele_shapes[i][-1]
             nvars = self.system.ele_shapes[i][1]
 
-            self.jac[etp] = jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles))
-            self.P[etp] = np.zeros((neles, nupts*nvars))
-            self.jacinv[etp] = jacinv[etp] = np.zeros((neles, (nupts*nvars)**2))
+            self.jac[etp] = jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles), dtype=self.fpdtype)
+            self.P[etp] = np.zeros((neles, nupts*nvars), dtype=self.backend.ixdtype)
+            self.jacinv[etp] = jacinv[etp] = np.zeros((neles, (nupts*nvars)**2), dtype=self.fpdtype)
             self.jacinv[etp] = backend.matrix(jacinv[etp].shape, jacinv[etp])
             self.jac[etp] = backend.matrix(jac[etp].shape, jac[etp])
 
@@ -67,7 +75,9 @@ class BlockJacobi(BaseCommon):
         rcurr = reg._curr_regidx
         rcurr_rhs = reg._stage_regidx[currstg]
 
-        h = self.eval_norm2(rcurr)*self.epsmc
+        h = self.fpdtype(np.sqrt(1 + self.eval_norm2(rcurr))*self.epsmc)
+        fac = 1/h
+        afac = 1.0/a
         
         for etp in sorted(self.system.ele_types):
             i = self.system.ele_types.index(etp)
@@ -78,9 +88,9 @@ class BlockJacobi(BaseCommon):
                     for npt in range(nupts):
                         self._addid(celes, [rcurr, raux], npt, v, col, h)
                         rhs(tc, raux, raux)
-                        self._add(-a/h, raux, a/h, rcurr_rhs)
+                        self._add(-fac, raux, fac, rcurr_rhs)
                         kerns = self._init_jac(raux, etp, celes)
-                        self._bind_kerns(kerns, npt, v, col, 1.0)
+                        self._bind_kerns(kerns, npt, v, col, afac)
                         backend.run_kernels(kerns)
 
         for etp in self.system.ele_types:
@@ -94,4 +104,3 @@ class BlockJacobi(BaseCommon):
             backend.run_kernels(shufkerns)
         
         self.backend.wait()
-

@@ -13,11 +13,13 @@ class GMRESSolver(BaseCommon):
 		self.niters = cfg.getint(sect, 'gmres-niters', 10)
 		self.ltol = cfg.getfloat(sect, 'gmres-tol', 1e-3)
 
-		fpdtype = cfg.get('backend', 'precision')
-		if fpdtype == 'double':
-			self.epsmc = np.sqrt(np.finfo(float).eps)
+		precision = cfg.get('backend', 'precision')
+		if precision == 'double':
+			self.epsmc = np.sqrt(np.finfo(np.float64).eps)
+			self.fpdtype = np.float64
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
+			self.fpdtype = np.float32
 
 		self.register = register
 		self._dt = dt
@@ -30,17 +32,20 @@ class GMRESSolver(BaseCommon):
 			self.dtjac_out = cfg.getfloat(sect, 'dtjac-out', np.inf)
 
 			self.nsmooth = cfg.getint(sect, 'nsmooth', 1)
+		
+		else:
+			self.prec = None
 	
 	def _init_solver(self, tc, a, currstg):
 		self.iter = 0
 		rcurr = self.register._curr_regidx
 		gndofs = self._get_gndofs()
 
-		self.e1 = np.zeros(self.niters+1)
+		self.e1 = np.zeros((self.niters+1), dtype=self.fpdtype)
 		self.e1[0] = 1.0
 
-		self.sn = np.zeros(self.niters)
-		self.cs = np.zeros(self.niters)
+		self.sn = np.zeros((self.niters), dtype=self.fpdtype)
+		self.cs = np.zeros((self.niters), dtype=self.fpdtype)
 
 		self.y = [[] for _ in range(len(self.system.ele_types))]
 
@@ -54,21 +59,35 @@ class GMRESSolver(BaseCommon):
 		reg = self.register
 		tc, a = self.tc, self.a
 		currstg = self.currstg
+		dtype = self.fpdtype
 
 		rcurr = reg._curr_regidx
 		rcurr_rhs = reg._stage_regidx[currstg]
 
 		xabs = self.eval_norm2(rdu)
 
-		if xabs > 1e-10:
-			eps = epsmc*self.rcurr_norm/xabs + epsmc
+
+
+
+		# if xabs > 1e-10:
+		if xabs > 1e-4:
+			eps = dtype(np.sqrt(1 + self.eval_norm2(rcurr))*epsmc/xabs)
 		else:
-			eps = epsmc*self.rcurr_norm
+			eps = dtype(np.sqrt(1 + self.eval_norm2(rcurr))*epsmc)
+		# eps = self._eval_step_size(rcurr, rdu)
+
+
+		# if xabs > 1e-5:
+		# 	eps = epsmc*self.rcurr_norm/xabs + epsmc
+		# else:
+		# 	eps = epsmc*self.rcurr_norm
+
+		fac = dtype(1.0/eps)
 
 		add(0.0, rmv, 1.0, rcurr, eps, rdu)
 		rhs(tc, rmv, rmv)
 
-		add(-a/eps, rmv, a/eps, rcurr_rhs, 1.0, rdu)
+		add(-fac, rmv, fac, rcurr_rhs, 1.0/a, rdu)
 
 	def _jacobi_prec(self):
 		rdu = self.register._gmres_regidx[self.iter]
@@ -98,7 +117,7 @@ class GMRESSolver(BaseCommon):
 		rkp1 = self.register._gmres_regidx[self.iter+1]
 		r0 = rdu
 
-		h = np.zeros(self.iter+1)
+		h = np.zeros((self.iter+1), dtype=self.fpdtype)
 
 		if self.prec:
 			r0 = self._jacobi_prec()
@@ -146,7 +165,7 @@ class GMRESSolver(BaseCommon):
 
 		self._add(0.0, rdu, 1/rnorm, rdu)
 
-		H = np.zeros((self.niters+1, self.niters))
+		H = np.zeros((self.niters+1, self.niters), dtype=self.fpdtype)
 
 		beta = rnorm*self.e1
 

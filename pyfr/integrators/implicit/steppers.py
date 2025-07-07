@@ -18,8 +18,10 @@ class BaseESDIRKStepper(BaseImplicitStepper):
         
 
         for i, (acoeffs, ccoeff) in enumerate(zip(self.a, self.c), start=1):
-            acoeffs = [acoeff*dt for acoeff in acoeffs]
-            self.newtonsolver.solve(t + ccoeff*dt, acoeffs, i)
+            acn = [acoeffs[-1]*dt]
+            acn += [ac/acoeffs[-1] for ac in acoeffs]
+
+            self.newtonsolver.solve(t + ccoeff*dt, acn, i)
         
         if not self.fsal:
             bcoeffs = [bt*dt for bt in self.b]

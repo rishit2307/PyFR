@@ -10,11 +10,13 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg):
 		super().__init__(backend, rallocs, mesh, initsoln, cfg)
 
+		tstart = self.tstart if not self.isrestart else self.tcurr
+
 		newtonsolver = subclass_where(BaseNonLinearSolver, solver_name='newton')
 		self.newtonsolver = newtonsolver(backend, systemcls, 
 										 rallocs, mesh, initsoln, cfg, 
 										 self.nstages, self.stepper_nregs, 
-										 self.tstart, self._dt)
+										 tstart, self._dt)
 		
 		self.system = self.newtonsolver.system
 		

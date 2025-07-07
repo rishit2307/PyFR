@@ -191,7 +191,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
         n = a.nrow*a.ncol
         x, y = a, b
         w.cublasSetPointerMode(h, w.CUBLAS_POINTER_MODE_DEVICE)
-        rdev = cuda.mem_alloc(np.dtype(float).itemsize)
+        rdev = cuda.mem_alloc(np.dtype(fpdtype).itemsize)
 
         rhost = cuda.pagelocked_empty((), fpdtype)
 

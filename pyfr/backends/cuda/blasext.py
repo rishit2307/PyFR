@@ -230,13 +230,20 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[0].ioshape[1:]
 
+        jac_fpdtype = arr[-1].traits[-1]
+
         # Determine the grid/block
-        block = (128, 1, 1)
-        grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        block = (32, 16, 1)
+        blksz = 320 if fpdtype == np.float32 else 160
+        blky = block[1]
+
+        grid = get_grid_for_block(block, ncolb)
+        blkx = block[0]
 
         # Render the kernel template
         src = self.backend.lookup.get_template('jacmul').render(
-             ncola=ncola)
+             ncola=ncola, jac_fpdtype=jac_fpdtype, blkx=blkx, 
+             blky=blky, blksz=blksz, ndof=nrow*ncola)
 
         # Build the kernel
         kern = self._build_kernel('jacmul', src,

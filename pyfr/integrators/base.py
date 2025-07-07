@@ -292,7 +292,7 @@ class BaseCommon:
 
 		with nvtx.annotate("MPI_NORM2_CALL", color='green'):
 			comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
-		return np.sqrt(float(norm))
+		return np.sqrt(norm[0])
 	
 	def eval_norm1(self, rs):
 		kerns = self._get_norm1_kerns(rs)
@@ -302,7 +302,7 @@ class BaseCommon:
 		norm = np.array([sum(k.retval for k in kerns)])
 
 		comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
-		return float(norm)
+		return norm[0]
 
 
 
