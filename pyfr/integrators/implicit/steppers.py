@@ -29,7 +29,7 @@ class BaseESDIRKStepper(BaseImplicitStepper):
         
         self._idxcurr = self.newtonsolver.store_current_solution()
         if rank == root:
-            print(f'time is {t}')
+            print(f'Physical time is {t}')
 
 class ESDIRK32Stepper(BaseESDIRKStepper):
     stepper_name = 'esdirk2'

@@ -26,12 +26,18 @@ class GMRESSolver(BaseCommon):
 
 		self.prec = cfg.get(sect, 'precondition', None)
 		if self.prec in ['left', 'right']:
-			self.jacobi_prec = BlockJacobi(system, backend, register, cfg ,self.epsmc)
+			self.jacobi_solver = BlockJacobi(system, backend, register, cfg ,self.epsmc)
 			self.dtjac_start = tstart
 			self.dtjac_out_init = -1
 			self.dtjac_out = cfg.getfloat(sect, 'dtjac-out', np.inf)
 
 			self.nsmooth = cfg.getint(sect, 'nsmooth', 1)
+			self.jac_fpdtype = cfg.get(sect, 'jacobi-prec')
+
+			if self.jac_fpdtype != self.fpdtype:
+				self._prec_updated = False
+			else:
+				self._prec_updated = True
 		
 		else:
 			self.prec = None
@@ -101,7 +107,7 @@ class GMRESSolver(BaseCommon):
 
 			self._add(-1.0, raux, 1.0, rdu)
 
-			kerns = self.jacobi_prec.mul_jac(raux, r1)
+			kerns = self.jacobi_solver.mul_jac(raux, r1)
 			self.backend.run_kernels(kerns)
 
 			self._add(1.0, r0, 1.0, r1)
@@ -147,14 +153,21 @@ class GMRESSolver(BaseCommon):
 		self._init_solver(tc, acoeff, currstg)
 		reg = self.register
 		cs, sn = self.cs, self.sn
+		jac_dtype = self.jac_fpdtype
 
 		comm, rank, root = get_comm_rank_root()
 
 		if self.prec and tc <= self._dt + self.dtjac_start:
-			self.jacobi_prec._eval_jac(tc, acoeff, currstg)
+			self.jacobi_solver._eval_jac(tc, acoeff, currstg)
 
 			if rank == root:
 				print(f'jacobian evaluated')
+
+		elif self.prec and not self._prec_updated:
+			self.jacobi_solver._update_precision()
+			self._prec_updated = True
+			if rank == root:
+				print(f'jacobian precision updated')
 
 		rdu, rduold = reg._gmres_regidx[self.iter], reg._duold_regidx
 		rmv = reg._aux_regidx

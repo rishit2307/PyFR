@@ -19,8 +19,10 @@ class BlockJacobi(BaseCommon):
         else:
             self.fpdtype = np.float32
 
-        self.jac = jac = {}
-        self.jacinv = jacinv = {}
+        self.jac_fpdtype = cfg.get(sect, 'jacobi-prec', precision)
+
+        self.jac = {}
+        self.jacinv = {}
         self.jacshuff = {}
         self.P = {}
 
@@ -30,11 +32,11 @@ class BlockJacobi(BaseCommon):
             neles = self.system.ele_shapes[i][-1]
             nvars = self.system.ele_shapes[i][1]
 
-            self.jac[etp] = jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles), dtype=self.fpdtype)
+            self.jac[etp] = np.empty((nupts*nvars, nupts, nvars, neles), dtype=self.fpdtype)
             self.P[etp] = np.zeros((neles, nupts*nvars), dtype=self.backend.ixdtype)
-            self.jacinv[etp] = jacinv[etp] = np.zeros((neles, (nupts*nvars)**2), dtype=self.fpdtype)
-            self.jacinv[etp] = backend.matrix(jacinv[etp].shape, jacinv[etp])
-            self.jac[etp] = backend.matrix(jac[etp].shape, jac[etp])
+            self.jacinv[etp]  = np.zeros((neles, (nupts*nvars)**2), dtype=self.fpdtype)
+            self.jacinv[etp] = backend.matrix(self.jacinv[etp].shape, self.jacinv[etp])
+            self.jac[etp] = backend.matrix(self.jac[etp].shape, self.jac[etp])
 
             self.P[etp] = backend.matrix(self.P[etp].shape, self.P[etp], dtype=self.backend.ixdtype)
 
@@ -68,7 +70,6 @@ class BlockJacobi(BaseCommon):
     def _eval_jac(self, tc, a, currstg):
         add, rhs = self._add, self.system.rhs
         backend = self.backend
-        jac, jacinv = self.jac, self.jacinv
         reg = self.register
 
         raux = reg._aux_regidx
@@ -78,7 +79,7 @@ class BlockJacobi(BaseCommon):
         h = self.fpdtype(np.sqrt(1 + self.eval_norm2(rcurr))*self.epsmc)
         fac = 1/h
         afac = 1.0/a
-        
+
         for etp in sorted(self.system.ele_types):
             i = self.system.ele_types.index(etp)
             nupts = self.system.ele_shapes[i][0]
@@ -89,18 +90,39 @@ class BlockJacobi(BaseCommon):
                         self._addid(celes, [rcurr, raux], npt, v, col, h)
                         rhs(tc, raux, raux)
                         self._add(-fac, raux, fac, rcurr_rhs)
-                        kerns = self._init_jac(raux, etp, celes)
-                        self._bind_kerns(kerns, npt, v, col, afac)
-                        backend.run_kernels(kerns)
+                        kern = self._init_jac(raux, etp, celes)
+                        self._bind_kerns(kern, npt, v, col, afac)
+                        backend.run_kernels(kern)
+
 
         for etp in self.system.ele_types:
 
-            kern = backend.kernel('getf3', *[jac[etp], jacinv[etp], 
+            kern = backend.kernel('getf3', *[self.jac[etp], self.jacinv[etp], 
                                   self.P[etp]])
 
             backend.run_kernels([kern])	
 
-            shufkerns = self._shuff_jac(etp)
-            backend.run_kernels(shufkerns)
+            kern = self._shuff_jac(etp)
+            backend.run_kernels(kern)
         
         self.backend.wait()
+
+
+    def _update_precision(self):
+        jac_temp = {}
+        backend = self.backend
+        del self.jacinv
+
+        for etp in self.system.ele_types:
+            jac_temp[etp] = self.jac[etp].get()
+
+            del self.jac[etp]
+        
+        self.jac = {}
+
+        for etp in self.system.ele_types:
+            self.jac[etp] = backend.matrix(jac_temp[etp].shape, 
+                            jac_temp[etp], dtype=self.jac_fpdtype)
+        
+        del jac_temp
+        del self._memoize_cache_
