@@ -102,7 +102,7 @@ class Register:
 		self.solver_nregs = solver_nregs
 		
 		sect = 'solver-time-integrator'
-		prec =  cfg.get(sect, 'precondition', None)
+		self.prec =  cfg.get(sect, 'precondition', None)
 
 		self.aux_nregs = 1
 		self.jacobi_nregs = 2
@@ -112,7 +112,7 @@ class Register:
 					  self.stepper_nregs + self.gmres_nregs
 					  + self.aux_nregs + self.jacobi_nregs)
 		
-		if prec:
+		if self.prec == 'right':
 			self.nregs += self.gmres_nregs
 
 		self._regidx = list(range(self.nregs))
@@ -159,4 +159,7 @@ class Register:
 	@property
 	def _prec_regidx(self):
 		ix = self.nregs - self.gmres_nregs
-		return self._regidx[ix:ix+self.gmres_nregs]
+		if self.prec == 'right':
+			return self._regidx[ix:ix+self.gmres_nregs]
+		else:
+			return self._regidx[:self.gmres_nregs]

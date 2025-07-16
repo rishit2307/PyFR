@@ -2,7 +2,7 @@ import numpy as np
 from pyfr.integrators.base import BaseCommon
 from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
-
+import nvtx
 class GMRESSolver(BaseCommon):
 	def __init__(self, backend, system, cfg, register, tstart, dt):
 
@@ -38,7 +38,6 @@ class GMRESSolver(BaseCommon):
 				self._prec_updated = False
 			else:
 				self._prec_updated = True
-		
 		else:
 			self.prec = None
 	
@@ -55,10 +54,10 @@ class GMRESSolver(BaseCommon):
 
 		self.y = [[] for _ in range(len(self.system.ele_types))]
 
-		self.rcurr_norm = self.eval_norm1(rcurr)/gndofs
+		self.rcurr_norm = self.eval_norm2(rcurr)
 		self.tc, self.a = tc, a
 		self.currstg = currstg
-
+	@nvtx.annotate(color="red")
 	def _eval_mat_vec(self, rdu, rmv):
 		add, rhs = self._add, self.system.rhs
 		epsmc = self.epsmc
@@ -72,14 +71,11 @@ class GMRESSolver(BaseCommon):
 
 		xabs = self.eval_norm2(rdu)
 
-
-
-
 		# if xabs > 1e-10:
 		if xabs > 1e-4:
-			eps = dtype(np.sqrt(1 + self.eval_norm2(rcurr))*epsmc/xabs)
+			eps = dtype(np.sqrt(1 + self.rcurr_norm)*epsmc/xabs)
 		else:
-			eps = dtype(np.sqrt(1 + self.eval_norm2(rcurr))*epsmc)
+			eps = dtype(np.sqrt(1 + self.rcurr_norm)*epsmc)
 		# eps = self._eval_step_size(rcurr, rdu)
 
 
@@ -95,23 +91,23 @@ class GMRESSolver(BaseCommon):
 
 		add(-fac, rmv, fac, rcurr_rhs, 1.0/a, rdu)
 
-	def _jacobi_prec(self):
-		rdu = self.register._gmres_regidx[self.iter]
+	def _jacobi_prec(self, rin):
+		if self.prec == None:
+			return rin
+		
 		raux = self.register._aux_regidx
 		r0, r1 = self.register._jacobi_regidx
-
-		self._add(0.0, r0, 0.0, rdu)
+		self._add(0.0, r0, 0.0, rin)
 
 		for i in range(self.nsmooth):
-			self._eval_mat_vec(r0, raux)
+			self._eval_mat_vec(r0, r1)
+			self._add(-1.0, r1, 1.0, rin)
 
-			self._add(-1.0, raux, 1.0, rdu)
-
-			kerns = self.jacobi_solver.mul_jac(raux, r1)
+			kerns = self.jacobi_solver.mul_jac(r1, raux)
 			self.backend.run_kernels(kerns)
 
-			self._add(1.0, r0, 1.0, r1)
-		
+			self._add(1.0, r0, 1.0, raux)
+
 		return r0
 
 	def _arnoldi(self):
@@ -119,17 +115,20 @@ class GMRESSolver(BaseCommon):
 
 		rdu = self.register._gmres_regidx[self.iter]
 		rmv = self.register._aux_regidx
-		rprec = self.register._prec_regidx[self.iter]
 		rkp1 = self.register._gmres_regidx[self.iter+1]
-		r0 = rdu
+		rprec = self.register._prec_regidx[self.iter]
 
 		h = np.zeros((self.iter+1), dtype=self.fpdtype)
 
-		if self.prec:
-			r0 = self._jacobi_prec()
+		if self.prec == 'left':	
+			self._eval_mat_vec(rdu, rmv)
+			rmv = self._jacobi_prec(rmv)
+		
+		else:
+			r0 = self._jacobi_prec(rdu)
+			self._add(0.0, rprec, 1.0, r0)
+			self._eval_mat_vec(r0, rmv)
 
-		self._add(0.0, rprec, 1.0, r0)
-		self._eval_mat_vec(r0, rmv)
 		rji = self.register._gmres_regidx
 
 		kerns = [self._get_dot_kerns(rji[j], rmv) for j in range(self.iter+1)]
@@ -148,7 +147,7 @@ class GMRESSolver(BaseCommon):
 		h = np.append(h, qnorm)
 
 		return h
-
+	@nvtx.annotate(color="green")
 	def solve(self, tc, acoeff, currstg):
 		self._init_solver(tc, acoeff, currstg)
 		reg = self.register
@@ -171,12 +170,13 @@ class GMRESSolver(BaseCommon):
 
 		rdu, rduold = reg._gmres_regidx[self.iter], reg._duold_regidx
 		rmv = reg._aux_regidx
-
 		self._eval_mat_vec(rduold, rmv)
 		self._add(1.0, rdu, -1.0, rmv)
-		rnorm = self.eval_norm2(rdu)
 
-		self._add(0.0, rdu, 1/rnorm, rdu)
+		r0 = rdu if self.prec in ('right', None) else self._jacobi_prec(rdu)
+
+		rnorm = self.eval_norm2(r0)
+		self._add(0.0, rdu, 1/rnorm, r0)
 
 		H = np.zeros((self.niters+1, self.niters), dtype=self.fpdtype)
 
@@ -196,8 +196,7 @@ class GMRESSolver(BaseCommon):
 
 			if err < self.ltol:
 				if rank == root:
-					print(f'GMRES converged in {k} iterations, error is {err}')
-					
+					print(f'GMRES converged in {k} iterations, error is {err}')		
 				break
 
 		if k == self.niters-1 and err > self.ltol:
@@ -209,14 +208,13 @@ class GMRESSolver(BaseCommon):
 		rduold = reg._duold_regidx
 
 		consts = [0.0]+list(y)
-		rp = self.register._prec_regidx
+		rp = self.register._prec_regidx[:self.iter+1]
 		regidxs = [rdu] + [r for r in rp]
 
 		self._addv(consts, regidxs)
 		self._add(1.0, rdu, 1.0, rduold)
 
 		return rdu
-
 
 	def _giv_rot(self, h, cs, sn, k):
 		for i in range(k):

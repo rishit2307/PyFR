@@ -28,49 +28,49 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-	def _eval_mat_vec(self, rdU, rrhs):
+	# def _eval_mat_vec(self, rdU, rrhs):
 
-		add, rhs = self._add, self.system.rhs
-		epsmc = self.epsmc
-		t, dt, dtfac = self.t, self.dt, self.dtfac
+	# 	add, rhs = self._add, self.system.rhs
+	# 	epsmc = self.epsmc
+	# 	t, dt, dtfac = self.t, self.dt, self.dtfac
 
-		rU, rrU = self._up_rup_regidx
-		dUn = self.eval_norm2(rdU)
+	# 	rU, rrU = self._up_rup_regidx
+	# 	dUn = self.eval_norm2(rdU)
 
-		# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
-		# eps = epsmc*np.sqrt(self.Un)
-		# eps = self.epsmc*self.Un/dUn + self.epsmc
-		if dUn> 1e-10:
-			eps = self.epsmc*self.Un/dUn + self.epsmc
-		else:
-			eps = self.epsmc*self.Un
-		# eps = self.epsmc*self.Un
+	# 	# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
+	# 	# eps = epsmc*np.sqrt(self.Un)
+	# 	# eps = self.epsmc*self.Un/dUn + self.epsmc
+	# 	if dUn> 1e-10:
+	# 		eps = self.epsmc*self.Un/dUn + self.epsmc
+	# 	else:
+	# 		eps = self.epsmc*self.Un
+	# 	# eps = self.epsmc*self.Un
 
-		# rrhs = rU + eps*rdU
-		add(0.0, rrhs, 1.0, rU, eps, rdU)
+	# 	# rrhs = rU + eps*rdU
+	# 	add(0.0, rrhs, 1.0, rU, eps, rdU)
 
-		# rrhs = rhs(rU + eps*rdU)
-		rhs(t+dt, rrhs, rrhs)
+	# 	# rrhs = rhs(rU + eps*rdU)
+	# 	rhs(t+dt, rrhs, rrhs)
 
-		self.nfeval += 1
+	# 	self.nfeval += 1
 
-		# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
-		# add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
-		add(-dt/(dtfac*eps), rrhs, dt/(eps*dtfac), rrU, 1.0, rdU)
+	# 	# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
+	# 	# add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
+	# 	add(-dt/(dtfac*eps), rrhs, dt/(eps*dtfac), rrU, 1.0, rdU)
 
 
-	def _init_gmres(self):
-		self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
-		self.rnorm= dict()
+	# def _init_gmres(self):
+	# 	self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
+	# 	self.rnorm= dict()
 
-		self.ltol = 1e-3
-		self.e1 = np.zeros(self.m+1)
-		self.e1[0] = 1.0
+	# 	self.ltol = 1e-3
+	# 	self.e1 = np.zeros(self.m+1)
+	# 	self.e1[0] = 1.0
 
-		self.sn = np.zeros(self.m)
-		self.cs = np.zeros(self.m)
-		self.k = 0
-		self.y = [[] for _ in range(len(self.system.ele_types))]		
+	# 	self.sn = np.zeros(self.m)
+	# 	self.cs = np.zeros(self.m)
+	# 	self.k = 0
+	# 	self.y = [[] for _ in range(len(self.system.ele_types))]		
 	
 class StdEulerStepper(BaseStdStepper):
 	stepper_name = 'euler'
