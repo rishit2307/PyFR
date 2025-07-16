@@ -487,7 +487,7 @@ class CUDA:
 
     def pagelocked_empty(self, shape, dtype):
 
-        nbytes = int(np.prod(shape)*np.dtype(dtype).itemsize)
+        nbytes = np.prod(shape)*np.dtype(dtype).itemsize
 
         alloc = CUDAHostAlloc(self, nbytes)
         alloc.__array_interface__ = {

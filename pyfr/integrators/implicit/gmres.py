@@ -20,6 +20,8 @@ class GMRESSolver(BaseCommon):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 			self.fpdtype = np.float32
+		
+		# self.epsmc = np.sqrt(np.finfo(np.float64).eps)
 
 		self.register = register
 		self._dt = dt
@@ -44,8 +46,6 @@ class GMRESSolver(BaseCommon):
 	def _init_solver(self, tc, a, currstg):
 		self.iter = 0
 		rcurr = self.register._curr_regidx
-		gndofs = self._get_gndofs()
-
 		self.e1 = np.zeros((self.niters+1), dtype=self.fpdtype)
 		self.e1[0] = 1.0
 
@@ -70,6 +70,7 @@ class GMRESSolver(BaseCommon):
 		rcurr_rhs = reg._stage_regidx[currstg]
 
 		xabs = self.eval_norm2(rdu)
+		# rcurr_norm = self.eval_norm1(rcurr)/self._get_gndofs()
 
 		# if xabs > 1e-10:
 		if xabs > 1e-4:
@@ -80,9 +81,9 @@ class GMRESSolver(BaseCommon):
 
 
 		# if xabs > 1e-5:
-		# 	eps = epsmc*self.rcurr_norm/xabs + epsmc
+		# 	eps = epsmc*rcurr_norm/xabs + epsmc
 		# else:
-		# 	eps = epsmc*self.rcurr_norm
+		# 	eps = epsmc*rcurr_norm
 
 		fac = dtype(1.0/eps)
 
@@ -95,18 +96,19 @@ class GMRESSolver(BaseCommon):
 		if self.prec == None:
 			return rin
 		
-		raux = self.register._aux_regidx
-		r0, r1 = self.register._jacobi_regidx
+		comm, rank, root=  get_comm_rank_root()
+
+		r0, r1, r2 = self.register._jacobi_regidx
 		self._add(0.0, r0, 0.0, rin)
 
 		for i in range(self.nsmooth):
 			self._eval_mat_vec(r0, r1)
 			self._add(-1.0, r1, 1.0, rin)
 
-			kerns = self.jacobi_solver.mul_jac(r1, raux)
+			kerns = self.jacobi_solver.mul_jac(r1, r2)
 			self.backend.run_kernels(kerns)
 
-			self._add(1.0, r0, 1.0, raux)
+			self._add(1.0, r0, 1.0, r2)
 
 		return r0
 
@@ -174,7 +176,6 @@ class GMRESSolver(BaseCommon):
 		self._add(1.0, rdu, -1.0, rmv)
 
 		r0 = rdu if self.prec in ('right', None) else self._jacobi_prec(rdu)
-
 		rnorm = self.eval_norm2(r0)
 		self._add(0.0, rdu, 1/rnorm, r0)
 

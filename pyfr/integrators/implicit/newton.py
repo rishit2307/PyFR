@@ -105,7 +105,7 @@ class Register:
 		self.prec =  cfg.get(sect, 'precondition', None)
 
 		self.aux_nregs = 1
-		self.jacobi_nregs = 2
+		self.jacobi_nregs = 3
 		self.niters = niters
 		self.gmres_nregs = self.niters + 1
 		self.nregs = (self.solver_nregs + self.stage_nregs + 
