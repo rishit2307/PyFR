@@ -38,8 +38,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
             r1[idx] = 0.0;
 
     }
-    
-    
+
     % for i in range(0, ndof, blksz):
         nl = min(${i}+${blksz}, ${ndof});
 

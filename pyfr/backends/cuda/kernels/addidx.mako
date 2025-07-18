@@ -21,8 +21,7 @@ addidx(ixdtype_t ncolb, ixdtype_t ldim,
 
         if (eid[j] == col){
             idx1 = npt*ldim + SOA_IX(j, vi, ${ncola});
-            x1[idx1] = x0[idx1] + h;
+            x1[idx1] = x0[idx1] + sqrt(1 + fabs(x0[idx1]))*h;
         }
-        
     }
 }

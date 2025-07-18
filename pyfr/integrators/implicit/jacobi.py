@@ -44,9 +44,9 @@ class BlockJacobi(BaseCommon):
         for k in kerns:
             k.bind(*args)
 
-    def _init_jac(self, r0, etp, celes):
+    def _init_jac(self, etp, celes, rs):
         jac = self.jac[etp]
-        kerns = [self.backend.kernel('jacinit', *[em[r0]] + [jac, celes])
+        kerns = [self.backend.kernel('jacinit', *[em[r] for r in rs] +[jac, celes])
                     for em in self.system.ele_banks]
         return kerns
 
@@ -76,8 +76,8 @@ class BlockJacobi(BaseCommon):
         rcurr = reg._curr_regidx
         rcurr_rhs = reg._stage_regidx[currstg]
 
-        h = self.fpdtype(np.sqrt(1 + self.eval_norm2(rcurr))*self.epsmc)
-        fac = 1/h
+        # h = self.fpdtype(np.sqrt(1 + self.eval_norm2(rcurr))*self.epsmc)
+        h = self.epsmc
         afac = 1.0/a
 
         for etp in sorted(self.system.ele_types):
@@ -89,11 +89,10 @@ class BlockJacobi(BaseCommon):
                     for npt in range(nupts):
                         self._addid(celes, [rcurr, raux], npt, v, col, h)
                         rhs(tc, raux, raux)
-                        self._add(-fac, raux, fac, rcurr_rhs)
-                        kern = self._init_jac(raux, etp, celes)
-                        self._bind_kerns(kern, npt, v, col, afac)
+                        self._add(-1.0, raux, 1.0, rcurr_rhs)
+                        kern = self._init_jac(etp, celes, [raux, rcurr])
+                        self._bind_kerns(kern, npt, v, col, afac, h)
                         backend.run_kernels(kern)
-
 
         for etp in self.system.ele_types:
 

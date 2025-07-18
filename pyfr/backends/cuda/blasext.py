@@ -160,7 +160,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         ncola, ncolb = arr[0].ioshape[1:]
 
         # nrowj, ncolj, ldimj, fpdtypej = arr[1].traits[1:]
-        ldimj = arr[1].ioshape[0]
+        ldimj = arr[2].ioshape[0]
 
         block = (128, 1, 1)
         grid = get_grid_for_block(block, ncolb, ldimj)
@@ -176,7 +176,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Build the kernel
         kern = self._build_kernel('jacinit', src,
-                                  [ixdtype]*4 + [np.uintp]*3 + [ixdtype]*3 + [fpdtype])
+               [ixdtype]*4 +[np.uintp]*4 + 
+               [ixdtype]*3 + [fpdtype]*2)
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -184,7 +185,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         class JacInitKernel(CUDAKernel):
             def bind(self, *consts):
-                params.set_args(*consts, start=7)
+                params.set_args(*consts, start=8)
 
             def run(self, stream):
                 kern.exec_async(stream, params)

@@ -238,7 +238,7 @@ class BaseCommon:
 											 dt_mat=dtaum, **kwargs))
 
 		return kerns
-	
+
 	@memoize
 	def _get_norm2_kerns(self, *rs):
 		kerns = [self.backend.kernel('norm2', *[em[r] for r in rs])

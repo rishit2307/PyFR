@@ -95,7 +95,7 @@ class GMRESSolver(BaseCommon):
 	def _jacobi_prec(self, rin):
 		if self.prec == None:
 			return rin
-		
+
 		comm, rank, root=  get_comm_rank_root()
 
 		r0, r1, r2 = self.register._jacobi_regidx
