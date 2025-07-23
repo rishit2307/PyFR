@@ -278,7 +278,7 @@ class NodalMeshAssembler:
         
         # Get neighbours of neighbour
         nnbele = self._get_nnb(nbele)
-        celes = self._colour_mesh(nbele)
+        celes = self._colour_mesh(nnbele)
 
         # Identify the fixed boundary faces
         bf = self._ident_boundary_faces(bpart, resid)
