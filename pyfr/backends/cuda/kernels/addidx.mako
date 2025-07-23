@@ -14,10 +14,6 @@ addidx(ixdtype_t ncolb, ixdtype_t ldim,
 
    if (j < ncolb)
     {
-        % for k in subdims:
-            idx = i*ldim + SOA_IX(j, ${k}, ${ncola});
-            x1[idx] = x0[idx];
-        % endfor
 
         if (eid[j] == col){
             idx1 = npt*ldim + SOA_IX(j, vi, ${ncola});

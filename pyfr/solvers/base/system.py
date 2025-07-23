@@ -145,14 +145,22 @@ class BaseSystem:
 
     def _load_colours(self, rallocs, mesh):
         celes, ncols = {}, {}
+        backend = self.backend
         comm, rank, root = get_comm_rank_root()
-        for etype in self.ele_types:
-            col = mesh[f'col_{etype}_p{rallocs.prank}']
-            ncols[etype] = np.amax(col) + 1
-            celes[etype] = self.backend.matrix(col[None].shape, col[None], dtype=self.backend.ixdtype)
+        getypes = set(comm.allreduce(self.ele_types, op=mpi.SUM))
+        for etype in sorted(getypes):
+            if etype in self.ele_types:
+                col = mesh[f'col_{etype}_p{rallocs.prank}']
+                ncols[etype] = np.amax(col) + 1
+                celes[etype] = backend.matrix(col[None].shape, col[None],
+                                              dtype=backend.ixdtype)
+            
+            else:
+                ncols[etype] = 0
+            
             ncols[etype] = comm.allreduce(ncols[etype], op=mpi.MAX)
         print(f'rank iss {rank}, ncols is {ncols}')
-        
+
         return celes, ncols
 
     def _load_int_inters(self, rallocs, mesh, elemap):

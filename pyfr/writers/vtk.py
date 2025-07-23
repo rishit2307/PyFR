@@ -659,7 +659,7 @@ class VTKWriter(BaseWriter):
 
         # Sub divison points inside of a standard element
         svpts = self._get_std_ele(name, nspts)
-        import pdb;pdb.set_trace()
+
         nsvpts = len(svpts)
 
         if name != 'pyr' and self.ho_output:

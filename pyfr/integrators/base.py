@@ -251,15 +251,17 @@ class BaseCommon:
 				 for em in self.system.ele_banks]
 		
 		return kerns
-	
-	@memoize
-	def _get_addidx_kerns(self, eid, *rs):
+
+	def _get_addidx_kerns(self, eid, etype, *rs):
+
+		etype_ix = self.system.ele_types.index(etype)
+		em = self.system.ele_banks[etype_ix]
 
 		kerns = [self.backend.kernel('addidx', 
-				*[em[r] for r in rs] + [eid]) 
-				for em in self.system.ele_banks]
+				*[em[r] for r in rs] + [eid])]
 
 		return kerns
+
 
 	@memoize
 	def _get_jacmul_kernels(self, jac, *rs):
@@ -274,8 +276,12 @@ class BaseCommon:
 
 		self.backend.run_kernels(jacmulkern)
 
-	def _addid(self, eid, rs, npt, vi, col, h):
-		addidx = self._get_addidx_kerns(eid, *rs)
+	def _addid(self, rs, npt, vi, col, h, etype):
+		
+		if etype not in self.system.ele_types:
+			return
+		eid = self.system.celes[etype]
+		addidx = self._get_addidx_kerns(eid, etype, *rs)
 
 		for k in addidx:
 			k.bind(npt, vi, col, h)

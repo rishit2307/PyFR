@@ -20,7 +20,7 @@ class GMRESSolver(BaseCommon):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 			self.fpdtype = np.float32
-		
+
 		# self.epsmc = np.sqrt(np.finfo(np.float64).eps)
 
 		self.register = register
@@ -36,7 +36,7 @@ class GMRESSolver(BaseCommon):
 			self.nsmooth = cfg.getint(sect, 'nsmooth', 1)
 			self.jac_fpdtype = cfg.get(sect, 'jacobi-prec')
 
-			if self.jac_fpdtype != self.fpdtype:
+			if self.jac_fpdtype != precision:
 				self._prec_updated = False
 			else:
 				self._prec_updated = True
@@ -51,8 +51,6 @@ class GMRESSolver(BaseCommon):
 
 		self.sn = np.zeros((self.niters), dtype=self.fpdtype)
 		self.cs = np.zeros((self.niters), dtype=self.fpdtype)
-
-		self.y = [[] for _ in range(len(self.system.ele_types))]
 
 		self.rcurr_norm = self.eval_norm2(rcurr)
 		self.tc, self.a = tc, a
@@ -111,6 +109,26 @@ class GMRESSolver(BaseCommon):
 			self._add(1.0, r0, 1.0, r2)
 
 		return r0
+	
+
+	def _jacobi_prec_cpu(self, rin):
+		r0, r1, r2 = self.register._jacobi_regidx
+		self._add(0.0, r0, 0.0, rin)
+		nupts, nvars, neles = self.system.ele_shapes[0]
+		N = nupts*nvars
+
+		for i in range(self.nsmooth):
+			self._eval_mat_vec(r0, r1)
+			self._add(-1.0, r1, 1.0, rin)
+			r1_cpu = self.system.ele_banks[0][r1].get().reshape(N, -1)
+
+			tp = self.jacinv_cpu @ r1_cpu.T[..., None]
+
+			self.system.ele_banks[0][r2].set(tp.T.reshape(nupts, nvars, -1))
+
+			self._add(1.0, r0, 1.0, r2)
+
+		return r0
 
 	def _arnoldi(self):
 		comm, rank, root = get_comm_rank_root()
@@ -125,14 +143,21 @@ class GMRESSolver(BaseCommon):
 		if self.prec == 'left':	
 			self._eval_mat_vec(rdu, rmv)
 			rmv = self._jacobi_prec(rmv)
-		
+
 		else:
+			# r0 = self._jacobi_prec_cpu(rdu)
 			r0 = self._jacobi_prec(rdu)
 			self._add(0.0, rprec, 1.0, r0)
 			self._eval_mat_vec(r0, rmv)
 
 		rji = self.register._gmres_regidx
+		# rmv_cpu = self.system.ele_banks[0][rmv].get()
 
+		# for j in range(self.iter + 1):
+		# 	rjij_cpu = self.system.ele_banks[0][rji[j]].get()
+
+		# 	h[j] = np.sum(rjij_cpu*rmv_cpu)
+		# import pdb;pdb.set_trace()
 		kerns = [self._get_dot_kerns(rji[j], rmv) for j in range(self.iter+1)]
 		self.backend.run_kernels([krn for kern in kerns for krn in kern])
 		self.backend.wait()
@@ -141,6 +166,16 @@ class GMRESSolver(BaseCommon):
 			h[i] = sum([v.retval for v in kern])
 
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
+		# w_cpu = self.system.ele_banks[0][rmv].get()
+
+		# for j in range(self.iter + 1):
+		# 	rjij_cpu = self.system.ele_banks[0][rji[j]].get()
+		# 	w_cpu -= h[j]*rjij_cpu
+
+		# qnorm = np.linalg.norm(w_cpu)
+		# qnorm = comm.allreduce(qnorm**2, op=mpi.SUM)
+		# qnorm = np.sqrt(qnorm)
+		# self.system.ele_banks[0][rkp1].set(w_cpu/qnorm)
 
 		self._addv([1.0] + list(-h), [rmv] + [rji[j] for j in range(self.iter+1)])
 		qnorm = self.eval_norm2(rmv)
@@ -149,6 +184,7 @@ class GMRESSolver(BaseCommon):
 		h = np.append(h, qnorm)
 
 		return h
+
 	@nvtx.annotate(color="green")
 	def solve(self, tc, acoeff, currstg):
 		self._init_solver(tc, acoeff, currstg)
@@ -160,6 +196,7 @@ class GMRESSolver(BaseCommon):
 
 		if self.prec and tc <= self._dt + self.dtjac_start:
 			self.jacobi_solver._eval_jac(tc, acoeff, currstg)
+			# self.jacinv_cpu = self.jacobi_solver._eval_jac_cpu(tc, acoeff, currstg)
 
 			if rank == root:
 				print(f'jacobian evaluated')
@@ -172,8 +209,8 @@ class GMRESSolver(BaseCommon):
 
 		rdu, rduold = reg._gmres_regidx[self.iter], reg._duold_regidx
 		rmv = reg._aux_regidx
-		self._eval_mat_vec(rduold, rmv)
-		self._add(1.0, rdu, -1.0, rmv)
+		# self._eval_mat_vec(rduold, rmv)
+		# self._add(1.0, rdu, -1.0, rmv)
 
 		r0 = rdu if self.prec in ('right', None) else self._jacobi_prec(rdu)
 		rnorm = self.eval_norm2(r0)
@@ -197,7 +234,7 @@ class GMRESSolver(BaseCommon):
 
 			if err < self.ltol:
 				if rank == root:
-					print(f'GMRES converged in {k} iterations, error is {err}')		
+					print(f'GMRES converged in {k} iterations, error is {err}')
 				break
 
 		if k == self.niters-1 and err > self.ltol:
@@ -213,7 +250,7 @@ class GMRESSolver(BaseCommon):
 		regidxs = [rdu] + [r for r in rp]
 
 		self._addv(consts, regidxs)
-		self._add(1.0, rdu, 1.0, rduold)
+		# self._add(1.0, rdu, 1.0, rduold)
 
 		return rdu
 

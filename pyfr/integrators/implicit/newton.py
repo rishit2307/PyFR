@@ -77,12 +77,12 @@ class NewtonSolver(BaseNonLinearSolver):
 		rcurr = self.register._curr_regidx
 		rduold = self.register._duold_regidx
 
-		nnorm = self._update_rhs(tc, acoeffs, currstg)
+		nnorm_init = self._update_rhs(tc, acoeffs, currstg)
 		nnorm = np.inf
 		newtoniter = 0
 		comm, rank, root = get_comm_rank_root()
 
-		while nnorm > self.ntol:
+		while nnorm/nnorm_init > self.ntol:
 			rdu = self.gmres_solver.solve(tc, acoeffs[0], currstg)
 
 			self._add(1.0, rcurr, 1.0, rdu)
@@ -93,7 +93,7 @@ class NewtonSolver(BaseNonLinearSolver):
 
 			if rank == root:
 				print(f'stage is {currstg}')
-				print(f'nnorm is {nnorm}, newton is {newtoniter}')
+				print(f'nnorm is {nnorm/nnorm_init}, newton is {newtoniter}')
 
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):

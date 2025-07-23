@@ -188,8 +188,8 @@ class NodalMeshAssembler:
                     pfaces[pftype].append([lf, rf])
                     pmap[lf, rf] = k
 
-                    # nbele[lf[:2]].append(rf[:2])
-                    # nbele[rf[:2]].append(lf[:2])
+                    nbele[lf[:2]].append(rf[:2])
+                    nbele[rf[:2]].append(lf[:2])
 
         return pfaces, pmap
     
