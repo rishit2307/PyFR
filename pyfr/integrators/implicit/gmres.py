@@ -114,19 +114,21 @@ class GMRESSolver(BaseCommon):
 	def _jacobi_prec_cpu(self, rin):
 		r0, r1, r2 = self.register._jacobi_regidx
 		self._add(0.0, r0, 0.0, rin)
-		nupts, nvars, neles = self.system.ele_shapes[0]
-		N = nupts*nvars
 
-		for i in range(self.nsmooth):
-			self._eval_mat_vec(r0, r1)
-			self._add(-1.0, r1, 1.0, rin)
-			r1_cpu = self.system.ele_banks[0][r1].get().reshape(N, -1)
 
-			tp = self.jacinv_cpu @ r1_cpu.T[..., None]
+		for j, etypes in enumerate(self.system.ele_types):
+			nupts, nvars, neles = self.system.ele_shapes[j]
+			N = nupts*nvars
+			for i in range(self.nsmooth):
+				self._eval_mat_vec(r0, r1)
+				self._add(-1.0, r1, 1.0, rin)
+				r1_cpu = self.system.ele_banks[j][r1].get().reshape(N, -1)
 
-			self.system.ele_banks[0][r2].set(tp.T.reshape(nupts, nvars, -1))
+				tp = self.jacinv_cpu[j] @ r1_cpu.T[..., None]
 
-			self._add(1.0, r0, 1.0, r2)
+				self.system.ele_banks[j][r2].set(tp.T.reshape(nupts, nvars, -1))
+
+				self._add(1.0, r0, 1.0, r2)
 
 		return r0
 
@@ -143,6 +145,7 @@ class GMRESSolver(BaseCommon):
 		if self.prec == 'left':	
 			self._eval_mat_vec(rdu, rmv)
 			rmv = self._jacobi_prec(rmv)
+			# rmv = self._jacobi_prec_cpu(rmv)
 
 		else:
 			# r0 = self._jacobi_prec_cpu(rdu)
@@ -190,7 +193,6 @@ class GMRESSolver(BaseCommon):
 		self._init_solver(tc, acoeff, currstg)
 		reg = self.register
 		cs, sn = self.cs, self.sn
-		jac_dtype = self.jac_fpdtype
 
 		comm, rank, root = get_comm_rank_root()
 

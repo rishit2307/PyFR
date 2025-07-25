@@ -18,26 +18,36 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
 
     __shared__ fpdtype_t sA[${blkx}*${blksz}];
 
-    if (tid < ncolb){
-        #pragma unroll
-        for (ixdtype_t i=0; i < ${ndof} - ${blky}; i+=${blky}){
-            uid = (tidy + i) / ${ncola};
-            vid = (tidy + i) % ${ncola};
-
-            idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
-            r1[idx] = 0.0;
-        }
-
-        ixdtype_t i = ${ndof} - ${blky};
-        uid = (tidy + i) / ${ncola};
-        vid = (tidy + i) % ${ncola};
+    % for i in range(0, ndof, blky):
+        uid = (tidy + ${i}) / ${ncola};
+        vid = (tidy + ${i}) % ${ncola};
 
         idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
-
-        if (tidy + i < ${ndof})
+        if (tid < ncolb && tidy + ${i} < ${ndof})
             r1[idx] = 0.0;
+    
+    % endfor
 
-    }
+    ## if (tid < ncolb){
+    ##     #pragma unroll
+    ##     for (ixdtype_t i=0; i < ${ndof} - ${blky}; i+=${blky}){
+    ##         uid = (tidy + i) / ${ncola};
+    ##         vid = (tidy + i) % ${ncola};
+
+    ##         idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+    ##         r1[idx] = 0.0;
+    ##     }
+
+    ##     ixdtype_t i = ${ndof} - ${blky};
+    ##     uid = (tidy + i) / ${ncola};
+    ##     vid = (tidy + i) % ${ncola};
+
+    ##     idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+
+    ##     if (tidy + i < ${ndof})
+    ##         r1[idx] = 0.0;
+
+    ## }
 
     % for i in range(0, ndof, blksz):
         nl = min(${i}+${blksz}, ${ndof});
@@ -83,7 +93,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
             r1temp = 0.0;
             if (tidy + j < ${ndof} && tid < ncolb){
                 
-                #pragma unroll 40
+                #pragma unroll 20
                 for (ixdtype_t k=${i}; k < nl; ++k){
 
                     uid = k / ${ncola};
