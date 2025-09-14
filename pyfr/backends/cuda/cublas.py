@@ -109,7 +109,7 @@ class CUDACUBLASKernels(CUDAKernelProvider):
 
             @property
             def retval(self):
-                return result
+                return fpdtype(result)
 
         return NormKernel(mats=[a])
 
@@ -138,32 +138,6 @@ class CUDACUBLASKernels(CUDAKernelProvider):
                 return fpdtype(result)
 
         return NormKernel(mats=[a])
-
-    def dot(self, a, b):
-        fpdtype = a.traits[-1]
-        w, h = self.lib, self.handle
-        cublasdot = w.cublasDdot if fpdtype == np.float64 else w.cublasSdot
-        n = a.nrow*a.ncol
-        x, y = a, b
-
-        if fpdtype == np.float64:
-            result = c_double(0.0)
-        else:
-            result = c_float(0.0)
-
-        def ddd(stream):
-            w.cublasSetStream(h, stream)
-            cublasdot(h, n, x, 1, y, 1, result)
-
-        class DotKernel(CUDAKernel):
-            def run(self, stream):
-                ddd(stream)
-
-            @property
-            def retval(self):
-                return fpdtype(result)
-        
-        return DotKernel(mats=[a, b])
 
     def lu(self, *arr):
         cuda = self.backend.cuda

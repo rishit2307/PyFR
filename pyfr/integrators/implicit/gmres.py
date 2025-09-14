@@ -160,13 +160,15 @@ class GMRESSolver(BaseCommon):
 		# 	rjij_cpu = self.system.ele_banks[0][rji[j]].get()
 
 		# 	h[j] = np.sum(rjij_cpu*rmv_cpu)
-		# import pdb;pdb.set_trace()
-		kerns = [self._get_dot_kerns(rji[j], rmv) for j in range(self.iter+1)]
-		self.backend.run_kernels([krn for kern in kerns for krn in kern])
-		self.backend.wait()
 
-		for i, kern in enumerate(kerns):
-			h[i] = sum([v.retval for v in kern])
+		for j in range(self.iter + 1):
+			h[j] = self._eval_dot(rji[j], rmv)
+		# kerns = [self._get_dot_kerns(rji[j], rmv) for j in range(self.iter+1)]
+		# self.backend.run_kernels([krn for kern in kerns for krn in kern])
+		# self.backend.wait()
+
+		# for i, kern in enumerate(kerns):
+		# 	h[i] = sum([v.retval for v in kern])
 
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 		# w_cpu = self.system.ele_banks[0][rmv].get()
@@ -181,7 +183,7 @@ class GMRESSolver(BaseCommon):
 		# self.system.ele_banks[0][rkp1].set(w_cpu/qnorm)
 
 		self._addv([1.0] + list(-h), [rmv] + [rji[j] for j in range(self.iter+1)])
-		qnorm = self.eval_norm2(rmv)
+		qnorm = self._eval_norm(rmv)
 		self._add(0.0, rkp1, 1.0/qnorm, rmv)
 
 		h = np.append(h, qnorm)

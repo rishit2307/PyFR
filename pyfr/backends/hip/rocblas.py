@@ -52,8 +52,20 @@ class RocBLASWrappers(LibWrapper):
          c_int, c_int, c_void_p, c_void_p, c_int, c_int, c_void_p,
          c_int, c_int, c_void_p, c_void_p, c_int, c_int, c_void_p,
          c_int, c_int, c_int, c_int, c_int, c_uint32), 
-         (c_int, 'rocblas_dtrtri', c_void_p, c_int, c_int, 
-          c_int, c_void_p, c_int, c_void_p, c_int)
+        (c_int, 'rocblas_dtrtri', c_void_p, c_int, c_int, 
+         c_int, c_void_p, c_int, c_void_p, c_int),
+        (c_int, 'rocblas_sasum', c_void_p, c_int, c_void_p, c_int,
+         POINTER(c_float)), 
+        (c_int, 'rocblas_dasum', c_void_p, c_int,  c_void_p, c_int,
+         POINTER(c_double)), 
+        (c_int, 'rocblas_snrm2', c_void_p, c_int, c_void_p, c_int,
+         POINTER(c_float)),
+        (c_int, 'rocblas_dnrm2', c_void_p, c_int, c_void_p, c_int,
+         POINTER(c_double)),
+        (c_int, 'rocblas_sdot', c_void_p, c_int, c_void_p, c_int, c_void_p,
+         c_int, POINTER(c_float)),
+        (c_int, 'rocblas_ddot', c_void_p, c_int, c_void_p, c_int, c_void_p,
+         c_int, POINTER(c_double))
     ]
 
 
@@ -162,31 +174,3 @@ class HIPRocBLASKernels(HIPKernelProvider):
                 gemm(stream)
 
         return MulKernel(mats=[a, b, out], dt=dt)
-    
-
-    def inv(self, a, b):
-
-        h, w = self._handle, self._wrappers
-
-        opA = opB = w.OPERATION_NONE
-        rtype = w.DATATYPE_F64_R
-
-        n = 64
-        print(a.leaddim)
-        def inverse(stream):
-            w.rocblas_set_stream(h, stream)
-            w.rocblas_dtrtri(
-                h, w.FILL_FULL, w.DIAGONAL_NON_UNIT, n, a, a.leaddim, 
-                b, b.leaddim
-            )
-
-        class InvKernel(HIPKernel):
-            def add_to_graph(self, graph, deps):
-                pass
-
-            def run(self, stream):
-                inverse(stream)
-            
-        return InvKernel(mats=[a, b])
-
-

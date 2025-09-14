@@ -73,7 +73,7 @@ class HIPBackend(BaseBackend):
         kprovs = [provider.HIPPointwiseKernelProvider,
                   blasext.HIPBlasExtKernels,
                   packing.HIPPackingKernels,
-                  rocblas.HIPRocBLASKernels,
+                  gimmik.HIPGiMMiKKernels,
                   rocblas.HIPRocBLASKernels]
         self._providers = [k(self) for k in kprovs]
 

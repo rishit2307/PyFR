@@ -56,7 +56,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return CopyKernel(mats=[dst, src])
 
-    def reduction(self, *rs, method, norm, dt_mat=None):
+    def reduction(self, *rs, method, norm=None, dt_mat=None):
         if any(r.traits != rs[0].traits for r in rs[1:]):
             raise ValueError('Incompatible matrix types')
 
@@ -86,11 +86,17 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         regs = list(rs) + [dt_mat] if dt_mat else rs
 
-        # Argument types for reduction kernel
+         # Argument types for reduction kernel
         if method == 'errest':
             argt = [ixdtype]*3 + [np.uintp]*4 + [fpdtype]*2
+        elif method == 'errest_imp':
+            argt = [ixdtype]*3 + [np.uintp]*3 + [fpdtype]*2
         elif method == 'resid' and dt_mat:
             argt = [ixdtype]*3 + [np.uintp]*4 + [fpdtype]
+        elif method == 'dot':
+            argt = [ixdtype]*3 + [np.uintp]*3
+        elif method == 'norm':
+            argt = [ixdtype]*3 + [np.uintp]*2
         else:
             argt = [ixdtype]*3 + [np.uintp]*3 + [fpdtype]
 
@@ -122,6 +128,56 @@ class CUDABlasExtKernels(CUDAKernelProvider):
                             stream)
 
         return ReductionKernel(mats=regs)
+
+    def dot(self, *rs):
+        cuda = self.backend.cuda
+        ixdtype = self.backend.ixdtype
+        nrow, ncol, ldim, fpdtype = rs[0].traits[1:]
+        ncola, ncolb = rs[0].ioshape[1:]
+
+        # Reduction block dimensions
+        block = (256, 1, 1)
+
+        # Determine the grid size
+        grid = get_grid_for_block(block, ncolb, ncola)
+
+        # Empty result buffer on the device
+        reduced_dev = cuda.mem_alloc(ncola*grid[0]*rs[0].itemsize)
+
+        # Empty result buffer on the host
+        reduced_host = cuda.pagelocked_empty((ncola, grid[0]), fpdtype)
+
+        tplargs = dict(blocksz=block[0])
+
+        # Get the kernel template
+        src = self.backend.lookup.get_template('dot').render(**tplargs)
+
+        regs = list(rs)
+
+        argt = [ixdtype]*3 + [np.uintp]*3
+
+        # Build the reduction kernel
+        rkern = self._build_kernel('dot', src, argt)
+
+        # Set the parameters
+        params = rkern.make_params(grid, block)
+        params.set_args(nrow, ncolb, ldim, reduced_dev, *regs)
+
+
+        class DOTKernel(CUDAKernel):
+            @property
+            def retval(self):
+                return np.sum(reduced_host, axis=1)
+
+            def bind(self, *facs):
+                pass
+
+            def run(self, stream):
+                rkern.exec_async(stream, params)
+                cuda.memcpy(reduced_host, reduced_dev, reduced_dev.nbytes,
+                           stream)
+
+        return DOTKernel(mats=regs)
 
     def addidx(self, *arr, subdims=None):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]

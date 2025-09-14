@@ -1,18 +1,7 @@
 <%inherit file='base'/>
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
 typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
-
-%if pyfr.npdtype_to_ctype(jac_fpdtype) == '__half':
-    #define JAC_HALF_PREC
-%endif
-
-#ifdef JAC_HALF_PREC
-    #define cast(x) __half2float(x)
-#else
-    #define cast(x) x
-#endif
-
-__global__ void
+__global__ __launch_bounds__(${blkx*blky}) void
 jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         fpdtype_t *__restrict__ r0, fpdtype_t *__restrict__ r1,
         jac_fpdtype_t *__restrict__ jac)
@@ -24,9 +13,6 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
     ixdtype_t uid, vid, nv;
     ixdtype_t idx, sidx;
     fpdtype_t r1temp = 0.0;
-
-    // Fixed-size array
-    ## fpdtype_t acc[${ndof // blky + ndof % blky}] = {0.0};
 
     ixdtype_t nl;
 
@@ -93,7 +79,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                     vid = k % ${ncola};
                     jidx = (tidy + j)*ldim*nrow + uid*ldim + SOA_IX(tid, vid, ${ncola});
                     sidx = (k-${i})*blockDim.x + threadIdx.x;
-                    r1temp += sA[sidx] * cast(jac[jidx]);
+                    r1temp += sA[sidx] * jac[jidx];
 
                 }
                 uid = (tidy + j) / ${ncola};
@@ -102,21 +88,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                 idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                 r1[idx] += r1temp;
             }
-            ## acc[j / blockDim.y] += r1temp;
         }
         __syncthreads();
     % endfor
-
-    ## if (tid < ncolb){
-    ##     % for aix in range(ndof // blky + ndof % blky):
-    ##         uid = (tidy + ${aix}*blockDim.y) / ${ncola};
-    ##         vid = (tidy + ${aix}*blockDim.y) % ${ncola};
-
-    ##         idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
-
-    ##         if (tidy + ${aix}*blockDim.y < ${ndof})
-    ##             r1[idx] = acc[${aix}];
-
-    ##     % endfor
-    ## }
 }

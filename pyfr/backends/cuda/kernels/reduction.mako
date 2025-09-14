@@ -1,16 +1,24 @@
 <%inherit file='base'/>
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
 
-__global__ void
+__global__  void
 reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
           fpdtype_t *__restrict__ reduced,
-          fpdtype_t *__restrict__ rcurr, fpdtype_t *__restrict__ rold,
+          fpdtype_t *__restrict__ rcurr
 % if method == 'errest':
-          fpdtype_t *__restrict__ rerr, fpdtype_t atol, fpdtype_t rtol)
+          ,fpdtype_t *__restrict__ rold, fpdtype_t *__restrict__ rerr, 
+          fpdtype_t atol, fpdtype_t rtol)
+% elif method == 'errest_imp':
+          ,fpdtype_t * __restrict__ rerr, fpdtype_t atol, fpdtype_t rtol)
 % elif method == 'resid' and dt_type == 'matrix':
+          ,fpdtype_t *__restrict__ rold,
           fpdtype_t *__restrict__ dt_mat, fpdtype_t dt_fac)
 % elif method == 'resid':
-          fpdtype_t dt_fac)
+            ,fpdtype_t *__restrict__ rold, fpdtype_t dt_fac)
+% elif method == 'dot':
+            ,fpdtype_t * __restrict__ rold)
+% elif method == 'norm':
+            )
 % endif
 {
     int tid = threadIdx.x;
@@ -26,12 +34,22 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
             ixdtype_t idx = j*ldim + SOA_IX(i, blockIdx.y, gridDim.y);
         % if method == 'errest':
             r = rerr[idx]/(atol + rtol*max(fabs(rcurr[idx]), fabs(rold[idx])));
+        % elif method == 'errest_imp':
+            r = rerr[idx]/(atol + rtol*fabs(rcurr[idx]));
         % elif method == 'resid':
             r = (rcurr[idx] - rold[idx])/(dt_fac${'*dt_mat[idx]' if dt_type == 'matrix' else ''});
+        % elif method == 'dot':
+            r = rcurr[idx]*rold[idx];
+        % elif method == 'norm':
+            r = rcurr[idx];
         % endif
 
         % if norm == 'uniform':
             acc = max(r*r, acc);
+        % elif norm == 'l1':
+            acc += fabs(r);
+        % elif method == 'dot':
+            acc += r;
         % else:
             acc += r*r;
         % endif

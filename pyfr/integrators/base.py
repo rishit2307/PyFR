@@ -220,13 +220,15 @@ class BaseCommon:
 				 for em in self.system.ele_banks]
 
 		return kerns
-	
-	@memoize
-	def _get_dot_kerns(self, *rs):
-		kerns = [self.backend.kernel('dot', *[em[r] for r in rs]) 
-				  for em in self.system.ele_banks]
-		 
-		return kerns
+
+	def _eval_dot(self, *rs):
+		kerns = self._get_dot_kerns(*rs)
+
+		self.backend.run_kernels(kerns, wait=True)
+
+		res = np.array([sum(v for k in kerns for v in k.retval)])
+
+		return float(res)
 
 	@memoize
 	def _get_reduction_kerns(self, *rs, **kwargs):
@@ -238,20 +240,17 @@ class BaseCommon:
 											 dt_mat=dtaum, **kwargs))
 
 		return kerns
-
-	@memoize
-	def _get_norm2_kerns(self, *rs):
-		kerns = [self.backend.kernel('norm2', *[em[r] for r in rs])
-				 for em in self.system.ele_banks]
-		return kerns
 	
 	@memoize
-	def _get_norm1_kerns(self, *rs):
-		kerns = [self.backend.kernel('norm1', *[em[r] for r in rs])
-				 for em in self.system.ele_banks]
-		
+	def _get_dot_kerns(self, *rs):
+
+		kerns = []
+		for em in self.system.ele_banks:
+			kerns.append(self.backend.kernel('dot', *[em[r] for r in rs]))
+
 		return kerns
 
+	@memoize
 	def _get_addidx_kerns(self, eid, etype, *rs):
 
 		etype_ix = self.system.ele_types.index(etype)
@@ -288,29 +287,18 @@ class BaseCommon:
 		
 		self.backend.run_kernels(addidx)
 
-	@nvtx.annotate(color='black')
-	def eval_norm2(self, rs):
-		kerns = self._get_norm2_kerns(rs)
-
-		comm, rank, root = get_comm_rank_root()
-		self.backend.run_kernels(kerns, wait=True)
-		norm = np.array([sum(k.retval**2 for k in kerns)])
-
-		with nvtx.annotate("MPI_NORM2_CALL", color='green'):
-			comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
-		return np.sqrt(norm[0])
-	
-	def eval_norm1(self, rs):
-		kerns = self._get_norm1_kerns(rs)
+	def _eval_norm(self, rs):
 		comm, rank, root = get_comm_rank_root()
 
+		kerns = self._get_reduction_kerns(rs, method='norm', 
+										  norm='l2')
+
 		self.backend.run_kernels(kerns, wait=True)
-		norm = np.array([sum(k.retval for k in kerns)])
 
-		comm.Allreduce(mpi.IN_PLACE, norm, op=mpi.SUM)
-		return norm[0]
+		res = np.array([sum(v for k in kerns for v in k.retval)])
+		comm.Allreduce(mpi.IN_PLACE, res, op=mpi.SUM)
 
-
+		return float(np.sqrt(res))
 
 	@nvtx.annotate(color='cyan')
 	def _addv(self, consts, regidxs, subdims=None):

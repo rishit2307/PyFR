@@ -7,7 +7,7 @@ from pyfr.nputil import npeval
 from pyfr.plugins.base import BaseSolnPlugin, SurfaceMixin, init_csv
 
 
-FWHSurfParams = namedtuple('FWHSurfParams', ('eidxs', 'm0', 'norm', 'area',
+FWHSurfParams = namedtuple('FWHSurfParams', ('eidxs', 'm0', 'nda',
                                              'r_tilde_vec', 'r_star_inv',
                                              'r_star_tilde_vec'))
 
@@ -15,7 +15,7 @@ FWHSurfParams = namedtuple('FWHSurfParams', ('eidxs', 'm0', 'norm', 'area',
 class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
     name = 'fwh'
     systems = ['ac-euler', 'ac-navier-stokes', 'euler', 'navier-stokes']
-    formulations = ['dual', 'std']
+    formulations = ['dual', 'std', 'implicit']
     dimensions = [2, 3]
 
     def __init__(self, intg, cfgsect, suffix=None, *args, **kwargs):
@@ -27,6 +27,7 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         self.tstart = self.cfg.getfloat(cfgsect, 'tstart', 0.0)
         self.t_last = -np.inf
         self.dt = self.cfg.getfloat(cfgsect, 'dt')
+        intg.call_plugin_dt(self.dt)
         self.obsv_pts = np.array(self.cfg.getliteral(self.cfgsect,
                                                      'observer-pts'))
         self.nobvs = len(self.obsv_pts)
@@ -42,6 +43,10 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         privarmap = intg.system.elementscls.privarmap[ndims]
         self._vidx = [x in 'uvw' for x in privarmap]
         self._pidx = privarmap.index('p')
+
+        if not self.incomp:
+            self._ridx = privarmap.index('rho')
+      
         self.consts = self.cfg.items_as('constants', float)
 
         self.qinf = {k: npeval(self.cfg.getexpr(cfgsect, k), self.consts)
@@ -64,7 +69,10 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         # Initialise surface data
         ele_map = intg.system.ele_map
         self.emap = {k: i for i, k in enumerate(ele_map)}
+
         self.ele_surface, _ = self._surf_region(intg)
+        self.surf_type = self.cfg.get(cfgsect, 'surf-type', None)
+        
         self._init_surf(ele_map)
 
     def _init_surf(self, ele_map):
@@ -75,11 +83,11 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
             # Get face operators
             itype, proj, norm = eles.basis.faces[fidx]
 
-            # Create a quadratue on suface
+            # Create a quadrature on suface
             qpts, qwts = self._surf_quad(itype, proj)
             norm = np.array([norm for x in qpts])
 
-            # Get phyical location, transformations, and normals
+            # Get physical location, transformations, and normals
             ploc = eles.ploc_at_np(qpts)[..., eidxs]
             rcpdjac = eles.rcpdjac_at_np(qpts)[..., eidxs]
             pnorm = eles.pnorm_at(qpts, norm)[:, eidxs]
@@ -87,11 +95,15 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
             # Get ops and components of the surface
             m0 = eles.basis.ubasis.nodal_basis_at(qpts)
             norm_mag = np.linalg.norm(pnorm, axis=-1, keepdims=True)
-            n = (pnorm / norm_mag).transpose(2, 0, 1).reshape(self.ndims, -1)
-            area = (qwts[:, None] / rcpdjac).reshape((-1))
+            # norm_mag = np.linalg.norm(pnorm, axis=-1)
+            n = (qwts[:, None] * pnorm.transpose(2, 0, 1)).reshape(self.ndims, -1)
+            # n = pnorm.transpose(2, 0, 1).reshape(self.ndims, -1)
+            # area = np.repeat(qwts, len(eidxs))
+            # area = (qwts[:, None]*np.ones_like(norm_mag)).reshape(-1)
+            # area = (qwts[:, None] * norm_mag[..., 0]).reshape(-1)
             dist = self._distances(ploc)
 
-            self.surf[etype, fidx] = FWHSurfParams(eidxs, m0, n, area, *dist)
+            self.surf[etype, fidx] = FWHSurfParams(eidxs, m0, n, *dist)
 
     def _distances(self, spts):
         surf_pts = spts.transpose(0, 2, 1).reshape(-1, self.ndims)
@@ -106,16 +118,29 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
         m_r = r_o_hat @ self.qinf['M']
 
         r_star_vec = r_o*np.hypot(gamma_inv, m_r)[..., None]
+        self.rs = np.linalg.norm(r_star_vec, axis=-1)
         r_star_inv = 1 / np.linalg.norm(r_star_vec, axis=-1)
 
         r_grad_fac = (np.einsum('ij,k->ijk', m_r, self.qinf['M']) +
                       r_o_hat*gamma_inv**2)
-        r_snorm = r_o*r_star_inv[..., None]
+        r_snorm = r_star_inv*d
 
-        r_star_tilde_vec = r_snorm*r_grad_fac
-        r_tilde_vec = (r_snorm - self.qinf['M'])*gamma**2
+        r_star_tilde_vec = r_snorm[..., None]*r_grad_fac
+        r_tilde_vec = (r_star_tilde_vec - self.qinf['M'])*gamma**2
 
         return r_tilde_vec, r_star_inv, r_star_tilde_vec
+
+    def _apply_wall_bc(self, pris):
+        uvw = pris[self._vidx]
+        rho = pris[self._ridx]
+
+        # Calculate velocity magnitude
+        gamma = self.consts['gamma']
+        vmag = np.sum(uvw**2, axis=0)
+
+        # Apply no-slip
+        pris[self._pidx] += 0.5*(gamma-1)*pris[self._ridx]*vmag
+        pris[self._vidx] = 0
 
     def _fwh_solve(self, intg):
         o_vals = np.zeros(self.nobvs)
@@ -135,10 +160,15 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
             pris = self.elementscls.con_to_pri(s, self.cfg)
             pris = np.reshape(pris, (self.nvars, -1))
 
+            if self.surf_type == 'solid':
+                self._apply_wall_bc(pris)
+
             p = pris[self._pidx] - self.qinf['p']
             u = pris[self._vidx] - self.uinf
+            # u = pris[self._vidx]
             d_inf = self.qinf['rho']
-            d_tot = d_inf + p*ci**2
+            # d_tot = d_inf + p*ci**2
+            d_tot = pris[self._ridx]
 
             mom = d_tot*(u + self.uinf)
             drift = -d_inf*self.uinf
@@ -150,22 +180,23 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
             u_t = pris_t[self._vidx]
             p_t = pris_t[self._pidx]
 
-            d_tot_t = p_t / self.qinf['c']**2
+            # d_tot_t = p_t / self.qinf['c']**2
+            d_tot_t = pris_t[self._ridx]
             mom_t = d_tot_t*(u + self.uinf) + d_tot*u_t
-            mom_t_n = np.sum(param.norm*mom_t, axis=0, keepdims=True)
+            mom_t_n = np.sum(param.nda*mom_t, axis=0, keepdims=True)
 
             # Monopole
-            q = np.sum(param.norm*(mom + drift), axis=0, keepdims=True).T
+            q = np.sum(param.nda*(mom + drift), axis=0, keepdims=True).T
             q_t = mom_t_n.T
-            acc = (1 - self.Minf)*q_t*param.r_star_inv
+            acc = (1 - param.r_tilde_vec @ self.qinf['M'])*q_t*param.r_star_inv
             acc -= q*param.r_star_inv**2*(
                 param.r_star_tilde_vec @ self.uinf.reshape(-1)
             )
 
             # Dipole
-            mom_n = np.sum(param.norm*mom, axis=0, keepdims=True)
-            f = mom_n*u + (p - self.qinf['p'])*param.norm
-            f_t = mom_t_n*u + mom_n*u_t + p_t*param.norm
+            mom_n = np.sum(param.nda*mom, axis=0, keepdims=2)
+            f = mom_n*u + p*param.nda
+            f_t = mom_t_n*u + mom_n*u_t + p_t*param.nda
 
             acc += ci*param.r_star_inv*np.einsum('ki,ijk->ij', f_t,
                                                  param.r_tilde_vec)
@@ -173,7 +204,7 @@ class FWHPlugin(SurfaceMixin, BaseSolnPlugin):
                                                  param.r_star_tilde_vec)
 
             # Quadrature and accumulate
-            o_vals += param.area @ acc
+            o_vals += np.sum(acc, axis=0)
 
         return o_vals / (4*np.pi)
 

@@ -103,7 +103,7 @@ class NVRTC:
 class SourceModule:
     def __init__(self, backend, src):
         # Prepare the source code
-        src = f'extern "C"\n{{\n{src}\n}}'
+        src = f'#include </usr/local/cuda/include/cuda_fp16.h> \n extern "C"\n{{\n{src}\n}}'
 
         # Obtain the compute capability for our device
         cmajor, cminor = backend.cuda.compute_capability()

@@ -8,8 +8,8 @@ from pyfr.backends.hip.generator import HIPKernelGenerator
 from pyfr.util import memoize
 
 
-def get_grid_for_block(block, nrow, ncol=1):
-    return (-(-nrow // block[0]), -(-ncol // block[1]), 1)
+def get_grid_for_block(block, nrow, ncol=1, ncolb=1):
+    return (-(-nrow // block[0]), -(-ncol // block[1]), -(-ncolb // block[2]))
 
 
 class HIPKernel(Kernel):

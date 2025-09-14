@@ -78,8 +78,7 @@ class CUDABackend(BaseBackend):
                   blasext.CUDABlasExtKernels,
                   packing.CUDAPackingKernels,
                   gimmik.CUDAGiMMiKKernels,
-                  cublaslt.CUDACUBLASLtKernels, 
-                  cublas.CUDACUBLASKernels]
+                  cublaslt.CUDACUBLASLtKernels]
         self._providers = [k(self) for k in kprovs]
 
         # Pointwise kernels

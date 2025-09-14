@@ -1,10 +1,10 @@
 <%inherit file='base'/>
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
-<%include file='pyfr.backends.cuda.kernels.gemm'/>
-<%include file='pyfr.backends.cuda.kernels.ltrmm'/>
-<%include file='pyfr.backends.cuda.kernels.utrtri'/>
+<%include file='pyfr.backends.hip.kernels.gemm'/>
+<%include file='pyfr.backends.hip.kernels.ltrmm'/>
+<%include file='pyfr.backends.hip.kernels.utrtri'/>
 
-__global__ void
+__global__ void __launch_bounds__(${blksz})
 getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim, 
       fpdtype_t *__restrict__ jac, fpdtype_t *__restrict__ jacinv,  
       ixdtype_t *__restrict__ P)
@@ -65,7 +65,7 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
 
 
                 for (int off=warpSize/2; off > zero; off >>= 1)
-                    acc = max(__shfl_down_sync(0xFFFFFFFFU, acc, off), acc);
+                    acc = max(__shfl_down(acc, off), acc);
 
                 if (threadIdx.x % warpSize == zero)
                     sA[threadIdx.x / warpSize] = acc;
@@ -76,7 +76,7 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
                     acc = (threadIdx.x  < blockDim.x / warpSize) ? sA[threadIdx.x] : fzero;
 
                     for (int off=warpSize / 2; off > zero; off >>=1){
-                        acc = max(__shfl_down_sync(0xFFFFFFFFU, acc, off), acc);
+                        acc = max(__shfl_down(acc, off), acc);
                     }
                 }
 

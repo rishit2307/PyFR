@@ -27,11 +27,8 @@ class BlockJacobi(BaseCommon):
 		for k in kerns:
 			k.bind(*args)
 
-	def _init_jac(self, etp, rs, npt, v, col, afac, h):
-
-		if etp not in self.system.ele_types:
-			return
-
+	@memoize
+	def _get_jacinit_kerns(self, etp, *rs):
 		celes = self.system.celes[etp]
 		etype_ix = self.system.ele_types.index(etp)
 		jac = self.jac[etype_ix]
@@ -39,7 +36,16 @@ class BlockJacobi(BaseCommon):
 		kerns = [self.backend.kernel('jacinit', 
 				 *[em[r] for r in rs] +[jac, celes])]
 
+		return kerns
+
+	def _init_jac(self, etp, rs, npt, v, col, afac, h):
+
+		if etp not in self.system.ele_types:
+			return
+
+		kerns = self._get_jacinit_kerns(etp, *rs)
 		self._bind_kerns(kerns, npt, v, col, afac, h)
+
 		self.backend.run_kernels(kerns)
 
 	def _shuff_jac(self):
