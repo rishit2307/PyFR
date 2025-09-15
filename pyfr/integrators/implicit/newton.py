@@ -15,10 +15,6 @@ class BaseNonLinearSolver(BaseCommon):
 		self.ntol = cfg.getfloat(sect, 'ntol', 0.01)
 		self._crdown = cfg.getfloat(sect, 'crdown', 0.3)
 
-		# Error tolerances
-		# self._atol = cfg.getfloat(sect, 'atol')
-		# self._rtol = cfg.getfloat(sect, 'rtol')
-
 		# Truncation Error Constant
 		self._errbias = cfg.getfloat(sect, 'err-bias', 1.5)
 
@@ -140,17 +136,6 @@ class NewtonSolver(BaseNonLinearSolver):
 		nnorm = self._update_rhs(tc, acoeffs, currstg)
 		nnorm_init = nnorm
 
-		# # Estimate the error
-		# # delnrm = self._errest(rcurr, rdu0)
-		# delnrm = self._eval_norm(rdu0)
-		# delnrmp = delnrm
-
-		# # Convergence Rate
-		# crate = delnrm / delnrmp
-
-		# Set convergence flag to True
-		nonlin_conv = True
-
 		while nnorm / nnorm_init > self.ntol:
 
 			# Linear Solve
@@ -162,14 +147,6 @@ class NewtonSolver(BaseNonLinearSolver):
 
 			# Store RHS
 			nnorm = self._update_rhs(tc, acoeffs, currstg)
-
-			# Calculate the error
-			# delnrm = self._errest(rcurr, rdu)
-			# delnrm = self._eval_norm(rdu) / np.sqrt(self._get_gndofs())
-			# theta = delnrm / delnrmp
-			# crate = theta / (1-theta)
-			# crate = max(self._crdown*crate, delnrm/delnrmp)
-			# crate = np.abs(delnrm / (delnrmp - delnrm))
 
 			if rank == root:
 				print(f'stage is {currstg}')
@@ -184,29 +161,9 @@ class NewtonSolver(BaseNonLinearSolver):
 				# Reevaluate the jacobian if niters > maxniters
 				self.gmres_solver._eval_jac(tc, acoeffs[-1], currstg, 
 											              rcurr)
-				# import pdb;pdb.set_trace()
-				
-				# return not nonlin_conv, rcurr
+
 
 		return rcurr, rprev
-
-		# nnorm_init = self._update_rhs(tc, acoeffs, currstg)
-		# nnorm = np.inf
-		# while nnorm/nnorm_init > self.ntol:
-		# 	rdu = self.gmres_solver.solve(tc, acoeffs[0], currstg, newton_iter)
-
-		# 	self._add(1.0, rcurr, 1.0, rdu)
-		# 	self._add(0.0, rduold, 1.0, rdu)
-
-		# 	nnorm = self._update_rhs(tc, acoeffs, currstg)
-
-		# 	if rank == root:
-		# 		print(f'stage is {currstg}')
-		# 		print(f'nnorm is {nnorm/nnorm_init}, newton is {newton_iter}')
-			
-		# 	newton_iter += 1
-
-		# 	return True, self.register._curr_regidx
 
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):

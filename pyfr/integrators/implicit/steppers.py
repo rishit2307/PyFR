@@ -2,7 +2,7 @@ import math
 
 from pyfr.integrators.implicit.base import BaseImplicitIntegrator
 from pyfr.mpiutil import get_comm_rank_root
-import sklearn
+
 class BaseImplicitStepper(BaseImplicitIntegrator):
 	pass
 
@@ -19,22 +19,6 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 	@property
 	def stepper_nregs(self):
 		return 3 if self.stepper_has_errest else 2
-	
-	# def _cluster_jac(self):
-	# 	jac = self.newtonsolver.gmres_solver.jacobi_solver.jac[0]
-	# 	nupts, nvars, neles = self.system.ele_shapes[0]
-	# 	N = nupts*nvars
-	# 	jacinv_cpu = jac.get().reshape(N, N, neles)
-	# 	kmeans = sklearn.cluster.MiniBatchKMeans
-	# 	kms = kmeans(n_clusters=10).fit(jacinv_cpu.reshape(neles, -1))
-
-	# 	tp = self.system.ele_banks[0][self.newtonsolver._idxcurr].get()
-	# 	tp[:, 0] = kms.labels_
-	# 	self.system.ele_banks[0][self.newtonsolver._idxcurr].set(tp)
-	# 	print('kmeans done')
-	# 	self._run_plugins()
-	# 	print('writign done')
-
 	
 	def step(self, t, dt):
 		newtonsolver = self.newtonsolver

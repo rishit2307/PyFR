@@ -22,8 +22,6 @@ class GMRESSolver(BaseCommon):
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 			self.fpdtype = np.float32
 
-		# self.epsmc = np.sqrt(np.finfo(np.float64).eps)
-
 		self.register = register
 		self._dt = dt
 
@@ -69,20 +67,11 @@ class GMRESSolver(BaseCommon):
 		rcurr_rhs = reg._stage_regidx[currstg]
 
 		xabs = self._eval_norm(rdu)
-		# rcurr_norm = self.eval_norm1(rcurr)/self._get_gndofs()
 
-		# if xabs > 1e-10:
 		if xabs > 1e-4:
 			eps = dtype(np.sqrt(1 + self.rcurr_norm)*epsmc/xabs)
 		else:
 			eps = dtype(np.sqrt(1 + self.rcurr_norm)*epsmc)
-		# eps = self._eval_step_size(rcurr, rdu)
-
-
-		# if xabs > 1e-5:
-		# 	eps = epsmc*rcurr_norm/xabs + epsmc
-		# else:
-		# 	eps = epsmc*rcurr_norm
 
 		fac = dtype(a/eps)
 
@@ -124,42 +113,18 @@ class GMRESSolver(BaseCommon):
 		if self.prec == 'left':	
 			self._eval_mat_vec(rdu, rmv)
 			rmv = self._jacobi_prec(rmv)
-			# rmv = self._jacobi_prec_cpu(rmv)
 
 		else:
-			# r0 = self._jacobi_prec_cpu(rdu)
 			r0 = self._jacobi_prec(rdu)
 			self._add(0.0, rprec, 1.0, r0)
 			self._eval_mat_vec(r0, rmv)
 
 		rji = self.register._gmres_regidx
-		# rmv_cpu = self.system.ele_banks[0][rmv].get()
-
-		# for j in range(self.iter + 1):
-		# 	rjij_cpu = self.system.ele_banks[0][rji[j]].get()
-
-		# 	h[j] = np.sum(rjij_cpu*rmv_cpu)
 
 		for j in range(self.iter + 1):
 			h[j] = self._eval_dot(rji[j], rmv)
-		# kerns = [self._get_dot_kerns(rji[j], rmv) for j in range(self.iter+1)]
-		# self.backend.run_kernels([krn for kern in kerns for krn in kern])
-		# self.backend.wait()
-
-		# for i, kern in enumerate(kerns):
-		# 	h[i] = sum([v.retval for v in kern])
 
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
-		# w_cpu = self.system.ele_banks[0][rmv].get()
-
-		# for j in range(self.iter + 1):
-		# 	rjij_cpu = self.system.ele_banks[0][rji[j]].get()
-		# 	w_cpu -= h[j]*rjij_cpu
-
-		# qnorm = np.linalg.norm(w_cpu)
-		# qnorm = comm.allreduce(qnorm**2, op=mpi.SUM)
-		# qnorm = np.sqrt(qnorm)
-		# self.system.ele_banks[0][rkp1].set(w_cpu/qnorm)
 
 		self._addv([1.0] + list(-h), [rmv] + [rji[j] for j in range(self.iter+1)])
 		qnorm = self._eval_norm(rmv)
@@ -183,23 +148,6 @@ class GMRESSolver(BaseCommon):
 			self.jac_evaluated = True
 			if rank == root:
 				print(f'jacobian evaluated')
-		
-
-		
-
-		# elif self.prec and newtoniter % self.max_newtoniters == 0:
-		# 	self.jacobi_solver._eval_jac(tc, acoeff, currstg)
-		# 	if rank == root:
-		# 		print(f'jacobian evaluated')
-
-		# 	self._prec_updated = False
-
-		# if self.prec and tc <= self._dt + self.dtjac_start:
-		# 	self.jacobi_solver._eval_jac(tc, acoeff, currstg)
-			# self.jacinv_cpu = self.jacobi_solver._eval_jac_cpu(tc, acoeff, currstg)
-
-		# 	if rank == root:
-		# 		print(f'jacobian evaluated')
 
 		elif self.prec and not self._prec_updated:
 			self.jacobi_solver._update_precision()
