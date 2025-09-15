@@ -1,9 +1,9 @@
 import numpy as np
+import math
 from pyfr.integrators.base import BaseCommon, BaseIntegrator
 from pyfr.integrators.implicit.gmres import GMRESSolver
 from pyfr.integrators.implicit.jacobi import BlockJacobi
-from pyfr.mpiutil import get_comm_rank_root
-
+from pyfr.mpiutil import get_comm_rank_root, mpi
 class BaseNonLinearSolver(BaseCommon):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg, 
 				 stage_nregs, stepper_nregs, tstart, dt):
@@ -12,7 +12,21 @@ class BaseNonLinearSolver(BaseCommon):
 		
 		sect = 'solver-time-integrator'
 		niters = cfg.getint(sect, 'gmres-niters', 10)
-		self.ntol = cfg.getfloat(sect, 'ntol', 1e-2)
+		self.ntol = cfg.getfloat(sect, 'ntol', 0.01)
+		self._crdown = cfg.getfloat(sect, 'crdown', 0.3)
+
+		# Error tolerances
+		# self._atol = cfg.getfloat(sect, 'atol')
+		# self._rtol = cfg.getfloat(sect, 'rtol')
+
+		# Truncation Error Constant
+		self._errbias = cfg.getfloat(sect, 'err-bias', 1.5)
+
+		# Error norm
+		self._norm = cfg.get(sect, 'errest-norm', 'l2')
+
+		# Max iters
+		self._max_newtoniters = cfg.getint(sect, 'newton-niters')
 
 		self.register = Register(stage_nregs, stepper_nregs,
 						         niters, self.solver_nregs, cfg)
@@ -24,23 +38,14 @@ class BaseNonLinearSolver(BaseCommon):
 							   cfg=cfg)
 
 		self.gmres_solver = GMRESSolver(backend, system, cfg, 
-										self.register, tstart, dt)
+										self.register, dt)
+		
+		self._idxcurr = self.register._stepper_regidx[0]
 
-		self._idxcurr = 0
-
-	def obtain_solution(self, bcoeffs):
-		regs = self.register
-		regidxs = [regs._curr_regidx] + [regs._prev_regidx]
-		regidxs += regs._stage_regidx
-		coeffs = [0.0, 1.0] + bcoeffs
-
-		self._addv(coeffs, regidxs)
-
-	def store_current_solution(self):
-		regs = self.register
-		self._add(0.0, regs._prev_regidx, 1.0, regs._curr_regidx)
-
-		return regs._prev_regidx
+	@property
+	def _idxprev(self):
+		rprev = set(self.register._stepper_regidx[:2]) - {self._idxcurr}
+		return next(iter(rprev))
 
 class NewtonSolver(BaseNonLinearSolver):
 	solver_name = 'newton'
@@ -48,24 +53,64 @@ class NewtonSolver(BaseNonLinearSolver):
 
 	def init_step(self, t):
 		rhs = self.system.rhs
-		rprev = self.register._prev_regidx
+		rcurr, rprev = self._idxcurr, self._idxprev
+  
 		rprev_rhs = self.register._stage_regidx[0]
 
 		rhs(t, rprev, rprev_rhs)
 
+	def obtain_solution(self, bcoeffs):
+		rcurr, rprev = self._idxcurr, self._idxprev
+
+		regidxs = [rcurr] + [rprev]
+		regidxs += self.register._stage_regidx
+		coeffs = [0.0, 1.0] + bcoeffs
+
+		self._addv(coeffs, regidxs)
+
+	def store_current_solution(self):
+		rcurr, rprev = self._idxcurr, self._idxprev
+
+		self._add(0.0, rprev, 1.0, rcurr)
+
+	def _errest(self, rcurr, rerr):
+		comm, rank, root = get_comm_rank_root()
+
+		# Get a set of kernels to estimate the integration error
+		ekerns = self._get_reduction_kerns(rcurr, rerr, method='errest_imp',
+										   norm=self._norm)
+		
+		# Bind the dynamic arguments
+		for kern in ekerns:
+			kern.bind(self._atol, self._rtol)
+
+		# Run the kernels
+		self.backend.run_kernels(ekerns, wait=True)
+
+		# Pseudo L2 norm
+		if self._norm == 'l2':
+			# Reduce locally (element types + field variables)
+			err = np.array([sum(v for k in ekerns for v in k.retval)])
+
+			# Reduce globally (MPI ranks)
+			comm.Allreduce(mpi.IN_PLACE, err, op=mpi.SUM)
+
+			# Normalise
+			err = np.sqrt(float(err) / self._get_gndofs())
+		
+		return err if not np.isnan(err) else 100
+
 	def _update_rhs(self, tc, acoeffs, currstg):
 		rhs = self.system.rhs
 		gndofs = self._get_gndofs()
+		rcurr, rprev = self._idxcurr, self._idxprev
 
 		rcurr_rhs = self.register._stage_regidx[currstg]
-		rcurr = self.register._curr_regidx
-		rprev = self.register._prev_regidx
 		rdu0 = self.register._gmres_regidx[0]
 
 		rhs(tc, rcurr, rcurr_rhs)
-		ac0 = acoeffs[0]
 
-		consts = [0.0, *acoeffs[1:], 1.0/ac0, -1.0/ac0]
+		consts = [0.0, *acoeffs, 1.0, -1.0]
 		regidxs = [rdu0] + self.register._stage_regidx[:currstg+1]
 		regidxs += [rprev, rcurr]
 
@@ -73,27 +118,95 @@ class NewtonSolver(BaseNonLinearSolver):
 
 		return self._eval_norm(rdu0)/np.sqrt(gndofs)
 
-	def solve(self, tc, acoeffs, currstg):
-		rcurr = self.register._curr_regidx
-		rduold = self.register._duold_regidx
+	def _init_stage(self, acoeffs, currstg):
+		rcurr, rprev = self._idxcurr, self._idxprev
 
-		nnorm_init = self._update_rhs(tc, acoeffs, currstg)
-		nnorm = np.inf
-		newtoniter = 0
+		consts = [0.0, 1.0, *acoeffs[:-1]]
+		regidxs=  [rcurr, rprev] + self.register._stage_regidx[:currstg]
+		self._addv(consts, regidxs)
+
+	def solve(self, tc, acoeffs, currstg, nsteps):
 		comm, rank, root = get_comm_rank_root()
+		rcurr, rprev = self._idxcurr, self._idxprev
+		eval_jac = nsteps == 0
 
-		while nnorm/nnorm_init > self.ntol:
-			rdu = self.gmres_solver.solve(tc, acoeffs[0], currstg)
+		# Begin nonlinear iteration count
+		newton_iter = 1
 
+		# Set the initial guess
+		# self._init_stage(acoeffs, currstg)
+
+		# Set the RHS
+		nnorm = self._update_rhs(tc, acoeffs, currstg)
+		nnorm_init = nnorm
+
+		# # Estimate the error
+		# # delnrm = self._errest(rcurr, rdu0)
+		# delnrm = self._eval_norm(rdu0)
+		# delnrmp = delnrm
+
+		# # Convergence Rate
+		# crate = delnrm / delnrmp
+
+		# Set convergence flag to True
+		nonlin_conv = True
+
+		while nnorm / nnorm_init > self.ntol:
+
+			# Linear Solve
+			rdu = self.gmres_solver.solve(tc, acoeffs[-1], currstg,
+								 			rcurr,  eval_jac)
+
+			# Add correction to current solution
 			self._add(1.0, rcurr, 1.0, rdu)
-			self._add(0.0, rduold, 1.0, rdu)
 
+			# Store RHS
 			nnorm = self._update_rhs(tc, acoeffs, currstg)
-			newtoniter += 1 
+
+			# Calculate the error
+			# delnrm = self._errest(rcurr, rdu)
+			# delnrm = self._eval_norm(rdu) / np.sqrt(self._get_gndofs())
+			# theta = delnrm / delnrmp
+			# crate = theta / (1-theta)
+			# crate = max(self._crdown*crate, delnrm/delnrmp)
+			# crate = np.abs(delnrm / (delnrmp - delnrm))
 
 			if rank == root:
 				print(f'stage is {currstg}')
-				print(f'nnorm is {nnorm/nnorm_init}, newton is {newtoniter}')
+				print(f'nnorm is {nnorm / nnorm_init }, newton is {newton_iter}')
+
+			newton_iter	+= 1
+			# delnrmp = delnrm
+
+			# Return if maxniters exceeded
+			if newton_iter > self._max_newtoniters:
+
+				# Reevaluate the jacobian if niters > maxniters
+				self.gmres_solver._eval_jac(tc, acoeffs[-1], currstg, 
+											              rcurr)
+				# import pdb;pdb.set_trace()
+				
+				# return not nonlin_conv, rcurr
+
+		return rcurr, rprev
+
+		# nnorm_init = self._update_rhs(tc, acoeffs, currstg)
+		# nnorm = np.inf
+		# while nnorm/nnorm_init > self.ntol:
+		# 	rdu = self.gmres_solver.solve(tc, acoeffs[0], currstg, newton_iter)
+
+		# 	self._add(1.0, rcurr, 1.0, rdu)
+		# 	self._add(0.0, rduold, 1.0, rdu)
+
+		# 	nnorm = self._update_rhs(tc, acoeffs, currstg)
+
+		# 	if rank == root:
+		# 		print(f'stage is {currstg}')
+		# 		print(f'nnorm is {nnorm/nnorm_init}, newton is {newton_iter}')
+			
+		# 	newton_iter += 1
+
+		# 	return True, self.register._curr_regidx
 
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):
@@ -137,12 +250,8 @@ class Register:
 		  		+ self.gmres_nregs)
 
 	@property
-	def _curr_regidx(self):
-		return self._stepper_regidx[0]
-
-	@property
-	def _prev_regidx(self):
-		return self._stepper_regidx[1]
+	def _err_regidx(self):
+		return self._stepper_regidx[2]
 
 	@property
 	def _aux_regidx(self):

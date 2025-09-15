@@ -87,7 +87,7 @@ class BlockJacobi(BaseCommon):
 
 		return kerns
 
-	def _eval_jac(self, tc, a, currstg):
+	def _eval_jac(self, tc, a, currstg, rcurr):
 		add, rhs = self._add, self.system.rhs
 		backend = self.backend
 		reg = self.register
@@ -95,18 +95,15 @@ class BlockJacobi(BaseCommon):
 		nvars = self.system.nvars
 
 		raux = reg._aux_regidx
-		rcurr = reg._curr_regidx
 		rcurr_rhs = reg._stage_regidx[currstg]
 
 		h = self.epsmc
-		afac = 1.0/a
-
 
 		jac, jacinv = self.jac, self.jacinv
 		P = self.Permut
 		eupts = [(eshapes[0], etype) for eshapes, etype in 
 				 zip(self.system.ele_shapes, self.system.ele_types)]
-		
+
 		geupts = set(comm.allreduce(eupts, op=mpi.SUM))
 
 		for nupts, etype in sorted(geupts):
@@ -116,21 +113,24 @@ class BlockJacobi(BaseCommon):
 						self._add(0.0, raux, 1.0, rcurr)
 						self._addid([rcurr, raux], 
 									npt, v, col, h, etype)
-						
+
 						rhs(tc, raux, raux)
-						self._add(-1.0, raux, 1.0, rcurr_rhs)
+						self._add(-a, raux, a, rcurr_rhs)
 						self._init_jac(etype, [raux, rcurr], 
-									   npt, v, col, afac, h)
-						
+									   npt, v, col, 1.0, h)
+
 		kerns = [self.backend.kernel('getf3', *[jac[i], jacinv[i], P[i]])
 				 for i in range(len(self.system.ele_types))]
 		
+		# jactp_inv = jacinv[0].get()
+		# jactp_mean = np.mean(jactp_inv, axis=0)
+		# jactp_mean = np.tile(jactp_mean, (self.system.ele_shapes[0][-1], 1))
+		# jacinv[0].set(jactp_mean)
 		self.backend.run_kernels(kerns)
 		kerns = self._shuff_jac()
 		self.backend.run_kernels(kerns, wait=True)
 
 
-				
 		# for etp in sorted(self.system.ele_types):
 		#     i = self.system.ele_types.index(etp)
 		#     nupts = self.system.ele_shapes[i][0]
@@ -165,7 +165,7 @@ class BlockJacobi(BaseCommon):
 		comm, rank, root = get_comm_rank_root()
 
 		raux = reg._aux_regidx
-		rcurr = reg._curr_regidx
+
 		rcurr_rhs = reg._stage_regidx[currstg]
 		ebanks = self.system.ele_banks
 

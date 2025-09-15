@@ -15,8 +15,6 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
           fpdtype_t *__restrict__ dt_mat, fpdtype_t dt_fac)
 % elif method == 'resid':
             ,fpdtype_t *__restrict__ rold, fpdtype_t dt_fac)
-% elif method == 'dot':
-            ,fpdtype_t * __restrict__ rold)
 % elif method == 'norm':
             )
 % endif
@@ -38,8 +36,6 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
             r = rerr[idx]/(atol + rtol*fabs(rcurr[idx]));
         % elif method == 'resid':
             r = (rcurr[idx] - rold[idx])/(dt_fac${'*dt_mat[idx]' if dt_type == 'matrix' else ''});
-        % elif method == 'dot':
-            r = rcurr[idx]*rold[idx];
         % elif method == 'norm':
             r = rcurr[idx];
         % endif
@@ -47,8 +43,6 @@ reduction(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         % if norm == 'uniform':
             acc = max(r*r, acc);
         % elif norm == 'l1':
-            acc += fabs(r);
-        % elif method == 'dot':
             acc += r;
         % else:
             acc += r*r;

@@ -1,45 +1,241 @@
+import numpy as np
+
 from pyfr.integrators.implicit.base import BaseImplicitIntegrator
+from pyfr.mpiutil import get_comm_rank_root, mpi
 
 class BaseImplicitController(BaseImplicitIntegrator):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
 
-        # Solution filtering frequency
-        self._fnsteps = self.cfg.getint('soln-filter', 'nsteps', '0')
+		# Solution filtering frequency
+		self._fnsteps = self.cfg.getint('soln-filter', 'nsteps', '0')
 
-        # Fire off any event handlers if not restarting
-        if not self.isrestart:
-            self._run_plugins()
+		# Stats on the most recent step
+		self.stepinfo = []
 
-        
-    def _accept_step(self):
-        self.tcurr += self._dt
-        self.nacptsteps += 1
-        self.nacptchain += 1
+		# Fire off any event handlers if not restarting
+		if not self.isrestart:
+			self._run_plugins()
 
-        self._invalidate_caches()
 
-        # Run any plugins
-        self._run_plugins()
+	def _accept_step(self, dt, err=None):
+		comm, rank, root = get_comm_rank_root()
+		self.tcurr += dt
+		self.nacptsteps += 1
+		self.nacptchain += 1
+		self.nrjctchain = 0
+		self.stepinfo.append((dt, 'accept', err))
 
-        # Clear the step info
-        self.stepinfo = []
+		self._invalidate_caches()
+
+		if rank == root:
+			print(f'time is {self.tcurr}, dt is {dt}, err is {err}')
+
+		# Run any plugins
+		self._run_plugins()
+
+		# Clear the step info
+		self.stepinfo = []
+
+	def _reject_step(self, dt, rold, err=None):
+		comm, rank, root = get_comm_rank_root()
+		if dt <= self.dtmin:
+			raise RuntimeError('Minimum sized time step rejected')
+		
+		if rank == root:
+			print('Time step rejected')
+
+		if rank == root:
+			print(f'time is {self.tcurr}, dt is {dt}, err is {err}')
+
+		self.newtonsolver._idxcurr = rold
+
+		self.nacptchain = 0
+		self.nrjctsteps += 1
+		self.nrjctchain += 1
+		self.stepinfo.append((dt, 'reject', err))
 
 class ImplicitNoneController(BaseImplicitController):
-    controller_name = 'none'
-    controller_has_variable_dt = False
+	controller_name = 'none'
+	controller_has_variable_dt = False
 
-    @property
-    def controller_needs_errest(self):
-        return False
+	@property
+	def controller_needs_errest(self):
+		return False
 
-    def advance_to(self, t):
-        if t < self.tcurr:
-            raise ValueError('Advance time is in the past')
-        
-        while self.tcurr < t:
-            # Take the physical step
-            self.step(self.tcurr, self._dt)
+	def advance_to(self, t):
+		if t < self.tcurr:
+			raise ValueError('Advance time is in the past')
+		
+		while self.tcurr < t:
+			# import random
+			# self._dt = random(0.005, 0.01)
+			# Decide on the time step
+			dt = max(min(t - self.tcurr, self._dt), self.dtmin)
 
-            # We are not adaptive, so accept every step
-            self._accept_step()
+			# Take the physical step
+			rcurr, rold, rerr = self.step(self.tcurr, dt)
+			
+
+			# We are not adaptive, so accept every step
+			self._accept_step(dt)
+
+class ImplicitSoderlindController(BaseImplicitController):
+	controller_name = 'soderlind'
+	controller_has_variable_dt = True
+
+	@property
+	def controller_needs_errest(self):
+		return True
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		sect = 'solver-time-integrator'
+
+		# Maximum time step
+		self.dtmax = self.cfg.getfloat(sect, 'dt-max', 1e2)
+
+		# Error tolerances
+		self._atol = self.cfg.getfloat(sect, 'atol')
+		self._rtol = self.cfg.getfloat(sect, 'rtol')
+
+		# Error norm
+		self._norm = self.cfg.get(sect, 'errest-norm', 'l2')
+
+		if self._atol < 10*self.backend.fpdtype_eps:
+			raise ValueError('Absolute tolerance too small')
+
+		if self._rtol < 10*self.backend.fpdtype_eps:
+			raise ValueError('Relative tolerance too small')
+		
+		# Truncation Error Constant
+		self._errbias = self.cfg.getfloat(sect, 'err-bias', 1.0)
+
+		# Step size safety factor
+		self._saff = self.cfg.getfloat(sect, 'safety-fact', 0.8)
+
+		# Number of failures after which eta < etamxf
+		self._smallnef = self.cfg.getint(sect, 'small-etaef', 2)
+
+		# Halt simulation at maxnef failure
+		self._maxnef = self.cfg.getint(sect, 'max-etaef', 7)
+
+		# Time step reduction if niters > maxiters
+		self._etacf = self.cfg.getfloat(sect, 'etacf', 0.25)
+
+		# Set initial errors and stepsize growth
+		self._errpp, self._etapp = 1, 1
+		self._errp, self._etap = 1, 1
+
+		# Step size growth
+		self._etamx1 = self.cfg.getfloat(sect, 'etamax-1', 100.0)
+		self._etamax = self.cfg.getfloat(sect, 'etamax', 2.5)
+		self._etamxf = self.cfg.getfloat(sect, 'etamaxf', 0.3)
+		self._etamin = self.cfg.getfloat(sect, 'etamin', 0.3)
+
+		# Controller constants
+		self._k1 = 1.25
+		self._k2 = 0.5
+		self._k3 = -0.75
+		self._k4 = 0.25
+		self._k5 = 0.75
+
+	def _errest(self, rcurr, rold, rerr):
+		comm, rank, root = get_comm_rank_root()
+
+		# Get a set of kernels to estimate the integration error
+		ekerns = self._get_reduction_kerns(rcurr, rold, rerr, method='errest',
+										   norm=self._norm)
+		
+		# Bind the dynamic arguments
+		for kern in ekerns:
+			kern.bind(self._atol, self._rtol)
+
+		# Run the kernels
+		self.backend.run_kernels(ekerns, wait=True)
+
+		# Pseudo L2 norm
+		if self._norm == 'l2':
+			# Reduce locally (element types + field variables)
+			err = np.array([sum(v for k in ekerns for v in k.retval)])
+
+			# Reduce globally (MPI ranks)
+			comm.Allreduce(mpi.IN_PLACE, err, op=mpi.SUM)
+
+			# Normalise
+			err = np.sqrt(float(err) / self._get_gndofs())
+		
+		return err*self._errbias if not np.isnan(err) else 100
+	
+	def _estimate_eta(self, dt, err):
+		errpp, etapp = self._errpp, self._etapp
+		errp, etap = self._errp, self._etap
+		saff = self._saff
+		phat = self.stepper_order - 1
+
+		k1, k2, k3 = self._k1, self._k2, self._k3
+		k4, k5 = self._k4, self._k5
+
+		# Set etamin and etamax
+		etamin = self.dtmin / dt
+		etamax = self._etamax if err < 1 else 1
+
+		# Handle the case with more than smallnef failures
+		# if self.nrjctchain >= self._smallnef and err > 1:
+		# 	etamax = self._etamxf
+		# 	etamin = self._etamin
+		# 	import pdb;pdb.set_trace()
+
+		# Calculate eta from history
+		eta = err**(-k1/phat) * errp**(-k2/phat) * errpp**(-k3/phat)
+		eta *= etap**k4 * etapp**k5
+
+		# Handle the case of insufficient time history
+		if self.nacptsteps <= 1:
+			# etamax = (self._etamx1 if err < 1 and 
+			#  		 self.nacptsteps == 0 else etamax)
+
+			# Fall back to an I controller
+			eta = err**(-1/phat)
+
+		eta = min(etamax, max(eta*saff, etamin))
+
+		return eta
+
+	def advance_to(self, t):
+		if t < self.tcurr:
+			raise ValueError('Advance time is in the past')
+
+		sord = self.stepper_order
+		expa = 0.58 / sord
+		expb = 0.21 / sord
+
+		etamin = self._etamin
+		etamax = self._etamax
+		saff = self._saff
+
+		while self.tcurr < t:
+			# Decide on the time step
+			dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
+
+			# Take the physical step
+			rcurr, rold, rerr = self.step(self.tcurr, dt)
+
+			# Estimate the error
+			err = self._errest(rcurr, rold, rerr)
+
+			# Compute the size of the next step
+			# eta = self._estimate_eta(dt, err)
+			eta = err**-expa * self._errp**expb
+			eta = min(etamax, max(eta*saff, etamin))
+			self._dt = eta*dt
+
+			# self._errpp, self._etapp = self._errp, self._etap
+
+			# Decide if accept or reject step
+			if err > 1.0:
+				self._errp = err
+				self._reject_step(dt, rold, err=err)
+			else:
+				self._accept_step(dt, err=err)

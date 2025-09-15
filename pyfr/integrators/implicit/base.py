@@ -26,17 +26,16 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 		# Commit the system
 		self.system.commit()
 
-		self._idxcurr = self.newtonsolver._idxcurr
-
 		# Pre-process solution if necessary
 		self.system.preproc(self.tcurr,
-							self.system.ele_scal_upts(self._idxcurr))
+							self.system.ele_scal_upts(self.newtonsolver._idxcurr))
 
 	@property
 	def soln(self):
 		if not self._curr_soln:
-			self.system.postproc(self._idxcurr)
-			self._curr_soln = self.system.ele_scal_upts(self._idxcurr)
+			self.system.postproc(self.newtonsolver._idxcurr)
+			self._curr_soln = self.system.ele_scal_upts(self.
+											   newtonsolver._idxcurr)
 
 		return self._curr_soln
 
@@ -45,8 +44,8 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 		system = self.system
 
 		if not self._curr_grad_soln:
-			system.postproc(self._idxcurr)
-			system.compute_grads(self.tcurr, self._idxcurr)
+			system.postproc(self.newtonsolver._idxcurr)
+			system.compute_grads(self.tcurr, self.newtonsolver._idxcurr)
 			self._curr_grad_soln = [e.get() for e in system.eles_vect_upts]
 
 		return self._curr_grad_soln
@@ -57,12 +56,14 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 
 		if not self._curr_dt_soln:
 			copy = self.soln
-			system.rhs(self.tcurr, self._idxcurr, self._idxcurr)
-			self._curr_dt_soln = system.ele_scal_upts(self._idxcurr)
+			system.rhs(self.tcurr, self.newtonsolver_idxcurr, 
+			  			self.newtonsolver._idxcurr)
+			self._curr_dt_soln = system.ele_scal_upts(self.
+											 newtonsolver._idxcurr)
 
 			# Reset current register with original contents
 			for c, e in zip(copy, system.ele_banks):
-				e[self._idxcurr].set(c)
+				e[self.newtonsolver._idxcurr].set(c)
 
 		return self._curr_dt_soln
 

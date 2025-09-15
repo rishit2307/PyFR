@@ -41,6 +41,7 @@ class BaseIntegrator:
 		self.nacptsteps = 0
 		self.nrjctsteps = 0
 		self.nacptchain = 0
+		self.nrjctchain = 0
 
 		# Current and minimum time steps
 		self._dt = cfg.getfloat('solver-time-integrator', 'dt')

@@ -5,6 +5,7 @@ from pyfr.util import memoize, subclass_where
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from collections import defaultdict
 import nvtx
+import time
 
 class BaseStdStepper(BaseStdIntegrator):
 	def collect_stats(self, stats):

@@ -4,7 +4,7 @@ from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
 import nvtx
 class GMRESSolver(BaseCommon):
-	def __init__(self, backend, system, cfg, register, tstart, dt):
+	def __init__(self, backend, system, cfg, register, dt):
 
 		self.system = system
 		self.backend = backend
@@ -12,6 +12,7 @@ class GMRESSolver(BaseCommon):
 		sect = 'solver-time-integrator'
 		self.niters = cfg.getint(sect, 'gmres-niters', 10)
 		self.ltol = cfg.getfloat(sect, 'gmres-tol', 1e-3)
+		self.max_newtoniters = cfg.getint(sect, 'newton-niters')
 
 		precision = cfg.get('backend', 'precision')
 		if precision == 'double':
@@ -29,12 +30,10 @@ class GMRESSolver(BaseCommon):
 		self.prec = cfg.get(sect, 'precondition', None)
 		if self.prec in ['left', 'right']:
 			self.jacobi_solver = BlockJacobi(system, backend, register, cfg ,self.epsmc)
-			self.dtjac_start = tstart
-			self.dtjac_out_init = -1
-			self.dtjac_out = cfg.getfloat(sect, 'dtjac-out', np.inf)
 
 			self.nsmooth = cfg.getint(sect, 'nsmooth', 1)
 			self.jac_fpdtype = cfg.get(sect, 'jacobi-prec')
+			self.jac_evaluated  = False
 
 			if self.jac_fpdtype != precision:
 				self._prec_updated = False
@@ -43,9 +42,10 @@ class GMRESSolver(BaseCommon):
 		else:
 			self.prec = None
 	
-	def _init_solver(self, tc, a, currstg):
+	def _init_solver(self, tc, a, currstg, rcurr):
 		self.iter = 0
-		rcurr = self.register._curr_regidx
+		self._rcurr = rcurr
+		
 		self.e1 = np.zeros((self.niters+1), dtype=self.fpdtype)
 		self.e1[0] = 1.0
 
@@ -63,8 +63,9 @@ class GMRESSolver(BaseCommon):
 		tc, a = self.tc, self.a
 		currstg = self.currstg
 		dtype = self.fpdtype
+		rcurr = self._rcurr
 
-		rcurr = reg._curr_regidx
+
 		rcurr_rhs = reg._stage_regidx[currstg]
 
 		xabs = self._eval_norm(rdu)
@@ -83,12 +84,12 @@ class GMRESSolver(BaseCommon):
 		# else:
 		# 	eps = epsmc*rcurr_norm
 
-		fac = dtype(1.0/eps)
+		fac = dtype(a/eps)
 
 		add(0.0, rmv, 1.0, rcurr, eps, rdu)
 		rhs(tc, rmv, rmv)
 
-		add(-fac, rmv, fac, rcurr_rhs, 1.0/a, rdu)
+		add(-fac, rmv, fac, rcurr_rhs, 1.0, rdu)
 
 	def _jacobi_prec(self, rin):
 		if self.prec == None:
@@ -107,28 +108,6 @@ class GMRESSolver(BaseCommon):
 			self.backend.run_kernels(kerns)
 
 			self._add(1.0, r0, 1.0, r2)
-
-		return r0
-	
-
-	def _jacobi_prec_cpu(self, rin):
-		r0, r1, r2 = self.register._jacobi_regidx
-		self._add(0.0, r0, 0.0, rin)
-
-
-		for j, etypes in enumerate(self.system.ele_types):
-			nupts, nvars, neles = self.system.ele_shapes[j]
-			N = nupts*nvars
-			for i in range(self.nsmooth):
-				self._eval_mat_vec(r0, r1)
-				self._add(-1.0, r1, 1.0, rin)
-				r1_cpu = self.system.ele_banks[j][r1].get().reshape(N, -1)
-
-				tp = self.jacinv_cpu[j] @ r1_cpu.T[..., None]
-
-				self.system.ele_banks[j][r2].set(tp.T.reshape(nupts, nvars, -1))
-
-				self._add(1.0, r0, 1.0, r2)
 
 		return r0
 
@@ -191,19 +170,36 @@ class GMRESSolver(BaseCommon):
 		return h
 
 	@nvtx.annotate(color="green")
-	def solve(self, tc, acoeff, currstg):
-		self._init_solver(tc, acoeff, currstg)
+	def solve(self, tc, acoeff, currstg, rcurr, eval_jac):
+		self._init_solver(tc, acoeff, currstg, rcurr)
 		reg = self.register
 		cs, sn = self.cs, self.sn
 
 		comm, rank, root = get_comm_rank_root()
 
-		if self.prec and tc <= self._dt + self.dtjac_start:
-			self.jacobi_solver._eval_jac(tc, acoeff, currstg)
-			# self.jacinv_cpu = self.jacobi_solver._eval_jac_cpu(tc, acoeff, currstg)
+		if self.prec and eval_jac:
+			self.jacobi_solver._eval_jac(tc, acoeff, currstg, rcurr)
 
+			self.jac_evaluated = True
 			if rank == root:
 				print(f'jacobian evaluated')
+		
+
+		
+
+		# elif self.prec and newtoniter % self.max_newtoniters == 0:
+		# 	self.jacobi_solver._eval_jac(tc, acoeff, currstg)
+		# 	if rank == root:
+		# 		print(f'jacobian evaluated')
+
+		# 	self._prec_updated = False
+
+		# if self.prec and tc <= self._dt + self.dtjac_start:
+		# 	self.jacobi_solver._eval_jac(tc, acoeff, currstg)
+			# self.jacinv_cpu = self.jacobi_solver._eval_jac_cpu(tc, acoeff, currstg)
+
+		# 	if rank == root:
+		# 		print(f'jacobian evaluated')
 
 		elif self.prec and not self._prec_updated:
 			self.jacobi_solver._update_precision()
@@ -218,7 +214,8 @@ class GMRESSolver(BaseCommon):
 
 		r0 = rdu if self.prec in ('right', None) else self._jacobi_prec(rdu)
 		rnorm = self._eval_norm(r0)
-		self._add(0.0, rdu, 1/rnorm, r0)
+		self._add(0.0, rmv, 1/rnorm, r0)
+		self._add(0.0, rdu, 1.0, rmv)
 
 		H = np.zeros((self.niters+1, self.niters), dtype=self.fpdtype)
 
@@ -247,7 +244,7 @@ class GMRESSolver(BaseCommon):
 
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 		rdu = reg._gmres_regidx[self.iter]
-		rduold = reg._duold_regidx
+
 
 		consts = [0.0]+list(y)
 		rp = self.register._prec_regidx[:self.iter+1]
