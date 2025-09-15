@@ -1,6 +1,17 @@
 <%inherit file='base'/>
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
 typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
+
+%if pyfr.npdtype_to_ctype(jac_fpdtype) == '__half':
+    #define JAC_HALF_PREC
+%endif
+
+#ifdef JAC_HALF_PREC
+    #define cast(x) __half2float(x)
+#else
+    #define cast(x) x
+#endif
+
 __global__ __launch_bounds__(${blkx*blky}) void
 jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         fpdtype_t *__restrict__ r0, fpdtype_t *__restrict__ r1,
@@ -79,7 +90,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                     vid = k % ${ncola};
                     jidx = (tidy + j)*ldim*nrow + uid*ldim + SOA_IX(tid, vid, ${ncola});
                     sidx = (k-${i})*blockDim.x + threadIdx.x;
-                    r1temp += sA[sidx] * jac[jidx];
+                    r1temp += sA[sidx] * cast(jac[jidx]);
 
                 }
                 uid = (tidy + j) / ${ncola};

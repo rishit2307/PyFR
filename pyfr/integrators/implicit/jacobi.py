@@ -228,20 +228,24 @@ class BlockJacobi(BaseCommon):
 		return jacinv
 
 	def _update_precision(self):
-		jac_temp = {}
+		jac_temp = []
 		backend = self.backend
 		del self.jacinv
+		comm, rank, root = get_comm_rank_root()
 
-		for etp in self.system.ele_types:
-			jac_temp[etp] = self.jac[etp].get()
-
-			del self.jac[etp]
+		for i, etype in enumerate(self.system.ele_types):
+			jac_temp.append(self.jac[i].get())
 		
-		self.jac = {}
+		for jac in self.jac:
+			del jac
+		
+		del self.jac
+		
+		self.jac = []
 
-		for etp in self.system.ele_types:
-			self.jac[etp] = backend.matrix(jac_temp[etp].shape, 
-							jac_temp[etp], dtype=self.jac_fpdtype)
+		for i, etype in enumerate(self.system.ele_types):
+			self.jac.append(backend.matrix(jac_temp[i].shape, 
+							jac_temp[i], dtype=self.jac_fpdtype))
 		
 		del jac_temp
 		del self._memoize_cache_

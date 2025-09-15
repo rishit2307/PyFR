@@ -26,7 +26,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
     fpdtype_t r1temp = 0.0;
 
     // Fixed-size array
-    ## fpdtype_t acc[${ndof // blky + ndof % blky}] = {0.0};
+    fpdtype_t acc[accsz] = {0.0};
 
     ixdtype_t nl;
 

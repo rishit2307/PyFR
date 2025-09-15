@@ -52,7 +52,7 @@ class GMRESSolver(BaseCommon):
 		self.sn = np.zeros((self.niters), dtype=self.fpdtype)
 		self.cs = np.zeros((self.niters), dtype=self.fpdtype)
 
-		self.rcurr_norm = self.eval_norm2(rcurr)
+		self.rcurr_norm = self._eval_norm(rcurr)
 		self.tc, self.a = tc, a
 		self.currstg = currstg
 	@nvtx.annotate(color="red")
@@ -67,7 +67,7 @@ class GMRESSolver(BaseCommon):
 		rcurr = reg._curr_regidx
 		rcurr_rhs = reg._stage_regidx[currstg]
 
-		xabs = self.eval_norm2(rdu)
+		xabs = self._eval_norm(rdu)
 		# rcurr_norm = self.eval_norm1(rcurr)/self._get_gndofs()
 
 		# if xabs > 1e-10:
@@ -217,7 +217,7 @@ class GMRESSolver(BaseCommon):
 		# self._add(1.0, rdu, -1.0, rmv)
 
 		r0 = rdu if self.prec in ('right', None) else self._jacobi_prec(rdu)
-		rnorm = self.eval_norm2(r0)
+		rnorm = self._eval_norm(r0)
 		self._add(0.0, rdu, 1/rnorm, r0)
 
 		H = np.zeros((self.niters+1, self.niters), dtype=self.fpdtype)

@@ -93,7 +93,7 @@ class HIPRTC:
 class SourceModule:
     def __init__(self, backend, src):
         # Prepare the source code
-        src = f'extern "C"\n{{\n{src}\n}}'
+        src = f'#include </opt/rocm/include/hip/hip_fp16.h> \n extern "C"\n{{\n{src}\n}}'
 
         # Get the compute architecture
         arch = backend.props['gcn_arch_name']

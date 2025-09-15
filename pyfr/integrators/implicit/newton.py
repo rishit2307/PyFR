@@ -71,7 +71,7 @@ class NewtonSolver(BaseNonLinearSolver):
 
 		self._addv(consts, regidxs)
 
-		return self.eval_norm2(rdu0)/np.sqrt(gndofs)
+		return self._eval_norm(rdu0)/np.sqrt(gndofs)
 
 	def solve(self, tc, acoeffs, currstg):
 		rcurr = self.register._curr_regidx
