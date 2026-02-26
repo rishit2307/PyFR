@@ -127,6 +127,7 @@ class GMRESSolver(BaseCommon):
 		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
 
 		self._addv([1.0] + list(-h), [rmv] + [rji[j] for j in range(self.iter+1)])
+
 		qnorm = self._eval_norm(rmv)
 		self._add(0.0, rkp1, 1.0/qnorm, rmv)
 
@@ -142,6 +143,7 @@ class GMRESSolver(BaseCommon):
 
 		comm, rank, root = get_comm_rank_root()
 
+		# Evaluate the Jacobians
 		if self.prec and eval_jac:
 			self.jacobi_solver._eval_jac(tc, acoeff, currstg, rcurr)
 
@@ -160,7 +162,9 @@ class GMRESSolver(BaseCommon):
 		# self._eval_mat_vec(rduold, rmv)
 		# self._add(1.0, rdu, -1.0, rmv)
 
+		# Right or Left Preconditioning
 		r0 = rdu if self.prec in ('right', None) else self._jacobi_prec(rdu)
+		
 		rnorm = self._eval_norm(r0)
 		self._add(0.0, rmv, 1/rnorm, r0)
 		self._add(0.0, rdu, 1.0, rmv)
@@ -171,8 +175,11 @@ class GMRESSolver(BaseCommon):
 
 		for k in range(self.niters):
 			self.iter = k
+			
+			# Arnoldi
 			H[:k+2, k] = self._arnoldi()
-
+			
+			# Givens Rotation
 			H[:k+2, k], cs[k], sn[k] = self._giv_rot(H[:k+2, k], 
 													cs, sn ,k)
 
@@ -190,6 +197,7 @@ class GMRESSolver(BaseCommon):
 			if rank == root:
 				print(f'GMRES did not converge in {self.niters} iterations, error is {err}')
 
+		# Solve the least squares system
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 		rdu = reg._gmres_regidx[self.iter]
 

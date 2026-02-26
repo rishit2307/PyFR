@@ -61,6 +61,9 @@ class CUBLASWrappers(LibWrapper):
         c_int, POINTER(c_float)),
         (c_int, 'cublasDdot_v2', c_void_p, c_int, c_void_p, c_int, c_void_p, 
         c_int, POINTER(c_double)),
+        (c_int, 'cublasDgemmBatched_v2', c_void_p, c_int, c_int, c_int, c_int, c_int,
+         POINTER(c_float), POINTER(c_void_p), c_int, POINTER(c_void_p), c_int,
+         POINTER(c_float), POINTER(c_void_p), c_int, c_int)
     ]
 
     def _transname(self, name):
@@ -201,3 +204,41 @@ class CUDACUBLASKernels(CUDAKernelProvider):
                 getinv(stream)
 
         return InvKernel(mats=[a, b])
+    
+
+
+    def mul(self, a, b, out, alpha=1.0, beta=0.0):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+
+        m = 256
+        n = 160
+        k = 160
+
+        # α and β factors for C = α*(A*op(B)) + β*C
+        if a.dtype == np.float64:
+            cublasgemm = w.cublasDgemmBatched
+            alpha_ct, beta_ct = c_double(alpha), c_double(beta)
+        else:
+            cublasgemm = w.cublasSgemmBatched
+            alpha_ct, beta_ct = c_float(alpha), c_float(beta)
+
+        class MulKernel(CUDAKernel):
+            def add_to_graph(self, graph, deps):
+                stream = cuda.create_stream()
+
+                # Capture the execution of cuBLAS to obtain a graph
+                stream.begin_capture()
+                self.run(stream)
+                gnode = stream.end_capture()
+
+                # Embed this graph in our main graph
+                return graph.graph.add_graph(gnode, deps)
+
+            def run(self, stream):
+                w.cublasSetStream(h, stream)
+                cublasgemm(h, w.OP_N, w.OP_N, m, n, k,
+                           alpha_ct, b, 128, a, 160,
+                           beta_ct, out, 128, 50)
+
+        return MulKernel(mats=[a, b, out])

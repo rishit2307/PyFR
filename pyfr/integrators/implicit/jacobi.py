@@ -106,6 +106,7 @@ class BlockJacobi(BaseCommon):
 
 		geupts = set(comm.allreduce(eupts, op=mpi.SUM))
 
+		# Evaluate the Jacobians
 		for nupts, etype in sorted(geupts):
 			for col in range(self.system.ncolours[etype]):
 				for npt in range(nupts):

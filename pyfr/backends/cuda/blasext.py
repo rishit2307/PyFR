@@ -281,6 +281,93 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return JacShuffleKernel(mats=arr)
     
+    def reshuff_clust(self, *arr):
+        ixdtype = self.backend.ixdtype
+
+        nclust = arr[1].traits[1]
+        ncol = np.prod(arr[0].ioshape[:-1])
+        neles = arr[0].ioshape[-1]
+        nrow, ncola, ncolb = arr[0].ioshape
+        nrow, ldim2 = arr[0].traits[1:3]
+
+        eleclust = neles // nclust
+
+        block = (256, 1, 1)
+
+        bm, bn = 160, 128
+        bk = 16
+
+        grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+
+        src = self.backend.lookup.get_template('reshuffclust').render(
+            ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles,
+            bm=bm, bn=bn, bk=bk, ldim=ncol**2
+        )
+
+        kern = self._build_kernel('reshuffclust', src, [ixdtype]+ [np.uintp]*4)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(nclust,  *arr)
+
+        class ReshuffClust(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+
+        return ReshuffClust(mats=arr)
+
+
+    
+    def jacmul_clust(self, *arr):
+        ixdtype = self.backend.ixdtype
+
+        nclust = arr[2].traits[1]
+        ncol = np.prod(arr[0].ioshape[:-1])
+        neles = arr[0].ioshape[-1]
+        nrow, ncola, ncolb = arr[0].ioshape
+        nrow, ldim2 = arr[0].traits[1:3]
+
+        eleclust = neles // nclust
+
+        block = (256, 1, 1)
+
+        bm, bn = 128, 160
+        bk = 16
+        grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+        tplargs = dict()
+        tplargs['_macros'] = {}
+        # grid = (nclust, 1, 1)
+        # src = self.backend.lookup.get_template('jacmulclustv6').render(
+        # ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
+        # bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
+        # wm=32, wn=64, wmiter=2, wniter=2, tm=4, tn=4)
+
+        src = self.backend.lookup.get_template('jacmulclustv7').render(
+        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
+        bm=bm, bn=bn, bk=bk, ldim=ncol**2, **tplargs)
+
+        with open("jacmul.cu", 'w') as f:
+            print(src, file=f)
+        # Build the kernel
+        kern = self._build_kernel('jacmulclustv7', src, [ixdtype]+ [np.uintp]*6)
+
+        # Set the parameters 
+
+        params = kern.make_params(grid, block)
+        params.set_args(nclust, *arr)
+
+        class JacMulClustKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return JacMulClustKernel(mats=arr)
 
     def jacmul(self, *arr):
         ixdtype = self.backend.ixdtype
