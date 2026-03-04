@@ -312,7 +312,6 @@ class CUDAFunction(_CUDABase):
         self.nreg = self._get_attr('num_regs')
         self.shared_mem = self._get_attr('shared_size_bytes')
         self.local_mem = self._get_attr('local_size_bytes')
-        print(f'local memory is {self.local_mem}')
 
         # Save a reference to our underlying module and argument types
         self.module = module

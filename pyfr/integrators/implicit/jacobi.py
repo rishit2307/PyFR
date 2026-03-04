@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.cluster import MiniBatchKMeans
 
 from pyfr.integrators.base import BaseCommon
 from pyfr.mpiutil import mpi, get_comm_rank_root
@@ -21,6 +22,9 @@ class BlockJacobi(BaseCommon):
 			self.fpdtype = np.float32
 
 		self.jac_fpdtype = cfg.get(sect, 'jacobi-prec', precision)
+		self.clustering = cfg.getbool(sect, 'clustering', False)
+		if self.clustering:
+			self.nclust = cfg.getint(sect, 'nclust', 50)
 		self._set_jac_backend()
 
 	def _bind_kerns(self, kerns, *args):
@@ -82,8 +86,21 @@ class BlockJacobi(BaseCommon):
 		jac = self.jac
 		backend = self.backend
 
+
 		kerns = [backend.kernel('jacmul', *[em[r] for r in rs]+[jac[i]])
 				 for i, em in enumerate(self.system.ele_banks)]
+
+		return kerns
+	
+	@memoize
+	def mul_jac_kmeans(self, *rs):
+		jacinv = self.jacinv
+		backend = self.backend
+		emap, cluster_neles = self.emap, self.cluster_neles
+
+		kerns = [backend.kernel('jacmul_clust', *[em[r] for r in rs]+[jacinv[i]] +
+						  						  [emap[i]]+[cluster_neles[i]])
+								for i, em in enumerate(self.system.ele_banks)]
 
 		return kerns
 
@@ -131,6 +148,7 @@ class BlockJacobi(BaseCommon):
 		jac_temp = []
 		backend = self.backend
 		del self.jacinv
+
 		comm, rank, root = get_comm_rank_root()
 
 		for i, etype in enumerate(self.system.ele_types):
@@ -149,3 +167,51 @@ class BlockJacobi(BaseCommon):
 		
 		del jac_temp
 		del self._memoize_cache_
+
+	def _get_kmeans(self):
+		jac_temp = []
+		backend = self.backend
+		comm, rank, root=  get_comm_rank_root()
+
+		self.emap = [[] for i in range(len(self.system.ele_types))]
+		self.cluster_neles = [np.empty((1, self.nclust), dtype=np.int32) for i in range(len(self.system.ele_types))]
+		for i, etype in enumerate(self.system.ele_types):
+			jac_temp.append(self.jacinv[i].get())
+		
+		for jacinv in self.jacinv:
+			del jacinv
+
+		del self.jacinv
+		for jac in self.jac:
+			del jac
+		
+		del self.jac
+
+		self.jacinv = []
+		cluster_neles, emap = self.cluster_neles, self.emap
+
+		for i, jact in enumerate(jac_temp):
+			kmeans = MiniBatchKMeans(n_clusters=self.nclust).fit(jact)
+			N= np.prod(self.system.ele_shapes[i][:2])
+			jactp = np.empty((self.nclust, N**2))
+
+			for clust in range(self.nclust):
+				ele_ix = np.where(kmeans.labels_ == clust)[0]
+				cluster_neles[i][:, clust] = len(ele_ix)
+				emap[i] += ele_ix.tolist()
+				jactp[clust] = np.mean(jact[ele_ix], axis=0)
+
+			jactpb = self.backend.matrix(jactp.shape, jactp)
+			self.jacinv.append(jactpb)
+			emapi = np.array(emap[i])
+
+			emap[i] = backend.matrix(emapi[None].shape, 
+								     emapi[None],
+									 dtype=self.backend.ixdtype)
+			
+			cluster_neles[i] = backend.matrix(cluster_neles[i].shape,
+										  	  cluster_neles[i], 
+											  dtype=self.backend.ixdtype)
+			# np.savetxt(f'cluster_neles_{rank}', cluster_neles[i].get())
+			# np.savetxt(f'emap_{rank}', emap[i].get())
+			# np.savetxt(f'jacinv_{rank}', jactp)

@@ -3,6 +3,7 @@
 // AoSoA macros
 #define SOA_SZ ${soasz}
 #define SOA_IX(a, v, nv) ((((a) / SOA_SZ)*(nv) + (v))*SOA_SZ + (a) % SOA_SZ)
+#define SOA_IX2(a, nv) ((a) / SOA_SZ)*(nv)*SOA_SZ + (a) % SOA_SZ
 
 // Typedefs
 typedef ${pyfr.npdtype_to_ctype(fpdtype)} fpdtype_t;

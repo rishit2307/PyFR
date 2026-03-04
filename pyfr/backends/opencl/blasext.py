@@ -21,6 +21,8 @@ class OpenCLBlasExtKernels(OpenCLKernelProvider):
         # Build the kernel
         kern = self._build_kernel('axnpby', src,
                                   [ixdtype]*3 + [np.uintp]*nv + [fpdtype]*nv)
+        
+        import pdb;pdb.set_trace()
         kern.set_dims((ncolb, nrow))
         kern.set_args(nrow, ncolb, ldim, *arr)
 
@@ -108,3 +110,44 @@ class OpenCLBlasExtKernels(OpenCLKernelProvider):
                                  reduced_dev.nbytes, False, [revt], ret_evt)
 
         return ReductionKernel(mats=regs)
+
+    def jacmul_clust(self, *arr):
+        ixdtype = self.backend.ixdtype
+        nclust = arr[2].traits[1]
+        ncol = np.prod(arr[0].ioshape[:-1])
+        neles = arr[0].ioshape[-1]
+        nrow, ncola, ncolb = arr[0].ioshape
+        nrow, ldim2 = arr[0].traits[1:3]
+
+
+        eleclust = neles // nclust
+        bm, bn = 64, 64
+        bk = 16
+        ls = (64, 1, 1)
+        gs = (nclust*ls[0],  -(-ncol //bm), -(-eleclust//bn))
+
+        tplargs = dict()
+        tplargs['_macros'] = {}
+
+        src = self.backend.lookup.get_template('jacmulclustv7').render(
+        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=ls[0], tot_neles=neles, 
+        bm=bm, bn=bn, bk=bk, ldim=ncol**2, **tplargs)
+
+        with open('jacmul.cl', 'w') as f:
+            print(src, file=f)
+
+        # Build the kernel
+        kern = self._build_kernel('jacmulclustv7', src, [ixdtype]+ [np.uintp]*6)
+        kern.set_dims(gs, ls)
+        kern.set_args(nclust, *arr)
+
+
+        class JacMulClustKernel(OpenCLKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, queue, wait_for=None, ret_evt=False):
+                kern.exec_async(queue, wait_for, ret_evt)
+
+        return JacMulClustKernel(mats=arr)
+

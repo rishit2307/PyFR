@@ -122,3 +122,48 @@ class MetalBlasExtKernels(MetalKernelProvider):
                 blit.endEncoding()
 
         return ReductionKernel(mats=regs)
+
+
+    def jacmul_clust(self, *arr):
+        ixdtype = self.backend.ixdtype
+
+        nclust = arr[2].traits[1]
+        ncol = np.prod(arr[0].ioshape[:-1])
+        neles = arr[0].ioshape[-1]
+        nrow, ncola, ncolb = arr[0].ioshape
+        nrow, ldim2 = arr[0].traits[1:3]
+
+        eleclust = neles // nclust
+
+        tgrp = (64, 1, 1)
+
+        bm, bn = 64, 64
+        bk = 16
+        grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+        tplargs = dict()
+        tplargs['_macros'] = {}
+        # grid = (nclust, 1, 1)
+        # src = self.backend.lookup.get_template('jacmulclustv6').render(
+        # ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
+        # bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
+        # wm=32, wn=64, wmiter=2, wniter=2, tm=4, tn=4)
+
+        src = self.backend.lookup.get_template('jacmulclustv7').render(
+        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=tgrp[0], tot_neles=neles, 
+        bm=bm, bn=bn, bk=bk, ldim=ncol**2, **tplargs)
+
+        with open("jacmul.cu", 'w') as f:
+            print(src, file=f)
+        # Build the kernel
+        kern = self._build_kernel('jacmulclustv7', src, [ixdtype]+ [np.uintp]*6)
+
+        kargs = [nclust] + [r.data for r in arr]
+        class JacMulClustKernel(MetalKernel):
+            def bind(self):
+                pass
+
+            def run(self, cbuf):
+                kern(cbuf, grid, tgrp, *kargs)
+
+        return JacMulClustKernel(mats=arr)
+

@@ -32,14 +32,18 @@ class GMRESSolver(BaseCommon):
 			self.nsmooth = cfg.getint(sect, 'nsmooth', 1)
 			self.jac_fpdtype = cfg.get(sect, 'jacobi-prec')
 			self.jac_evaluated  = False
+			self.clustering = cfg.getbool(sect, 'clustering', False)
 
 			if self.jac_fpdtype != precision:
 				self._prec_updated = False
 			else:
 				self._prec_updated = True
+			self.mul_jac = self.jacobi_solver.mul_jac
+			
+
 		else:
 			self.prec = None
-	
+		self._cluster_jac = False if self.clustering else True
 	def _init_solver(self, tc, a, currstg, rcurr):
 		self.iter = 0
 		self._rcurr = rcurr
@@ -53,6 +57,8 @@ class GMRESSolver(BaseCommon):
 		self.rcurr_norm = self._eval_norm(rcurr)
 		self.tc, self.a = tc, a
 		self.currstg = currstg
+		
+
 	@nvtx.annotate(color="red")
 	def _eval_mat_vec(self, rdu, rmv):
 		add, rhs = self._add, self.system.rhs
@@ -92,9 +98,19 @@ class GMRESSolver(BaseCommon):
 		for i in range(self.nsmooth):
 			self._eval_mat_vec(r0, r1)
 			self._add(-1.0, r1, 1.0, rin)
-
-			kerns = self.jacobi_solver.mul_jac(r1, r2)
+			# if self.mul_jac == self.jacobi_solver.mul_jac_kmeans:
+			# 	self.backend.wait()
+			# 	import time
+			# 	kerns = self.mul_jac(r1, r2)
+			# 	st = time.time()
+			# 	self.backend.run_kernels(kerns, wait=True)
+			# 	ed = time.time()
+			# 	print(f'rank is {rank}, time is {ed - st}')
+			# 	exit()
+			# else:
+			kerns = self.mul_jac(r1, r2)
 			self.backend.run_kernels(kerns)
+
 
 			self._add(1.0, r0, 1.0, r2)
 
@@ -142,7 +158,6 @@ class GMRESSolver(BaseCommon):
 		cs, sn = self.cs, self.sn
 
 		comm, rank, root = get_comm_rank_root()
-
 		# Evaluate the Jacobians
 		if self.prec and eval_jac:
 			self.jacobi_solver._eval_jac(tc, acoeff, currstg, rcurr)
@@ -156,6 +171,11 @@ class GMRESSolver(BaseCommon):
 			self._prec_updated = True
 			if rank == root:
 				print(f'jacobian precision updated')
+
+		elif self.prec and not self._cluster_jac:
+			self.jacobi_solver._get_kmeans()
+			self._cluster_jac = True
+			self.mul_jac = self.jacobi_solver.mul_jac_kmeans
 
 		rdu, rduold = reg._gmres_regidx[self.iter], reg._duold_regidx
 		rmv = reg._aux_regidx

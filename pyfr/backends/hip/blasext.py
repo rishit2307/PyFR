@@ -282,6 +282,53 @@ class HIPBlasExtKernels(HIPKernelProvider):
 
         return JacShuffleKernel(mats=arr)
     
+    def jacmul_clust(self, *arr):
+        ixdtype = self.backend.ixdtype
+
+        nclust = arr[2].traits[1]
+        ncol = np.prod(arr[0].ioshape[:-1])
+        neles = arr[0].ioshape[-1]
+        nrow, ncola, ncolb = arr[0].ioshape
+        nrow, ldim2 = arr[0].traits[1:3]
+
+        eleclust = neles // nclust
+
+        block = (256, 1, 1)
+
+        bm, bn = 160, 128
+        bk = 16
+        grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+        tplargs = dict()
+        tplargs['_macros'] = {}
+        # grid = (nclust, 1, 1)
+        # src = self.backend.lookup.get_template('jacmulclustv6').render(
+        # ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
+        # bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
+        # wm=32, wn=64, wmiter=2, wniter=2, tm=4, tn=4)
+
+        src = self.backend.lookup.get_template('jacmulclustv7').render(
+        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
+        bm=bm, bn=bn, bk=bk, ldim=ncol**2, **tplargs)
+
+        with open("jacmul.cu", 'w') as f:
+            print(src, file=f)
+        # Build the kernel
+        kern = self._build_kernel('jacmulclustv7', src, [np.uintp]*5)
+
+        # Set the parameters 
+
+        params = kern.make_params(grid, block)
+        params.set_args(*arr)
+
+        class JacMulClustKernel(HIPKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return JacMulClustKernel(mats=arr)
+    
 
     def jacmul(self, *arr):
         ixdtype = self.backend.ixdtype
@@ -364,4 +411,3 @@ class HIPBlasExtKernels(HIPKernelProvider):
                 kern.exec_async(stream, params)
 
         return GetF3Kernel(mats=arr)
-

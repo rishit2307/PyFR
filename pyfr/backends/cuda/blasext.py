@@ -331,13 +331,16 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         nrow, ncola, ncolb = arr[0].ioshape
         nrow, ldim2 = arr[0].traits[1:3]
 
-        eleclust = neles // nclust
+        # eleclust = neles // nclust
+        eleclust = np.amax(arr[-1].get())
 
-        block = (256, 1, 1)
+        block = (64, 1, 1)
 
-        bm, bn = 128, 160
+        bm, bn = 64, 64
         bk = 16
+
         grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+
         tplargs = dict()
         tplargs['_macros'] = {}
         # grid = (nclust, 1, 1)
@@ -353,12 +356,11 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         with open("jacmul.cu", 'w') as f:
             print(src, file=f)
         # Build the kernel
-        kern = self._build_kernel('jacmulclustv7', src, [ixdtype]+ [np.uintp]*6)
+        kern = self._build_kernel('jacmulclustv7', src, [np.uintp]*5)
 
         # Set the parameters 
-
         params = kern.make_params(grid, block)
-        params.set_args(nclust, *arr)
+        params.set_args(*arr)
 
         class JacMulClustKernel(CUDAKernel):
             def bind(self, *consts):
