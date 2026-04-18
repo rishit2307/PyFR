@@ -47,12 +47,6 @@ class BaseElements:
         # Instantiate the basis class
         self.basis = basis = basiscls(nspts, cfg)
 
-        lcf = Inifile(self.cfg.tostr())
-        lcf.set('solver', 'order', 1)
-
-        self.lowbasis = basiscls(nspts, lcf)
-        self.lnupts = self.lowbasis.nupts
-
         # See what kind of projection the basis is using
         self.antialias = basis.antialias
 
@@ -239,15 +233,6 @@ class BaseElements:
         self.scal_upts = [backend.matrix(self.scal_upts.shape,
                                          self.scal_upts, tags={'align'})
                           for i in range(nscalupts)]
-        
-        self.low_upts = [backend.matrix(np.zeros((self.lnupts, self.nvars, self.neles)).shape, 
-                                        np.zeros((self.lnupts, self.nvars, self.neles)), tags={'align'})
-                         for i in range(2)]
-        
-        # self.scal_upts[3] = backend.matrix(np.zeros(self.scal_upts[0].get().shape).shape, 
-        #                                     np.zeros(self.scal_upts[0].get().shape), tags={'align'})
-        
-        
 
         # Find/allocate space for a solution-sized scalar
         tags = self.scal_upts[0].tags

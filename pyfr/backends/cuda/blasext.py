@@ -3,7 +3,7 @@ import math
 
 from pyfr.backends.cuda.provider import (CUDAKernel, CUDAKernelProvider,
                                          get_grid_for_block)
-
+from pyfr.mpiutil import get_comm_rank_root
 
 class CUDABlasExtKernels(CUDAKernelProvider):
     def axnpby(self, *arr, subdims=None):
@@ -129,11 +129,11 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return ReductionKernel(mats=regs)
 
-    def dot(self, *rs):
+    def dot(self, *rs, scaling=False):
         cuda = self.backend.cuda
         ixdtype = self.backend.ixdtype
-        nrow, ncol, ldim, fpdtype = rs[0].traits[1:]
-        ncola, ncolb = rs[0].ioshape[1:]
+        nrow, ncol, ldim, fpdtype = rs[1].traits[1:]
+        ncola, ncolb = rs[1].ioshape[1:]
 
         # Reduction block dimensions
         block = (256, 1, 1)
@@ -142,7 +142,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         grid = get_grid_for_block(block, ncolb, ncola)
 
         # Empty result buffer on the device
-        reduced_dev = cuda.mem_alloc(ncola*grid[0]*rs[0].itemsize)
+        reduced_dev = cuda.mem_alloc(ncola*grid[0]*rs[1].itemsize)
 
         # Empty result buffer on the host
         reduced_host = cuda.pagelocked_empty((ncola, grid[0]), fpdtype)
@@ -150,7 +150,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         tplargs = dict(blocksz=block[0])
 
         # Get the kernel template
-        src = self.backend.lookup.get_template('dot').render(**tplargs)
+        src = self.backend.lookup.get_template('dot').render(scaling=scaling, 
+                                                             **tplargs)
 
         regs = list(rs)
 
@@ -184,7 +185,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         ncola, ncolb = arr[0].ioshape[1:]
 
         block = (128, 1, 1)
-        grid = get_grid_for_block(block, ncolb, nrow)
+        grid = get_grid_for_block(block, ncolb)
 
         ixdtype = self.backend.ixdtype
         fpdtype = self.backend.fpdtype
@@ -195,7 +196,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Build the kernel
         kern = self._build_kernel('addidx', src,
-                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*3
+                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*6
                                   + [fpdtype])
 
         # Set the parameters
@@ -210,13 +211,15 @@ class CUDABlasExtKernels(CUDAKernelProvider):
                 kern.exec_async(stream, params)
 
         return AddidxKernel(mats=arr)
-    
+
     def jacinit(self, *arr):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
-        ncola, ncolb = arr[0].ioshape[1:]
+        ncola = arr[0].ioshape[1]
+        ncolb = arr[2].ioshape[0]
+        ldimj = np.prod(arr[0].ioshape[:2])
 
         # nrowj, ncolj, ldimj, fpdtypej = arr[1].traits[1:]
-        ldimj = arr[2].ioshape[0]
+        # ldimj = arr[2].ioshape[0]
 
         block = (128, 1, 1)
         grid = get_grid_for_block(block, ncolb, ldimj)
@@ -233,7 +236,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # Build the kernel
         kern = self._build_kernel('jacinit', src,
                [ixdtype]*4 +[np.uintp]*4 + 
-               [ixdtype]*3 + [fpdtype]*2)
+               [ixdtype]*6 + [fpdtype]*2)
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -323,7 +326,6 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
     
     def jacmul_clust(self, *arr):
-        ixdtype = self.backend.ixdtype
 
         nclust = arr[2].traits[1]
         ncol = np.prod(arr[0].ioshape[:-1])
@@ -331,13 +333,15 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         nrow, ncola, ncolb = arr[0].ioshape
         nrow, ldim2 = arr[0].traits[1:3]
 
+        jac_fpdtype = arr[2].traits[-1]
+
         # eleclust = neles // nclust
-        eleclust = np.amax(arr[-1].get())
+        eleclust = np.amax(arr[-2].get())
 
-        block = (64, 1, 1)
-
-        bm, bn = 64, 64
-        bk = 16
+        block = (128, 1, 1)
+        K = 4
+        bm, bn = 320, 4
+        bk = 32
 
         grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
 
@@ -349,14 +353,15 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
         # wm=32, wn=64, wmiter=2, wniter=2, tm=4, tn=4)
 
-        src = self.backend.lookup.get_template('jacmulclustv7').render(
+        src = self.backend.lookup.get_template('jacmulclustv9').render(
         ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
-        bm=bm, bn=bn, bk=bk, ldim=ncol**2, **tplargs)
+        bm=bm, bn=bn, bk=bk, ldim=ncol**2, jac_fpdtype=jac_fpdtype, K=K, 
+        **tplargs)
 
         with open("jacmul.cu", 'w') as f:
             print(src, file=f)
         # Build the kernel
-        kern = self._build_kernel('jacmulclustv7', src, [np.uintp]*5)
+        kern = self._build_kernel('jacmulclustv9', src, [np.uintp]*6)
 
         # Set the parameters 
         params = kern.make_params(grid, block)
@@ -375,7 +380,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[0].ioshape[1:]
-
+        comm, rank, root = get_comm_rank_root()
         jac_fpdtype = arr[-1].traits[-1]
 
         # Determine the grid/block
@@ -408,40 +413,48 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return JacMulKernel(mats=arr)
 
-    def getf3(self, *arr):
+    def getf3(self, *arr, kmeans=False):
         ixdtype = self.backend.ixdtype
-        neles, nrow, ldim, fpdtype = arr[1].traits[1:]
-        nrow = math.isqrt(nrow)
-        ncol = 1
+        jac_fpdtype = arr[1].traits[-1]
+
+
+        ldim = arr[0].ioshape[1]
+        nrow = math.isqrt(ldim)
         # neles, ncol, ldim, fpdytype = arr[0].traits[1:]
         # nrow = ldim // ncol
-
+        gridsz=  arr[0].ioshape[0]
+            
+        ncola = arr[1].ioshape[0] // arr[1].ioshape[1]
+        ldim2 = arr[1].traits[2]
+        ldimj = arr[1].traits[2]*arr[1].ioshape[1]
 
         # Determine the grid/block
         block = (512, 1, 1)
 
-
-        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
-        grid = (neles, 1, 1)
+        grid = (gridsz, 1, 1)
         tplargs = dict()
         tplargs['_macros'] = {}
 
+        
+
         # Render the kernel template
         src = self.backend.lookup.get_template('getf3').render(
-            nrow=nrow, blksz=block[0], **tplargs
+              nrow=nrow, blksz=block[0],ldim2=ldim2, ldimj=ldimj,
+              ncola=ncola, kmeans=kmeans, jac_fpdtype=jac_fpdtype,
+              **tplargs
         )
-
-         # Build the kernel
+        # Build the kernel
         kern = self._build_kernel('getf3', src,
-                                [ixdtype]*3 + [np.uintp]*3)
-        
+                                [ixdtype]*2 + [np.uintp]*3
+                                + [ixdtype]*3)
+
         # Set the parameters
         params = kern.make_params(grid, block)
-        params.set_args(nrow, ncol, ldim, *arr)
+        params.set_args(nrow, ldim, *arr)
 
         class GetF3Kernel(CUDAKernel):
             def bind(self, *consts):
-                pass
+                params.set_args(*consts, start=5)
 
             def run(self, stream):
                 kern.exec_async(stream, params)

@@ -4,12 +4,13 @@ from pyfr.integrators.base import BaseCommon, BaseIntegrator
 from pyfr.integrators.implicit.gmres import GMRESSolver
 from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
+
 class BaseNonLinearSolver(BaseCommon):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg, 
 				 stage_nregs, stepper_nregs, tstart, dt):
 		
 		self.backend = backend
-		
+
 		sect = 'solver-time-integrator'
 		niters = cfg.getint(sect, 'gmres-niters', 10)
 		self.ntol = cfg.getfloat(sect, 'ntol', 0.01)
@@ -32,10 +33,9 @@ class BaseNonLinearSolver(BaseCommon):
 		self.system = system = systemcls(backend, rallocs, 
 							   mesh, initsoln, nregs=nregs, 
 							   cfg=cfg)
-
 		self.gmres_solver = GMRESSolver(backend, system, cfg, 
 										self.register, dt)
-		
+
 		self._idxcurr = self.register._stepper_regidx[0]
 
 	@property
@@ -50,7 +50,6 @@ class NewtonSolver(BaseNonLinearSolver):
 	def init_step(self, t):
 		rhs = self.system.rhs
 		rcurr, rprev = self._idxcurr, self._idxprev
-  
 		rprev_rhs = self.register._stage_regidx[0]
 
 		rhs(t, rprev, rprev_rhs)
@@ -66,7 +65,6 @@ class NewtonSolver(BaseNonLinearSolver):
 
 	def store_current_solution(self):
 		rcurr, rprev = self._idxcurr, self._idxprev
-
 		self._add(0.0, rprev, 1.0, rcurr)
 
 	def _errest(self, rcurr, rerr):
@@ -75,7 +73,7 @@ class NewtonSolver(BaseNonLinearSolver):
 		# Get a set of kernels to estimate the integration error
 		ekerns = self._get_reduction_kerns(rcurr, rerr, method='errest_imp',
 										   norm=self._norm)
-		
+
 		# Bind the dynamic arguments
 		for kern in ekerns:
 			kern.bind(self._atol, self._rtol)
@@ -93,7 +91,7 @@ class NewtonSolver(BaseNonLinearSolver):
 
 			# Normalise
 			err = np.sqrt(float(err) / self._get_gndofs())
-		
+
 		return err if not np.isnan(err) else 100
 
 	def _update_rhs(self, tc, acoeffs, currstg):
@@ -124,11 +122,9 @@ class NewtonSolver(BaseNonLinearSolver):
 	def solve(self, tc, acoeffs, currstg, nsteps):
 		comm, rank, root = get_comm_rank_root()
 		rcurr, rprev = self._idxcurr, self._idxprev
-		eval_jac = nsteps == 0
 
 		# Begin nonlinear iteration count
-		newton_iter = 1
-
+		newton_iter = 0
 		# Set the initial guess
 		# self._init_stage(acoeffs, currstg)
 
@@ -140,39 +136,38 @@ class NewtonSolver(BaseNonLinearSolver):
 
 			# Linear Solve
 			rdu = self.gmres_solver.solve(tc, acoeffs[-1], currstg,
-								 			rcurr,  eval_jac)
+								 			rcurr)
 
 			# Add correction to current solution
 			self._add(1.0, rcurr, 1.0, rdu)
 
 			# Store RHS
 			nnorm = self._update_rhs(tc, acoeffs, currstg)
-
-			if rank == root:
-				print(f'stage is {currstg}')
-				print(f'nnorm is {nnorm / nnorm_init }, newton is {newton_iter}')
-
 			newton_iter	+= 1
-			# delnrmp = delnrm
 
 			# Return if maxniters exceeded
-			if newton_iter > self._max_newtoniters:
+			if newton_iter > self._max_newtoniters-1:
 
 				# Reevaluate the jacobian if niters > maxniters
 				self.gmres_solver._eval_jac(tc, acoeffs[-1], currstg, 
 											              rcurr)
 
+				if self.gmres_solver.clustering:
+					self._cluster_jac = False
 
-		return rcurr, rprev
+		if rank == root:
+				print(f'stage is {currstg}', flush=True)
+				print(f'nnorm is {nnorm /nnorm_init}, newton is {newton_iter}', flush=True)
 
+		return rcurr, rprev, nnorm
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):
 		self.stage_nregs = stage_nregs
 		self.stepper_nregs = stepper_nregs
 		self.solver_nregs = solver_nregs
-		
+
 		sect = 'solver-time-integrator'
-		self.prec =  cfg.get(sect, 'precondition', None)
+		self.prec =  cfg.getbool(sect, 'precondition', False)
 
 		self.aux_nregs = 1
 		self.jacobi_nregs = 3
@@ -182,11 +177,11 @@ class Register:
 					  self.stepper_nregs + self.gmres_nregs
 					  + self.aux_nregs + self.jacobi_nregs)
 		
-		if self.prec == 'right':
+		if self.prec:
 			self.nregs += self.gmres_nregs
 
 		self._regidx = list(range(self.nregs))
-	
+
 	@property
 	def _gmres_regidx(self):
 		return self._regidx[:self.gmres_nregs]
@@ -225,7 +220,7 @@ class Register:
 	@property
 	def _prec_regidx(self):
 		ix = self.nregs - self.gmres_nregs
-		if self.prec == 'right':
+		if self.prec:
 			return self._regidx[ix:ix+self.gmres_nregs]
 		else:
 			return self._regidx[:self.gmres_nregs]

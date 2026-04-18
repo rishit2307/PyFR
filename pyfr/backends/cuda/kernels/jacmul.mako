@@ -102,21 +102,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                 idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                 r1[idx] += r1temp;
             }
-            ## acc[j / blockDim.y] += r1temp;
         }
         __syncthreads();
     % endfor
-
-    ## if (tid < ncolb){
-    ##     % for aix in range(ndof // blky + ndof % blky):
-    ##         uid = (tidy + ${aix}*blockDim.y) / ${ncola};
-    ##         vid = (tidy + ${aix}*blockDim.y) % ${ncola};
-
-    ##         idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
-
-    ##         if (tidy + ${aix}*blockDim.y < ${ndof})
-    ##             r1[idx] = acc[${aix}];
-
-    ##     % endfor
-    ## }
 }

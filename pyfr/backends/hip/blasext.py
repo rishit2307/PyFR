@@ -210,14 +210,16 @@ class HIPBlasExtKernels(HIPKernelProvider):
             def run(self, stream):
                 kern.exec_async(stream, params)
 
-        return AddidxKernel(mats=arr)    
+        return AddidxKernel(mats=arr)
 
     def jacinit(self, *arr):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
-        ncola, ncolb = arr[0].ioshape[1:]
+        ncola = arr[0].ioshape[1]
+        ncolb = arr[2].ioshape[0]
+        ldimj = np.prod(arr[0].ioshape[:2])
 
         # nrowj, ncolj, ldimj, fpdtypej = arr[1].traits[1:]
-        ldimj = arr[2].ioshape[0]
+        # ldimj = arr[2].ioshape[0]
 
         block = (128, 1, 1)
         grid = get_grid_for_block(block, ncolb, ldimj)
@@ -248,42 +250,8 @@ class HIPBlasExtKernels(HIPKernelProvider):
                 kern.exec_async(stream, params)
 
         return JacInitKernel(mats=arr)
-    
-    def jacshuffle(self, *arr):
-        nrow, ncol, ldim0, fpdtype = arr[0].traits[1:]
-        nrow, ncol, ldim1, fpdtype = arr[1].traits[1:]
-        nupts, ncola, ncolb = arr[1].ioshape[1:]
 
-
-        block = (128, 1, 1)
-        grid = get_grid_for_block(block, ncolb, nupts*ncola, nupts*ncola)
-
-        ixdtype = self.backend.ixdtype
-        fpdtype = self.backend.fpdtype
-
-        # Render the kernel template
-        src = self.backend.lookup.get_template('jacshuffle').render(
-            ncola=ncola, block=block)
-
-        # Build the kernel
-        kern = self._build_kernel('jacshuffle', src,
-                                  [ixdtype]*3 + [np.uintp]*2)
-
-        # Set the parameters
-        params = kern.make_params(grid, block)
-        params.set_args(ncolb, ldim0, ldim1, *arr)
-
-        class JacShuffleKernel(HIPKernel):
-            def bind(self, *consts):
-                pass
-
-            def run(self, stream):
-                kern.exec_async(stream, params)
-
-        return JacShuffleKernel(mats=arr)
-    
     def jacmul_clust(self, *arr):
-        ixdtype = self.backend.ixdtype
 
         nclust = arr[2].traits[1]
         ncol = np.prod(arr[0].ioshape[:-1])
@@ -291,13 +259,18 @@ class HIPBlasExtKernels(HIPKernelProvider):
         nrow, ncola, ncolb = arr[0].ioshape
         nrow, ldim2 = arr[0].traits[1:3]
 
-        eleclust = neles // nclust
+        jac_fpdtype = arr[2].traits[-1]
 
-        block = (256, 1, 1)
+        # eleclust = neles // nclust
+        eleclust = np.amax(arr[-2].get())
 
-        bm, bn = 160, 128
-        bk = 16
+        block = (128, 1, 1)
+        K = 4
+        bm, bn = 320, 4
+        bk = 32
+
         grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+
         tplargs = dict()
         tplargs['_macros'] = {}
         # grid = (nclust, 1, 1)
@@ -306,20 +279,19 @@ class HIPBlasExtKernels(HIPKernelProvider):
         # bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
         # wm=32, wn=64, wmiter=2, wniter=2, tm=4, tn=4)
 
-        src = self.backend.lookup.get_template('jacmulclustv7').render(
+        src = self.backend.lookup.get_template('jacmulclustv9').render(
         ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
-        bm=bm, bn=bn, bk=bk, ldim=ncol**2, **tplargs)
+        bm=bm, bn=bn, bk=bk, ldim=ncol**2, jac_fpdtype=jac_fpdtype, K=K, 
+        **tplargs)
 
         with open("jacmul.cu", 'w') as f:
             print(src, file=f)
         # Build the kernel
-        kern = self._build_kernel('jacmulclustv7', src, [np.uintp]*5)
+        kern = self._build_kernel('jacmulclustv9', src, [np.uintp]*6)
 
         # Set the parameters 
-
         params = kern.make_params(grid, block)
         params.set_args(*arr)
-
         class JacMulClustKernel(HIPKernel):
             def bind(self, *consts):
                 pass
@@ -328,7 +300,6 @@ class HIPBlasExtKernels(HIPKernelProvider):
                 kern.exec_async(stream, params)
 
         return JacMulClustKernel(mats=arr)
-    
 
     def jacmul(self, *arr):
         ixdtype = self.backend.ixdtype
@@ -367,41 +338,42 @@ class HIPBlasExtKernels(HIPKernelProvider):
 
         return JacMulKernel(mats=arr)
 
-    def getf3(self, *arr):
+    def getf3(self, *arr, kmeans=False):
         ixdtype = self.backend.ixdtype
-        neles, nrow, ldim, fpdtype = arr[1].traits[1:]
-        nrow = math.isqrt(nrow)
-        ncol = 1
+
+        col_neles = arr[-1].ioshape[-1]
+        ldim = arr[0].ioshape[1]
+        nrow = math.isqrt(ldim)
         # neles, ncol, ldim, fpdytype = arr[0].traits[1:]
         # nrow = ldim // ncol
 
+
+            
+        ncola = arr[1].ioshape[0] // arr[1].ioshape[1]
+        ldim2 = arr[1].traits[2]
+        ldimj = arr[1].traits[2]*arr[1].ioshape[1]
 
         # Determine the grid/block
         block = (512, 1, 1)
 
 
-        # grid = get_grid_for_block(block, ncolb, nrow*ncola)
-        grid = (neles, 1, 1)
-        tplargs = {'nrow':nrow}
-
-        
-        tplargs['nby'] = block[0]//32
-        tplargs['nb'] = 32
-        tplargs['blksz'] = block[0]
+        grid = (col_neles, 1, 1)
+        tplargs = dict()
         tplargs['_macros'] = {}
 
         # Render the kernel template
         src = self.backend.lookup.get_template('getf3').render(
-            **tplargs
+              nrow=nrow, blksz=block[0],ldim2=ldim2, ldimj=ldimj,
+              ncola=ncola, kmeans=kmeans,
+              **tplargs
         )
-
-         # Build the kernel
+        # Build the kernel
         kern = self._build_kernel('getf3', src,
-                                [ixdtype]*3 + [np.uintp]*3)
+                                [ixdtype]*2 + [np.uintp]*4)
 
         # Set the parameters
         params = kern.make_params(grid, block)
-        params.set_args(nrow, ncol, ldim, *arr)
+        params.set_args(nrow, ldim, *arr)
 
         class GetF3Kernel(HIPKernel):
             def bind(self, *consts):

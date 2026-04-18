@@ -230,7 +230,6 @@ def process_export(args):
 def _process_common(args, mesh, soln, cfg):
     # Manually initialise MPI
     init_mpi()
-
     comm, rank, root = get_comm_rank_root()
 
     # Create a backend

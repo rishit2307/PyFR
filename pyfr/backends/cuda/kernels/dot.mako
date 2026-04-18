@@ -19,12 +19,16 @@ dot(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         for (ixdtype_t j = 0; j < nrow; j++)
         {
             ixdtype_t idx = j*ldim + SOA_IX(i, blockIdx.y, gridDim.y);
-            r = r1[idx]*r2[idx];
+            % if not scaling:
+                r = r1[idx]*r2[idx];
+            % else:
+                r = r1[blockIdx.y]*fabsf(r2[idx]);
+            % endif
             acc += r;
         }
     }
 
-     // Reduce within each warp
+    // Reduce within each warp
     for (int off = warpSize / 2; off > 0; off >>= 1)
         acc += __shfl_down_sync(0xFFFFFFFFU, acc, off);
 

@@ -275,7 +275,7 @@ class NodalMeshAssembler:
         # Tag and pair periodic boundary faces
         pfpairs, pmap = self._pair_periodic_fluid_faces(bpart, resid, nbele)
         spinner()
-        
+
         # Get neighbours of neighbour
         nnbele = self._get_nnb(nbele)
         celes = self._colour_mesh(nnbele)
@@ -293,23 +293,7 @@ class NodalMeshAssembler:
 
         # Generate the internal connectivity array
         con = list(pairs)
-        # celes2 = self.color_mesh(con)
 
-
-        # for i, (l, r) in enumerate(con):
-        #     lcol = 'r' if l[1] in celes[0] else 'b'
-        #     rcol = 'r' if r[1] in celes[0] else 'b'
-        #     con[i][0] = (l[0], l[1], l[2], l[3], lcol)
-        #     con[i][1]  = (r[0], r[1], r[2], r[3], rcol)
-        
- 
-        # for col, eles in celes.items():
-        #     for l, r 
-
-
-
-        
-        
         # Extract the names of periodic interfaces
         con_pnames = defaultdict(list)
         for i, (l, r) in enumerate(con):
@@ -324,7 +308,6 @@ class NodalMeshAssembler:
         spinner()
 
         # Output
-        # ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2,S1').T}
         ret = {'con_p0': np.array(con, dtype='S4,i8,i1,i2').T}
 
         for k, v in con_pnames.items():

@@ -17,8 +17,11 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 										 rallocs, mesh, initsoln, cfg, 
 										 self.nstages, self.stepper_nregs, 
 										 tstart, self._dt)
-		
+
 		self.system = self.newtonsolver.system
+
+		# Handles blowup
+		self.ntblowup = True
 		
 		# Event handlers for advance_to
 		self.plugins = self._get_plugins(initsoln)
@@ -56,7 +59,7 @@ class BaseImplicitIntegrator(BaseCommon, BaseIntegrator):
 
 		if not self._curr_dt_soln:
 			copy = self.soln
-			system.rhs(self.tcurr, self.newtonsolver_idxcurr, 
+			system.rhs(self.tcurr, self.newtonsolver._idxcurr, 
 			  			self.newtonsolver._idxcurr)
 			self._curr_dt_soln = system.ele_scal_upts(self.
 											 newtonsolver._idxcurr)

@@ -29,7 +29,7 @@ class BaseImplicitController(BaseImplicitIntegrator):
 		self._invalidate_caches()
 
 		if rank == root:
-			print(f'time is {self.tcurr}, dt is {dt}, err is {err}')
+			print(f'time is {self.tcurr}, dt is {dt}, err is {err}', flush=True)
 
 		# Run any plugins
 		self._run_plugins()
@@ -46,7 +46,7 @@ class BaseImplicitController(BaseImplicitIntegrator):
 			print('Time step rejected')
 
 		if rank == root:
-			print(f'time is {self.tcurr}, dt is {dt}, err is {err}')
+			print(f'time is {self.tcurr}, dt is {dt}, err is {err}', flush=True)
 
 		self.newtonsolver._idxcurr = rold
 
@@ -208,8 +208,8 @@ class ImplicitSoderlindController(BaseImplicitController):
 			raise ValueError('Advance time is in the past')
 
 		sord = self.stepper_order
-		expa = 0.58 / sord
-		expb = 0.21 / sord
+		expa = 0.7 / sord
+		expb = 0.4 / sord
 
 		etamin = self._etamin
 		etamax = self._etamax

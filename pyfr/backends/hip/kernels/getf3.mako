@@ -4,10 +4,10 @@
 <%include file='pyfr.backends.hip.kernels.ltrmm'/>
 <%include file='pyfr.backends.hip.kernels.utrtri'/>
 
-__global__ void __launch_bounds__(${blksz})
-getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim, 
+__global__  __launch_bounds__(${blksz}) void
+getf3(ixdtype_t nrow, ixdtype_t ldim, 
       fpdtype_t *__restrict__ jac, fpdtype_t *__restrict__ jacinv,  
-      ixdtype_t *__restrict__ P)
+      ixdtype_t *__restrict__ P, ixdtype_t* __restrict__ eid)
 {
     ixdtype_t idx, idx1, idx0, idx2;
     const ixdtype_t nb = 32;
@@ -18,6 +18,9 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
     ixdtype_t one  = 1;
     ixdtype_t two = 2;
     fpdtype_t fone = 1.0;
+
+    ixdtype_t upt;
+    ixdtype_t vpt;
 
     ixdtype_t tid = threadIdx.x;
     __shared__ fpdtype_t mv;
@@ -39,16 +42,26 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
 
     for (ixdtype_t i=zero; i < nrow; i+=nby){
         for (ixdtype_t j=i+1; j < nrow; j+=nb){
-            idx = blockIdx.x*ldim + (tidrow + i)*nrow + (tidcol + j);
-            if (tidrow + i < nrow && tidcol + j < nrow)
+            % if kmeans:
+                idx = eid[blockIdx.x]*ldim + (tidrow + i)*nrow + (tidcol + j);
+            % else:
+                upt = (tidcol + j) / ${ncola};
+                vpt = (tidcol + j) % ${ncola};
+                idx = (tidrow + i)*${ldimj} + upt*${ldim2} + SOA_IX(eid[blockIdx.x], vpt, ${ncola});
+            % endif
+            
+            if (tidrow + i < nrow && tidcol + j < nrow){
                 jacinv[idx] = 0.0;
+            }
         }
     }
 
     for (ixdtype_t j=zero; j < nrow; j+=blockDim.x)
     {
-        if (tid < nrow - j)
+        if (tid < nrow - j){
             P[blockIdx.x*nrow + tid + j] = tid + j;
+        }
+            
     }
     for (ixdtype_t i=zero; i < nrow; i+=nb){
         for (ixdtype_t j=i; j < min(i+nb, nrow); j++){
@@ -60,9 +73,9 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
             // Reduce to find the maximum in column j
             for (ixdtype_t k=j; k < nrow; k += blockDim.x){
                 idx = blockIdx.x*ldim + (threadIdx.x + k)*nrow + j;
-                if (threadIdx.x < nrow - k)
+                if (threadIdx.x < nrow - k){
                     acc = fabs(jac[idx]);
-
+                }
 
                 for (int off=warpSize/2; off > zero; off >>= 1)
                     acc = max(__shfl_down(acc, off), acc);
@@ -115,8 +128,9 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
                 idx = blockIdx.x*ldim + (threadIdx.x + k)*nrow + j;
                 idx0 = blockIdx.x*ldim + j*nrow + j;
 
-                if (threadIdx.x < nrow - k)
+                if (threadIdx.x < nrow - k){
                     jac[idx] /= jac[idx0];
+                }
             }
             __syncthreads();
 
@@ -126,8 +140,10 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
                 idx = blockIdx.x*ldim + (tidrow+k)*nrow + tidcol + j + one;
                 idx0 = blockIdx.x*ldim + (tidrow+k)*nrow + j;
 
-                if (tidcol < min(i + nb, nrow) - j - one && tidrow + k < nrow)
-                    jac[idx] -= jac[idx1]*jac[idx0];
+                if (tidcol < min(i + nb, nrow) - j - one && tidrow + k < nrow){
+                     jac[idx] -= jac[idx1]*jac[idx0];
+                }
+                   
             }
             __syncthreads();
         }
@@ -143,8 +159,10 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         idx = tidrow*nb + tidcol;
         for (ixdtype_t j=i; j < min(i+nb, nrow); j+=nby){
             idx1 = blockIdx.x*ldim + (tidrow+j)*nrow + tidcol + i;
-            if (tidcol + i < nrow)
+            if (tidcol + i < nrow && (tidrow + j) < nrow){
                 sC[idx + (j-i)*nb] = jac[idx1];
+            }
+                
         }
 
         __syncthreads();
@@ -169,7 +187,12 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         }
 
         __syncthreads();
-        ${pyfr.expand('write', 'i', 'i', 'sB', 'jacinv')};
+        % if kmeans:
+            ${pyfr.expand('write_jacinv_kmeans', 'i', 'i', 'sB', 'jacinv')};
+        % else:
+            ${pyfr.expand('write_jacinv', 'i', 'i', 'sB', 'jacinv')};
+        % endif
+
         for (ixdtype_t j=i+nb; j < nrow; j+=nb){
             ${pyfr.expand('read', 'i', 'j', 'sA', 'jac')};
             ${pyfr.expand('l1trmm', 'sB', 'sA', 'sC')};
@@ -181,16 +204,29 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
            ${pyfr.expand('l1trmm', 'sB', 'sA', 'sC')}
 
            for (ixdtype_t k=i-nb; k > j; k-=nb){
-                ${pyfr.expand('read', 'i', 'k', 'sA', 'jacinv')};
+                % if kmeans:
+                    ${pyfr.expand('read_jacinv_kmeans', 'i', 'k', 'sA', 'jacinv')};
+                % else:
+                    ${pyfr.expand('read_jacinv', 'i', 'k', 'sA', 'jacinv')};
+                % endif
                 ${pyfr.expand('read', 'k', 'j', 'sD', 'jac')};
                 ${pyfr.expand('gemm', 'sA', 'sD', 'sE')};
             
                 for (ixdtype_t l=zero; l < nb; l+=nby)
                     sC[(tidrow + l)*nb + tidcol] += sE[(tidrow + l)*nb + tidcol];
            }
-           ${pyfr.expand('read', 'j', 'j', 'sA', 'jacinv')};
+            % if kmeans:
+                ${pyfr.expand('read_jacinv_kmeans', 'j', 'j', 'sA', 'jacinv')};
+            % else:
+                ${pyfr.expand('read_jacinv', 'j', 'j', 'sA', 'jacinv')};
+            % endif
            ${pyfr.expand('l2trmm','sC','sA','sD')};
-           ${pyfr.expand('write', 'i', 'j', '-sD', 'jacinv')}
+
+            % if kmeans:
+                ${pyfr.expand('write_jacinv_kmeans', 'i', 'j', '-sD', 'jacinv')}
+            % else:
+                ${pyfr.expand('write_jacinv', 'i', 'j', '-sD', 'jacinv')}
+            % endif
         }
 
         for (ixdtype_t j=i+nb; j < nrow; j+=nb){
@@ -201,8 +237,10 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
 
                 for(ixdtype_t l=zero; l < nb; l+=nby){
                     idx = blockIdx.x*ldim + (tidrow + l + j)*nrow + (tidcol + k);
-                    if (tidrow + l + j < nrow && tidcol +k < nrow)
+                    if (tidrow + l + j < nrow && tidcol +k < nrow){
                         jac[idx] -= sC[(tidrow+l)*nb + tidcol];
+                    }
+                        
                 }
             }
         }
@@ -214,11 +252,18 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         if (tid == zero)
             ix = P[blockIdx.x*nrow + i];
 
-    __syncthreads();
+        __syncthreads();
         for (ixdtype_t j=min(ix, i); j < nrow; j+=blockDim.x){
-            idx = blockIdx.x*ldim + (tid + j)*nrow + i;
-            idx1 = blockIdx.x*ldim + (tid + j)*nrow + ix;
+            % if kmeans:
+                idx = eid[blockIdx.x]*ldim + (tid + j)*nrow + i;
+                idx1 = eid[blockIdx.x]*ldim + (tid + j)*nrow + ix;
 
+            % else:
+                upt = i / ${ncola};
+                vpt = i % ${ncola};
+                idx = (tid+j)*${ldimj} + upt*${ldim2} + SOA_IX(eid[blockIdx.x], vpt, ${ncola});
+                idx1 = (tid+j)*${ldimj} + (ix / ${ncola})*${ldim2} + SOA_IX(eid[blockIdx.x], ix % ${ncola}, ${ncola});
+            % endif
             if (tid + j < nrow){
                 temp = jacinv[idx];
                 jacinv[idx] = jacinv[idx1];
@@ -236,22 +281,45 @@ getf3(ixdtype_t nrow, ixdtype_t ncol,  ixdtype_t ldim,
         for (ixdtype_t j=i; j < nrow; j+=nb){
             ${pyfr.expand('read', 'max(i-nb, zero)', 'j', 'sC', 'jac')};
             for (ixdtype_t k=zero; k < nrow; k+=nb){
-                ${pyfr.expand('read', 'j', 'k', 'sD', 'jacinv')};
+                % if kmeans:
+                    ${pyfr.expand('read_jacinv_kmeans', 'j', 'k', 'sD', 'jacinv')};
+                % else:
+                     ${pyfr.expand('read_jacinv', 'j', 'k', 'sD', 'jacinv')};
+                % endif
                 ${pyfr.expand('gemm', 'sC', 'sD', 'sE')};
                 for (ixdtype_t l=zero; l < min(nb, i); l+=nby){
-                    idx = blockIdx.x*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
-                    if (tidrow + l + max(i-nb, zero) < i && tidcol + k < nrow)
+                    % if kmeans:
+                        idx = eid[blockIdx.x]*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
+                    % else:
+                        upt = (tidcol + k) / ${ncola};
+                        vpt = (tidcol + k) % ${ncola};
+                        idx = (tidrow + l + max(i-nb, zero))*${ldimj} + upt*${ldim2} + SOA_IX(eid[blockIdx.x], vpt, ${ncola});
+                    % endif
+                    if (tidrow + l + max(i-nb, zero) < i && tidcol + k < nrow){
                         jacinv[idx] -= sE[(tidrow + l)*nb + tidcol];
+                    }
+                        
                 }
             }
         }
 
         for (ixdtype_t j=zero; j < nrow; j+=nb){
-            ${pyfr.expand('read', 'max(i-nb, zero)', 'j', 'sD', 'jacinv')};
+            % if kmeans:
+                ${pyfr.expand('read_jacinv_kmeans', 'max(i-nb, zero)', 'j', 'sD', 'jacinv')};
+            % else:
+                ${pyfr.expand('read_jacinv', 'max(i-nb, zero)', 'j', 'sD', 'jacinv')};
+            % endif
+
             ${pyfr.expand('gemm', 'sB', 'sD', 'sE')};
 
             for (ixdtype_t k=zero; k < min(nb, i); k+=nby){
-                idx = blockIdx.x*ldim + (tidrow + k + max(i-nb, zero))*nrow + (tidcol + j);
+                % if kmeans:
+                    idx = eid[blockIdx.x]*ldim + (tidrow + k + max(i-nb, zero))*nrow + (tidcol + j);
+                % else:
+                    upt = (tidcol + j) / ${ncola};
+                    vpt = (tidcol + j) % ${ncola};
+                    idx = (tidrow + k + max(i-nb, zero))*${ldimj} + upt*${ldim2} + SOA_IX(eid[blockIdx.x], vpt, ${ncola});
+                % endif
                 if (tidcol + j < nrow && tidrow + k + max(i-nb, zero) < i)
                     jacinv[idx] = sE[(tidrow + k)*nb + tidcol];
             }

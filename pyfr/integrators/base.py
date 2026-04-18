@@ -3,9 +3,8 @@ import itertools as it
 import re
 import sys
 import time
-
-import numpy as np
 import nvtx
+import numpy as np
 
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root, mpi
@@ -222,8 +221,8 @@ class BaseCommon:
 
 		return kerns
 
-	def _eval_dot(self, *rs):
-		kerns = self._get_dot_kerns(*rs)
+	def _eval_dot(self, r1, r2, scaling=False):
+		kerns = self._get_dot_kerns(r1, r2, scaling=scaling)
 
 		self.backend.run_kernels(kerns, wait=True)
 
@@ -243,11 +242,13 @@ class BaseCommon:
 		return kerns
 	
 	@memoize
-	def _get_dot_kerns(self, *rs):
+	def _get_dot_kerns(self, r1, r2, scaling=False):
 
 		kerns = []
 		for em in self.system.ele_banks:
-			kerns.append(self.backend.kernel('dot', *[em[r] for r in rs]))
+			regs = [r1, em[r2]] if scaling else [em[r1], em[r2]]
+			kerns.append(self.backend.kernel('dot', *regs,
+									         scaling=scaling))
 
 		return kerns
 
@@ -276,15 +277,17 @@ class BaseCommon:
 
 		self.backend.run_kernels(jacmulkern)
 
-	def _addid(self, rs, npt, vi, col, h, etype):
-		
+	def _addid(self, rs, stid, bsz, npt, vi, col, h, etype):
+
 		if etype not in self.system.ele_types:
 			return
+		eix= self.system.ele_types.index(etype)
+		neles = self.system.ele_shapes[eix][-1]
 		eid = self.system.celes[etype]
 		addidx = self._get_addidx_kerns(eid, etype, *rs)
 
 		for k in addidx:
-			k.bind(npt, vi, col, h)
+			k.bind(npt, vi, col, stid, bsz, neles, h)
 		
 		self.backend.run_kernels(addidx)
 
@@ -299,20 +302,18 @@ class BaseCommon:
 		res = np.array([sum(v for k in kerns for v in k.retval)])
 		comm.Allreduce(mpi.IN_PLACE, res, op=mpi.SUM)
 
-		return float(np.sqrt(res))
+		return float(np.sqrt(res)[0])
 
-	@nvtx.annotate(color='cyan')
 	def _addv(self, consts, regidxs, subdims=None):
 		# Get a suitable set of axnpby kernels
 		axnpby = self._get_axnpby_kerns(*regidxs, subdims=subdims)
 
 		# Bind the arguments
-		with nvtx.annotate("BINDING in axnpby", color="brown"):
-			for k in axnpby:
-				k.bind(*consts)
+		for k in axnpby:
+			k.bind(*consts)
 
 		self.backend.run_kernels(axnpby)
-	@nvtx.annotate(color='white')
+
 	def _add(self, *args, subdims=None):
 		self._addv(args[::2], args[1::2], subdims=subdims)
 

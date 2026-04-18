@@ -69,9 +69,10 @@ def get_local_rank():
     envs = [
         'MV2_COMM_WORLD_LOCAL_RANK',
         'OMPI_COMM_WORLD_LOCAL_RANK',
-        'SLURM_LOCALID'
+        'MPI_LOCALRANKID'
     ]
 
+    comm, rank, root = get_comm_rank_root()
     for ev in envs:
         if ev in os.environ:
             return int(os.environ[ev])

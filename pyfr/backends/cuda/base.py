@@ -1,8 +1,7 @@
 import re
 
 from pyfr.backends.base import BaseBackend
-from pyfr.mpiutil import get_local_rank
-
+from pyfr.mpiutil import get_local_rank, get_comm_rank_root
 
 class CUDABackend(BaseBackend):
     name = 'cuda'

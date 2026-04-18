@@ -72,7 +72,6 @@ class BaseStoredQuadRule(BaseTabulatedQuadRule):
 
         # Raise if no suitable rules were found
         if not best:
-            import pdb;pdb.set_trace()
             raise ValueError('No suitable quadrature rule found')
 
         # Load the rule

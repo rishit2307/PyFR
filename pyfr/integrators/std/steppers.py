@@ -4,7 +4,6 @@ from pyfr.integrators.std.base import BaseStdIntegrator
 from pyfr.util import memoize, subclass_where
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from collections import defaultdict
-import nvtx
 import time
 
 class BaseStdStepper(BaseStdIntegrator):
@@ -29,50 +28,6 @@ class BaseStdStepper(BaseStdIntegrator):
 		else:
 			self.epsmc = np.sqrt(np.finfo(np.float32).eps)
 
-	# def _eval_mat_vec(self, rdU, rrhs):
-
-	# 	add, rhs = self._add, self.system.rhs
-	# 	epsmc = self.epsmc
-	# 	t, dt, dtfac = self.t, self.dt, self.dtfac
-
-	# 	rU, rrU = self._up_rup_regidx
-	# 	dUn = self.eval_norm2(rdU)
-
-	# 	# eps = epsmc*np.sqrt(self.Un+1)/(np.sqrt(float(dUn)) + epsmc**2)
-	# 	# eps = epsmc*np.sqrt(self.Un)
-	# 	# eps = self.epsmc*self.Un/dUn + self.epsmc
-	# 	if dUn> 1e-10:
-	# 		eps = self.epsmc*self.Un/dUn + self.epsmc
-	# 	else:
-	# 		eps = self.epsmc*self.Un
-	# 	# eps = self.epsmc*self.Un
-
-	# 	# rrhs = rU + eps*rdU
-	# 	add(0.0, rrhs, 1.0, rU, eps, rdU)
-
-	# 	# rrhs = rhs(rU + eps*rdU)
-	# 	rhs(t+dt, rrhs, rrhs)
-
-	# 	self.nfeval += 1
-
-	# 	# rrhs = Ax = rhs(rU+eps*rdU)/eps + dtfac*dU/dt - rhs(rU)/eps
-	# 	# add(-1.0/eps, rrhs, 1.0/eps, rrU, dtfac/dt, rdU)
-	# 	add(-dt/(dtfac*eps), rrhs, dt/(eps*dtfac), rrU, 1.0, rdU)
-
-
-	# def _init_gmres(self):
-	# 	self.m = self.cfg.getint('solver-time-integrator', 'gmres-iter')
-	# 	self.rnorm= dict()
-
-	# 	self.ltol = 1e-3
-	# 	self.e1 = np.zeros(self.m+1)
-	# 	self.e1[0] = 1.0
-
-	# 	self.sn = np.zeros(self.m)
-	# 	self.cs = np.zeros(self.m)
-	# 	self.k = 0
-	# 	self.y = [[] for _ in range(len(self.system.ele_types))]		
-	
 class StdEulerStepper(BaseStdStepper):
 	stepper_name = 'euler'
 	stepper_has_errest = False
@@ -90,77 +45,6 @@ class StdEulerStepper(BaseStdStepper):
 		add(1.0, ut, dt, f)
 
 		return ut
-class Trapezoidal(BaseStdStepper):
-	stepper_name = 'trapezium'
-	stepper_has_errest = False
-	stepper_nregs = 2
-	stepper_order = 1
-	dtfac = 2.0
-
-	@property
-	def _stepper_nfevals(self):
-		return self.nsteps
-
-	def _res(self, ev_rru=False):
-		t, dt, dtfac = self.t, self.dt, self.dtfac
-
-		add, rhs_with_postproc = self._add, self.system.rhs
-		rmv, rdu = self._mvec_regidx, self._du_regidx
-		rduold = self._duold_regidx
-
-		ru, rru = self._u_ru_regidx
-		rup, rrup = self._up_rup_regidx
-
-		rhs_with_postproc(t+dt, rup, rrup)
-		self.backend.wait()
-		self.Un = self.eval_norm1(rup)/self._get_gndofs()
-		# self.Un = self.eval_norm1(rup)
-		self._eval_mat_vec(rduold, rmv)
-	
-		# rru = R(Un)
-		rhs_with_postproc(t, ru, rru)
-		self.nfeval += 2
-
-		# # rs = R(Un)/2 + R(Un+1,k)/2 
-		# add(0.0, rdu, dtfac/2., rru, dtfac/2., rrup)
-
-		# # rs = R(Un)/2 + R(Un+1,k)/2  + Un+1,k/dt - Un/dt
-		# add(1.0, rdu, -dtfac/dt, rup, dtfac/dt, ru)
-
-		add(0.0, rdu, dt/dtfac, rrup, dt/dtfac, rru)
-		
-		add(1.0, rdu, 1.0, ru, -1.0, rup)
-
-		# rs = b - Ax
-		add(1.0, rdu, -1, rmv)
-
-	def newton_res(self):
-		add, rhs_with_postproc = self._add, self.system.rhs
-		self.normele = dict()
-		comm, rank, root = get_comm_rank_root()
-		t, dt, dtfac = self.t, self.dt, self.dtfac
-
-		rU, rrU = self._u_ru_regidx
-		rUp, rrUp = self._up_rup_regidx
-		rhs_with_postproc(t+dt, rUp, rrUp)
-
-		rv = self._mvec_regidx
-		# add(0.0, rv, -dtfac/2, rrU, dtfac/dt, rUp, -dtfac/dt, rU)
-
-		# add(-1/2, rv, 1/dt, rUp, -1/dt, rU)
-
-		# add(1.0, rv, -dtfac/2, rrUp)
-
-		add(0.0, rv,  dt/dtfac, rrUp, dt/dtfac, rrU)
-
-		add(1.0, rv, 1.0, rU, -1.0, rUp)
-
-		self.nfeval+=1
-		normele = self.eval_norm2(rv)
-
-		return normele/np.sqrt(self._get_gndofs())
-		# return self.normele
-
 class StdTVDRK3Stepper(BaseStdStepper):
 	stepper_name = 'tvd-rk3'
 	stepper_has_errest = False
