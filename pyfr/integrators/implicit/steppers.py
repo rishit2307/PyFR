@@ -19,7 +19,7 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 	@property
 	def stepper_nregs(self):
 		return 3 if self.stepper_has_errest else 2
-	
+
 	def step(self, t, dt):
 		newtonsolver = self.newtonsolver
 		comm, rank, root = get_comm_rank_root()
@@ -33,8 +33,8 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 		for i, (acoeffs, ccoeff) in enumerate(zip(self.a, self.c), start=start):
 
 			acn = [acoeff*dt for acoeff in acoeffs]
-			rcurr, rold, nnorm = self.newtonsolver.solve(t+ccoeff*dt, acn, i, self.nacptsteps)
-
+			rcurr, rold, nnorm = self.newtonsolver.solve(t+ccoeff*dt, acn, i,
+							                             self.nacptsteps)
 			if math.isnan(nnorm):
 				self.ntblowup = False
 				for plugin in self.plugins:
@@ -65,14 +65,14 @@ class ESDIRK32Stepper(BaseESDIRKStepper):
 	nstages = 3
 	exp_first_stage = True
 
-	gamma = (2 - math.sqrt(2))/2
+	gamma = 1 - 1/math.sqrt(2)
 	b2 = math.sqrt(2)/4
 	fsal = True
-	beta = (4.0 - math.sqrt(2.0))/8.0
-	delta = 1.0/(2*math.sqrt(2.0))
+	beta = (4 - math.sqrt(2))/8
+	delta = 1/(2*math.sqrt(2))
 
 	a = [[gamma, gamma],
-		 [1 - b2 - gamma, b2, gamma]]
+		 [b2, b2, gamma]]
 	c = [2*gamma, 1]
 
 	bhat = [beta, beta, delta]
@@ -85,7 +85,7 @@ class TrapeziumStepper(BaseESDIRKStepper):
 	fsal = True
 	exp_first_stage = True
 
-	a = [[0.5, 0.5]]
+	a = [[1/2, 1/2]]
 	c = [1]
 
 

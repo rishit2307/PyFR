@@ -134,28 +134,27 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = rs[1].traits[1:]
         ncola, ncolb = rs[1].ioshape[1:]
-
+        comm, rank, root = get_comm_rank_root()
         # Reduction block dimensions
         block = (256, 1, 1)
-
+        nv = len(rs)
         # Determine the grid size
         grid = get_grid_for_block(block, ncolb, ncola)
 
         # Empty result buffer on the device
-        reduced_dev = cuda.mem_alloc(ncola*grid[0]*rs[1].itemsize)
+        reduced_dev = cuda.mem_alloc(ncola*grid[0]*(nv-1)*rs[1].itemsize)
 
         # Empty result buffer on the host
-        reduced_host = cuda.pagelocked_empty((ncola, grid[0]), fpdtype)
+        reduced_host = cuda.pagelocked_empty((ncola, grid[0], nv-1), fpdtype)
 
         tplargs = dict(blocksz=block[0])
 
         # Get the kernel template
-        src = self.backend.lookup.get_template('dot').render(scaling=scaling, 
+        src = self.backend.lookup.get_template('dot').render(scaling=scaling,
+                                                             nv = nv,
                                                              **tplargs)
-
         regs = list(rs)
-
-        argt = [ixdtype]*3 + [np.uintp]*3
+        argt = [ixdtype]*3 + [np.uintp]*(nv+1)
 
         # Build the reduction kernel
         rkern = self._build_kernel('dot', src, argt)
@@ -164,19 +163,20 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         params = rkern.make_params(grid, block)
         params.set_args(nrow, ncolb, ldim, reduced_dev, *regs)
 
-
         class DOTKernel(CUDAKernel):
             @property
             def retval(self):
-                return np.sum(reduced_host, axis=1)
+                reduced = np.sum(reduced_host, axis=(0, 1))
+
+                return reduced
 
             def bind(self, *facs):
                 pass
 
             def run(self, stream):
                 rkern.exec_async(stream, params)
-                cuda.memcpy(reduced_host, reduced_dev, reduced_dev.nbytes,
-                           stream)
+                cuda.memcpy(reduced_host, reduced_dev, 
+                                reduced_dev.nbytes, stream)
 
         return DOTKernel(mats=regs)
 
@@ -338,9 +338,9 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # eleclust = neles // nclust
         eleclust = np.amax(arr[-2].get())
 
-        block = (128, 1, 1)
+        block = (256, 1, 1)
         K = 4
-        bm, bn = 320, 4
+        bm, bn = 320, 8
         bk = 32
 
         grid = (nclust, -(-ncol //bm), -(-eleclust//bn))

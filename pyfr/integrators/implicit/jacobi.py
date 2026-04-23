@@ -147,7 +147,7 @@ class BlockJacobi(BaseCommon):
 				for col in range(self.system.ncolours[etype]):
 					for npt in range(nupts):
 						for v in range(nvars):		
-							self._add(0.0, raux, 1.0, rcurr)
+							self._add(0, raux, 1, rcurr)
 							self._addid([rcurr, raux], 
 										eles, self.jac_bsize,
 										npt, v, col, h, etype)
@@ -155,7 +155,7 @@ class BlockJacobi(BaseCommon):
 							rhs(tc, raux, raux)
 							self._add(-a, raux, a, rcurr_rhs)
 							self._init_jac(etype, [raux, rcurr], 
-											eles, npt, v, col, 1.0, h)
+											eles, npt, v, col, 1, h)
 
 				if etype in self.system.ele_types:
 					eix = self.system.ele_types.index(etype)
@@ -177,23 +177,6 @@ class BlockJacobi(BaseCommon):
 		if self.clustering:
 			self._set_jac_kmeans()
 		self.backend.wait()
-		# if self.clustering:
-		# 	jacinv_cpu = [self.jacinv[i].get() for i in range(len(self.system.ele_types))]
-
-		# 	for etype in self.system.ele_types:
-		# 		eix = self.system.ele_types.index(etype)
-		# 		jacinv_cpu_etp = jacinv_cpu[eix]
-		# 		neles = jacinv_cpu_etp.shape[0]
-		# 		stride= 5000
-
-		# 		for eles in range(0, neles, stride):
-		# 			self._get_kmeans_v3(eles, etype, jacinv_cpu_etp[eles:eles+stride])
-			
-		# 	# for etp, col in self.system.celes_ix.keys():
-		# 	# 	eix = self.system.ele_types.index(etp)
-		# 	# 	self._get_kmeans_v2(etp, col, jacinv_cpu[eix])
-			
-		# 	self._set_jac_kmeans()
 
 	def _update_precision(self):
 		jac_temp = []
@@ -226,13 +209,20 @@ class BlockJacobi(BaseCommon):
 
 		for i, jack in enumerate(self.jacinv_tmp):
 			etp = self.system.ele_types[i]
-			np.save(f'jac_{etp}_{rank}', np.vstack(jack))
+			np.save(f'./npy/jac_{etp}_{rank}', np.vstack(jack))
 			jackb = backend.matrix(np.vstack(jack).shape, 
 						  		   np.vstack(jack), dtype=self.jac_fpdtype)
+
+			# jack = np.load(f'./npy/jac_{etp}_{rank}.npy')
+			# jackb = backend.matrix(jack.shape, 
+			# 			  		   jack, dtype=self.jac_fpdtype)
 
 			ci = np.array(self.cluster_neles[i])[None]
 			ei = np.array(self.emap[i])[None]
 			stix = np.cumsum(ci) - ci
+			# ci = np.load(f'./npy/ci_{etp}_{rank}.npy')
+			# stix = np.load(f'./npy/stix_{etp}_{rank}.npy')
+			# ei = np.load(f'./npy/ei_{etp}_{rank}.npy')
 			self.cluster_neles[i] = backend.matrix(ci.shape, 
 										  		ci,dtype=backend.ixdtype)
 			
@@ -242,9 +232,9 @@ class BlockJacobi(BaseCommon):
 			self.jacinv.append(jackb)
 			self.emap[i] = backend.matrix(ei.shape, ei, dtype=backend.ixdtype)
 
-			np.save(f'ci_{etp}_{rank}', ci)
-			np.save(f'stix_{etp}_{rank}', stix)
-			np.save(f'ei_{etp}_{rank}', ei)
+			np.save(f'./npy/ci_{etp}_{rank}', ci)
+			np.save(f'./npy/stix_{etp}_{rank}', stix)
+			np.save(f'./npy/ei_{etp}_{rank}', ei)
 
 		del self.jacinv_tmp
 
@@ -279,7 +269,7 @@ class BlockJacobi(BaseCommon):
 		jacinvsc = scaler.fit_transform(jacinv_cpu)
 		kmeans = KMeans(n_clusters=nclust).fit(jacinvsc)
 		del jacinvsc
-		print(f'rank is {rank}, kmeans done', flush=True)
+		print(f'rank is {rank}, kmeans b4 final done', flush=True)
 
 		cluster_neles_tmp += np.bincount(kmeans.labels_, minlength=nclust).tolist()
 

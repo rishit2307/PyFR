@@ -68,8 +68,6 @@ class ImplicitNoneController(BaseImplicitController):
 			raise ValueError('Advance time is in the past')
 		
 		while self.tcurr < t:
-			# import random
-			# self._dt = random(0.005, 0.01)
 			# Decide on the time step
 			dt = max(min(t - self.tcurr, self._dt), self.dtmin)
 

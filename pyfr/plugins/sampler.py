@@ -63,7 +63,7 @@ def _plocs_to_tlocs(sbasis, spts, plocs, tlocs):
 class SamplerPlugin(BaseSolnPlugin):
     name = 'sampler'
     systems = ['*']
-    formulations = ['dual', 'std']
+    formulations = ['implicit', 'std']
     dimensions = [2, 3]
 
     def __init__(self, intg, cfgsect, suffix):

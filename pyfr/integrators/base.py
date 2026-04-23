@@ -5,6 +5,7 @@ import sys
 import time
 import nvtx
 import numpy as np
+np.set_printoptions(precision=16, suppress=False)
 
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root, mpi
@@ -24,7 +25,6 @@ class BaseIntegrator:
 		# Start time
 		self.tstart = cfg.getfloat('solver-time-integrator', 'tstart', 0.0)
 		self.tend = cfg.getfloat('solver-time-integrator', 'tend')
-		# self.tintg = cfg.getfloat('soln-plugin-integrate', 'tout')
 
 		# Current time; defaults to tstart unless restarting
 		if self.isrestart:
@@ -201,7 +201,6 @@ class BaseIntegrator:
 			# are called only once if stopping the computation
 			sys.exit(1)
 
-
 class BaseCommon:
 	def _get_gndofs(self):
 		comm, rank, root = get_comm_rank_root()
@@ -221,14 +220,15 @@ class BaseCommon:
 
 		return kerns
 
-	def _eval_dot(self, r1, r2, scaling=False):
-		kerns = self._get_dot_kerns(r1, r2, scaling=scaling)
+	def _eval_dot(self, rs, scaling=False):
+		comm, rank, root = get_comm_rank_root()
+		kerns = self._get_dot_kerns(*rs, scaling=scaling)
 
 		self.backend.run_kernels(kerns, wait=True)
+		result = sum([k.retval for k in kerns])
 
-		res = np.array([sum(v for k in kerns for v in k.retval)])
-
-		return float(res)
+		comm.Allreduce(mpi.IN_PLACE, result, op=mpi.SUM)
+		return result
 
 	@memoize
 	def _get_reduction_kerns(self, *rs, **kwargs):
@@ -242,11 +242,12 @@ class BaseCommon:
 		return kerns
 	
 	@memoize
-	def _get_dot_kerns(self, r1, r2, scaling=False):
+	def _get_dot_kerns(self, *rs, scaling=False):
 
 		kerns = []
 		for em in self.system.ele_banks:
-			regs = [r1, em[r2]] if scaling else [em[r1], em[r2]]
+			regs = [rs[0], em[rs[1]]] if scaling else [em[r] for r in rs]
+
 			kerns.append(self.backend.kernel('dot', *regs,
 									         scaling=scaling))
 
@@ -302,7 +303,7 @@ class BaseCommon:
 		res = np.array([sum(v for k in kerns for v in k.retval)])
 		comm.Allreduce(mpi.IN_PLACE, res, op=mpi.SUM)
 
-		return float(np.sqrt(res)[0])
+		return np.sqrt(res[0])
 
 	def _addv(self, consts, regidxs, subdims=None):
 		# Get a suitable set of axnpby kernels

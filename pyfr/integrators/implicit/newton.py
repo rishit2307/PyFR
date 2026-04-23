@@ -8,7 +8,7 @@ from pyfr.mpiutil import get_comm_rank_root, mpi
 class BaseNonLinearSolver(BaseCommon):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg, 
 				 stage_nregs, stepper_nregs, tstart, dt):
-		
+
 		self.backend = backend
 
 		sect = 'solver-time-integrator'
@@ -59,13 +59,13 @@ class NewtonSolver(BaseNonLinearSolver):
 
 		regidxs = [rcurr] + [rprev]
 		regidxs += self.register._stage_regidx
-		coeffs = [0.0, 1.0] + bcoeffs
+		coeffs = [0, 1] + bcoeffs
 
 		self._addv(coeffs, regidxs)
 
 	def store_current_solution(self):
 		rcurr, rprev = self._idxcurr, self._idxprev
-		self._add(0.0, rprev, 1.0, rcurr)
+		self._add(0, rprev, 1, rcurr)
 
 	def _errest(self, rcurr, rerr):
 		comm, rank, root = get_comm_rank_root()
@@ -95,6 +95,7 @@ class NewtonSolver(BaseNonLinearSolver):
 		return err if not np.isnan(err) else 100
 
 	def _update_rhs(self, tc, acoeffs, currstg):
+		comm, rank, root = get_comm_rank_root()
 		rhs = self.system.rhs
 		gndofs = self._get_gndofs()
 		rcurr, rprev = self._idxcurr, self._idxprev
@@ -104,7 +105,7 @@ class NewtonSolver(BaseNonLinearSolver):
 
 		rhs(tc, rcurr, rcurr_rhs)
 
-		consts = [0.0, *acoeffs, 1.0, -1.0]
+		consts = [0, *acoeffs, 1, -1]
 		regidxs = [rdu0] + self.register._stage_regidx[:currstg+1]
 		regidxs += [rprev, rcurr]
 
@@ -115,7 +116,7 @@ class NewtonSolver(BaseNonLinearSolver):
 	def _init_stage(self, acoeffs, currstg):
 		rcurr, rprev = self._idxcurr, self._idxprev
 
-		consts = [0.0, 1.0, *acoeffs[:-1]]
+		consts = [0, 1, *acoeffs[:-1]]
 		regidxs=  [rcurr, rprev] + self.register._stage_regidx[:currstg]
 		self._addv(consts, regidxs)
 
@@ -139,7 +140,7 @@ class NewtonSolver(BaseNonLinearSolver):
 								 			rcurr)
 
 			# Add correction to current solution
-			self._add(1.0, rcurr, 1.0, rdu)
+			self._add(1, rcurr, 1, rdu)
 
 			# Store RHS
 			nnorm = self._update_rhs(tc, acoeffs, currstg)
@@ -156,8 +157,8 @@ class NewtonSolver(BaseNonLinearSolver):
 					self._cluster_jac = False
 
 		if rank == root:
-				print(f'stage is {currstg}', flush=True)
-				print(f'nnorm is {nnorm /nnorm_init}, newton is {newton_iter}', flush=True)
+			print(f'stage is {currstg}', flush=True)
+			print(f'nnorm is {nnorm /nnorm_init}, newton is {newton_iter}', flush=True)
 
 		return rcurr, rprev, nnorm
 class Register:

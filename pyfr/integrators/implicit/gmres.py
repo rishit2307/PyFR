@@ -55,16 +55,23 @@ class GMRESSolver(BaseCommon):
 		convars = np.array(pri_to_con(pvars, cfg))
 		self.utyp = self.backend.matrix(convars[None].shape, 
 							        convars[None])
+		
+		# Allocate Storage
+		self._e1 = np.empty((self.niters+1))
+		self._sn = np.empty((self.niters))
+		self._cs = np.empty((self.niters))
+
+		self._H = np.empty((self.niters+1, self.niters))
 
 	def _init_solver(self, tc, a, currstg, rcurr):
 		self.iter = 0
 		self._rcurr = rcurr
-		
-		self.e1 = np.zeros((self.niters+1), dtype=self.fpdtype)
-		self.e1[0] = 1.0
 
-		self.sn = np.zeros((self.niters), dtype=self.fpdtype)
-		self.cs = np.zeros((self.niters), dtype=self.fpdtype)
+		self._e1.fill(0)
+		self._e1[0] = 1
+		self._sn.fill(0)
+		self._cs.fill(0)
+		self._H.fill(0)
 
 		self.rcurr_norm = self._eval_norm(rcurr)
 		self.tc, self.a = tc, a
@@ -85,26 +92,23 @@ class GMRESSolver(BaseCommon):
 		# xabs = self._eval_norm(rdu)
 
 		# if xabs > 1e-4:
-		# 	eps = dtype(np.sqrt(1 + self.rcurr_norm)*epsmc/xabs)
+		# 	eps = np.sqrt(1 + self.rcurr_norm)*epsmc/xabs
 		# else:
-		# 	eps = dtype(np.sqrt(1 + self.rcurr_norm)*epsmc)
+		# 	eps = np.sqrt(1 + self.rcurr_norm)*epsmc
 
 		utyp = self.utyp
-		dottyp = np.array(self._eval_dot(utyp, rdu, scaling=True))
-		dotcurr = np.array(np.abs(self._eval_dot(rcurr, rdu)))
-
-		comm.Allreduce(mpi.IN_PLACE, dottyp, op=mpi.SUM)
-		comm.Allreduce(mpi.IN_PLACE, dotcurr, op=mpi.SUM)
+		dottyp = self._eval_dot([utyp, rdu], scaling=True)
+		dotcurr = abs(self._eval_dot([rcurr, rdu]))
 
 		rdunrm = self._eval_norm(rdu)**2
 		eps = max(dottyp, dotcurr)*np.sign(dotcurr)*epsmc/rdunrm
 
 		fac = dtype(a/eps)
 
-		add(0.0, rmv, 1.0, rcurr, eps, rdu)
+		add(0, rmv, 1, rcurr, eps, rdu)
 		rhs(tc, rmv, rmv)
 
-		add(-fac, rmv, fac, rcurr_rhs, 1.0, rdu)
+		add(-fac, rmv, fac, rcurr_rhs, 1, rdu)
 
 	def _jacobi_prec(self, rin):
 		if self.prec == None:
@@ -116,12 +120,12 @@ class GMRESSolver(BaseCommon):
 
 		for i in range(1, self.nsmooth):
 			self._eval_mat_vec(r0, r1)
-			self._add(-1.0, r1, 1.0, rin)
+			self._add(-1, r1, 1, rin)
 
 			kerns = self.mul_jac(r1, r2)
 			self.backend.run_kernels(kerns)
 
-			self._add(1.0, r0, 1.0, r2)
+			self._add(1, r0, 1, r2)
 
 		return r0
 
@@ -132,32 +136,30 @@ class GMRESSolver(BaseCommon):
 		rmv = self.register._aux_regidx
 		rkp1 = self.register._gmres_regidx[self.iter+1]
 		rprec = self.register._prec_regidx[self.iter]
-
-		h = np.zeros((self.iter+2), dtype=self.fpdtype)
+		H = self._H
 
 		r0 = self._jacobi_prec(rdu)
-		self._add(0.0, rprec, 1.0, r0)
+		self._add(0, rprec, 1, r0)
 		self._eval_mat_vec(r0, rmv)
 
 		rji = self.register._gmres_regidx
 
-		for j in range(self.iter + 1):
-			h[j] = self._eval_dot(rji[j], rmv)
+		dotregs = [rmv] + [rji[j] for j in range(self.iter+1)]
+		H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)
 
-		comm.Allreduce(mpi.IN_PLACE, h, op=mpi.SUM)
-		self._addv([1.0] + list(-h[:self.iter+1]), [rmv] + [rji[j] for j in range(self.iter+1)])
+		self._addv([1] + list(-h), [rmv] + 
+			                  [rji[j] for j in range(self.iter+1)])
 
 		qnorm = self._eval_norm(rmv)
-		self._add(0.0, rkp1, 1.0/qnorm, rmv)
+		self._add(0, rkp1, 1/qnorm, rmv)
 
-		h[-1] = qnorm
-
-		return h
+		H[self.iter+1, self.iter] = qnorm
 
 	def solve(self, tc, acoeff, currstg, rcurr):
 		self._init_solver(tc, acoeff, currstg, rcurr)
+		H = self._H
 		reg = self.register
-		cs, sn = self.cs, self.sn
+		cs, sn = self._cs, self._sn
 
 		comm, rank, root = get_comm_rank_root()
 
@@ -190,22 +192,21 @@ class GMRESSolver(BaseCommon):
 
 		# Right or Left Preconditioning
 		rnorm = self._eval_norm(rdu)
-		self._add(0.0, rmv, 1/rnorm, rdu)
-		self._add(0.0, rdu, 1.0, rmv)
+		self._add(0, rmv, 1/rnorm, rdu)
 
-		H = np.zeros((self.niters+1, self.niters), dtype=self.fpdtype)
 
-		beta = rnorm*self.e1
+		self._add(0, rdu, 1, rmv)
+
+		beta = rnorm*self._e1
 
 		for k in range(self.niters):
 			self.iter = k
 			
 			# Arnoldi
-			H[:k+2, k] = self._arnoldi()
+			self._arnoldi()
 			
 			# Givens Rotation
-			H[:k+2, k], cs[k], sn[k] = self._giv_rot(H[:k+2, k], 
-													cs, sn ,k)
+			self._giv_rot(k)
 
 			beta[k+1] = -sn[k] * beta[k]
 			beta[k] = cs[k] * beta[k]
@@ -225,7 +226,7 @@ class GMRESSolver(BaseCommon):
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 		rdu = reg._gmres_regidx[self.iter]
 
-		consts = [0.0]+list(y)
+		consts = [0]+list(y)
 		rp = self.register._prec_regidx[:self.iter+1]
 		regidxs = [rdu] + [r for r in rp]
 
@@ -234,19 +235,17 @@ class GMRESSolver(BaseCommon):
 
 		return rdu
 
-	def _giv_rot(self, h, cs, sn, k):
+	def _giv_rot(self, k):
+		H, cs, sn = self._H, self._cs, self._sn
+
 		for i in range(k):
-			temp = cs[i] * h[i] + sn[i] * h[i+1]
+			temp = cs[i]*H[i, k] + sn[i]*H[i+1, k]
+			H[i+1, k] = -sn[i]*H[i, k] + cs[i]*H[i+1, k]
+			H[i, k] = temp
 
-			h[i+1] = -sn[i] * h[i] + cs[i] * h[i+1]
-			h[i] = temp
-		
-		cs_k, sn_k = self.giv(h[k], h[k+1])
-
-		h[k] = cs_k * h[k] + sn_k * h[k+1]
-		h[k+1] = 0.0
-
-		return h, cs_k, sn_k
+		cs[k], sn[k] = self.giv(H[k, k], H[k+1, k])
+		H[k, k] = cs[k]*H[k, k] + sn[k]*H[k+1, k]
+		H[k+1, k] = 0
 
 	def giv(self, v1, v2):
 		tt = np.sqrt(v1**2 + v2**2)
