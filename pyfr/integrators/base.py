@@ -212,10 +212,12 @@ class BaseCommon:
 		return comm.allreduce(ndofs, op=mpi.SUM)
 
 	@memoize
-	def _get_axnpby_kerns(self, *rs, subdims=None):
+	def _get_axnpby_kerns(self, *rs, subdims=None, inscales=(), 
+					      in_idx=(), outscales=()):
 
 		kerns = [self.backend.kernel('axnpby', *[em[r] for r in rs],
-									 subdims=subdims)
+									 subdims=subdims, inscales=inscales, 
+									 in_idx=in_idx, outscales=outscales)
 				 for em in self.system.ele_banks]
 
 		return kerns
@@ -272,11 +274,6 @@ class BaseCommon:
 		         for em in self.system.ele_banks]
 
 		return kerns
-	
-	def _mul_jac(self, jac, rs):
-		jacmulkern = self._get_jacmul_kernels(jac, *rs)
-
-		self.backend.run_kernels(jacmulkern)
 
 	def _addid(self, rs, stid, bsz, npt, vi, col, h, etype):
 
@@ -305,9 +302,12 @@ class BaseCommon:
 
 		return np.sqrt(res[0])
 
-	def _addv(self, consts, regidxs, subdims=None):
+	def _addv(self, consts, regidxs, subdims=None, inscales=(), 
+		      in_idx=(), outscales=()):
 		# Get a suitable set of axnpby kernels
-		axnpby = self._get_axnpby_kerns(*regidxs, subdims=subdims)
+		axnpby = self._get_axnpby_kerns(*regidxs, subdims=subdims, 
+								        inscales=inscales, in_idx=in_idx,
+										outscales=outscales)
 
 		# Bind the arguments
 		for k in axnpby:
@@ -315,8 +315,9 @@ class BaseCommon:
 
 		self.backend.run_kernels(axnpby)
 
-	def _add(self, *args, subdims=None):
-		self._addv(args[::2], args[1::2], subdims=subdims)
+	def _add(self, *args, subdims=None, inscales=(), in_idx=(), outscales=()):
+		self._addv(args[::2], args[1::2], subdims=subdims, 
+			       inscales=inscales, in_idx=in_idx, outscales=outscales)
 
 
 

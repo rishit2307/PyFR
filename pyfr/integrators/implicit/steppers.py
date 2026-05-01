@@ -24,25 +24,26 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 		newtonsolver = self.newtonsolver
 		comm, rank, root = get_comm_rank_root()
 		stage_regidx = newtonsolver.register._stage_regidx
+		newtonsolver = self.newtonsolver
 
-		self.newtonsolver.store_current_solution()
-		self.newtonsolver.init_step(t)
+		newtonsolver.store_current_solution()
+		newtonsolver.init_step(t)
 
 		start = 1 if self.exp_first_stage else 0
 
 		for i, (acoeffs, ccoeff) in enumerate(zip(self.a, self.c), start=start):
 
 			acn = [acoeff*dt for acoeff in acoeffs]
-			rcurr, rold, nnorm = self.newtonsolver.solve(t+ccoeff*dt, acn, i,
+			rcurr, rold, nerr = newtonsolver.solve(t+ccoeff*dt, acn, i,
 							                             self.nacptsteps)
-			if math.isnan(nnorm):
-				self.ntblowup = False
-				for plugin in self.plugins:
-					pname = getattr(plugin, 'name', 'other')
-					if pname == 'writer':
-						print(f'Writing solution')
-						plugin(self)
-						raise RuntimeError('NNorm is nan')
+			# if diverge:
+			# 	self.ntblowup = False
+			# 	for plugin in self.plugins:
+			# 		pname = getattr(plugin, 'name', 'other')
+			# 		if pname == 'writer':
+			# 			print(f'Writing solution')
+			# 			plugin(self)
+			# 			raise RuntimeError('NNorm is nan')
 
 		if self.stepper_has_errest:
 			rerr = newtonsolver.register._err_regidx
@@ -57,7 +58,9 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 			bcoeffs = [bt*dt for bt in self.b]
 			newtonsolver.obtain_solution(bcoeffs)
 
-		return rcurr, rold, (rerr if self.stepper_has_errest else None)
+		regerr = rerr if self.stepper_has_errest else None
+
+		return rcurr, rold, regerr, nerr
 
 class ESDIRK32Stepper(BaseESDIRKStepper):
 	stepper_name = 'esdirk2'

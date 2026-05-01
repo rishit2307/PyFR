@@ -13,7 +13,6 @@ class GMRESSolver(BaseCommon):
 		sect = 'solver-time-integrator'
 		self.niters = cfg.getint(sect, 'gmres-niters', 10)
 		self.ltol = cfg.getfloat(sect, 'gmres-tol', 1e-3)
-		self.max_newtoniters = cfg.getint(sect, 'newton-niters')
 
 		precision = cfg.get('backend', 'precision')
 		if precision == 'double':
@@ -46,17 +45,31 @@ class GMRESSolver(BaseCommon):
 		else:
 			self.prec = None
 
-		# Get utyp values for stepsize
+		# Get system variables
+		gndofs = self._get_gndofs()
 		ndims = self.system.ndims
 		privarmap = self.system.elementscls.privarmap
 		pri_to_con = self.system.elementscls.pri_to_con
+
+		# Get scales
+		hasv = lambda v:cfg.hasopt(sect, f'typ-{v}')
 		getv = lambda v:cfg.getfloat(sect, f'typ-{v}')
-		pvars = [getv(p) for p in privarmap[ndims]]
-		convars = np.array(pri_to_con(pvars, cfg))
-		self.utyp = self.backend.matrix(convars[None].shape, 
-							        convars[None])
-		
-		# Allocate Storage
+
+		check = all([hasv(p) for p in privarmap[ndims]])
+		self._scales, self._invscales = (), ()
+
+		if check:
+
+			pvars = [getv(p) for p in privarmap[ndims]]
+			convars = np.array(pri_to_con(pvars, cfg))
+	
+			# Commit scales to backend
+			self._scales = np.sqrt(gndofs)*convars
+			self._invscales = tuple(1/self._scales)
+			self._scales=  tuple(self._scales)
+			print(self._invscales, self._scales)
+
+		# Allocate Storage for GMRES 
 		self._e1 = np.empty((self.niters+1))
 		self._sn = np.empty((self.niters))
 		self._cs = np.empty((self.niters))
@@ -89,43 +102,41 @@ class GMRESSolver(BaseCommon):
 
 		rcurr_rhs = reg._stage_regidx[currstg]
 
-		# xabs = self._eval_norm(rdu)
+		xabs = self._eval_norm(rdu)
 
-		# if xabs > 1e-4:
-		# 	eps = np.sqrt(1 + self.rcurr_norm)*epsmc/xabs
-		# else:
-		# 	eps = np.sqrt(1 + self.rcurr_norm)*epsmc
+		if xabs > 1e-4:
+			eps = np.sqrt(1 + self.rcurr_norm)*epsmc/xabs
+		else:
+			eps = np.sqrt(1 + self.rcurr_norm)*epsmc
+		# eps = epsmc
+		# utyp = self.utyp
+		# dottyp = self._eval_dot([utyp, rdu], scaling=True)
+		# dotcurr = abs(self._eval_dot([rcurr, rdu]))
 
-		utyp = self.utyp
-		dottyp = self._eval_dot([utyp, rdu], scaling=True)
-		dotcurr = abs(self._eval_dot([rcurr, rdu]))
-
-		rdunrm = self._eval_norm(rdu)**2
-		eps = max(dottyp, dotcurr)*np.sign(dotcurr)*epsmc/rdunrm
+		# rdunrm = self._eval_norm(rdu)**2
+		# eps = max(dottyp, dotcurr)*np.sign(dotcurr)*epsmc/rdunrm
 
 		fac = dtype(a/eps)
 
-		add(0, rmv, 1, rcurr, eps, rdu)
+		_scales, _invscales = self._scales, self._invscales
+
+		add(0.0, rmv, 1.0, rcurr, eps, rdu, 
+	        inscales=_scales, in_idx=(2,))
+
 		rhs(tc, rmv, rmv)
 
-		add(-fac, rmv, fac, rcurr_rhs, 1, rdu)
+		add(-fac, rmv, fac, rcurr_rhs, 1, rdu,
+	        inscales=_scales, in_idx=(2,), 
+			outscales=_invscales)
 
 	def _jacobi_prec(self, rin):
 		if self.prec == None:
 			return rin
 
 		r0, r1, r2 = self.register._jacobi_regidx
-		kerns = self.mul_jac(rin, r0)
+		kerns = self.mul_jac(rin, r0, inscales=self._scales, 
+					         outscales=self._invscales)
 		self.backend.run_kernels(kerns)
-
-		for i in range(1, self.nsmooth):
-			self._eval_mat_vec(r0, r1)
-			self._add(-1, r1, 1, rin)
-
-			kerns = self.mul_jac(r1, r2)
-			self.backend.run_kernels(kerns)
-
-			self._add(1, r0, 1, r2)
 
 		return r0
 
@@ -139,16 +150,22 @@ class GMRESSolver(BaseCommon):
 		H = self._H
 
 		r0 = self._jacobi_prec(rdu)
-		self._add(0, rprec, 1, r0)
+		if self.prec:
+			self._add(0, rprec, 1, r0)
 		self._eval_mat_vec(r0, rmv)
 
 		rji = self.register._gmres_regidx
 
-		dotregs = [rmv] + [rji[j] for j in range(self.iter+1)]
-		H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)
+		for j in range(self.iter+1):
 
-		self._addv([1] + list(-h), [rmv] + 
-			                  [rji[j] for j in range(self.iter+1)])
+			H[j:j+1, self.iter] = h = self._eval_dot([rmv, rji[j]])
+			self._addv([1, -h], [rmv, rji[j]])
+
+		# dotregs = [rmv] + [rji[j] for j in range(self.iter+1)]
+		# H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)
+
+		# self._addv([1] + list(-h), [rmv] + 
+		# 	                  [rji[j] for j in range(self.iter+1)])
 
 		qnorm = self._eval_norm(rmv)
 		self._add(0, rkp1, 1/qnorm, rmv)
@@ -189,13 +206,13 @@ class GMRESSolver(BaseCommon):
 		rmv = reg._aux_regidx
 		# self._eval_mat_vec(rduold, rmv)
 		# self._add(1.0, rdu, -1.0, rmv)
+		self._add(0, rmv, 1, rdu, 
+			      inscales=self._invscales, in_idx=(1,))
 
 		# Right or Left Preconditioning
-		rnorm = self._eval_norm(rdu)
-		self._add(0, rmv, 1/rnorm, rdu)
+		rnorm = self._eval_norm(rmv)
 
-
-		self._add(0, rdu, 1, rmv)
+		self._add(0, rdu, 1/rnorm, rmv)
 
 		beta = rnorm*self._e1
 
@@ -230,10 +247,10 @@ class GMRESSolver(BaseCommon):
 		rp = self.register._prec_regidx[:self.iter+1]
 		regidxs = [rdu] + [r for r in rp]
 
-		self._addv(consts, regidxs)
+		self._addv(consts, regidxs, outscales=self._scales)
 		# self._add(1.0, rdu, 1.0, rduold)
 
-		return rdu
+		return rdu, self.iter
 
 	def _giv_rot(self, k):
 		H, cs, sn = self._H, self._cs, self._sn

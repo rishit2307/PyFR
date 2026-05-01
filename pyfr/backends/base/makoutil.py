@@ -9,17 +9,34 @@ import pyfr.nputil as nputil
 import pyfr.util as util
 
 
+def carray(context, vals):
+    return '{ ' + ', '.join(map(str, vals)) + ' }'
+
 def ndrange(context, *args):
     return util.ndrange(*args)
-
 
 def ilog2range(context, x):
     return [2**i for i in range(x.bit_length() - 2, -1, -1)]
 
-
 def npdtype_to_ctype(context, dtype):
     return nputil.npdtype_to_ctype(dtype)
 
+def axnpby_expr(context, k, idx, start=0, *, nv, in_idx=(),
+                inscale=None, outscale=None, in_name='_in',
+                out_name='_out'):
+    terms = []
+    for l in range(start, nv):
+        coef, val = f'a{l}', f'x{l}[{idx}]'
+        if l in in_idx and inscale:
+            terms.append(f'({coef})*{in_name}[{k}]*({val})')
+        else:
+            terms.append(f'({coef})*({val})')
+
+    if terms:
+        expr = '(' + ' + '.join(terms) + ')'
+        return f'{out_name}[{k}]*({expr})' if outscale else expr
+    else:
+        return '0'
 
 def dot(context, a_, b_=None, /, **kwargs):
     ix, nd = next(iter(kwargs.items()))

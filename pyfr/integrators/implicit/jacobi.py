@@ -96,24 +96,26 @@ class BlockJacobi(BaseCommon):
 											  dtype=self.backend.ixdtype))
 
 	@memoize
-	def mul_jac(self, *rs):
+	def mul_jac(self, *rs, inscales, outscales):
 		jac = self.jacinv
 		backend = self.backend
-		kerns = [backend.kernel('jacmul', *[em[r] for r in rs]+[jac[i]])
+		kerns = [backend.kernel('jacmul', *[em[r] for r in rs]+[jac[i]], 
+						        inscales=inscales, outscales=outscales)
 				 for i, em in enumerate(self.system.ele_banks)]
 
 		return kerns
 
 	@memoize
-	def mul_jac_kmeans(self, *rs):
+	def mul_jac_kmeans(self, *rs, inscales, outscales):
 		jacinv = self.jacinv
 		backend = self.backend
 		emap, cluster_neles = self.emap, self.cluster_neles
 		stidx = self.stidx
 
 		kerns = [backend.kernel('jacmul_clust', *[em[r] for r in rs]+[jacinv[i]] +
-						  		[emap[i]]+[cluster_neles[i], stidx[i]]) for i, em in 
-								enumerate(self.system.ele_banks)]
+						  		[emap[i]]+[cluster_neles[i], stidx[i]],
+								inscales=inscales, outscales=outscales) 
+								for i, em in enumerate(self.system.ele_banks)]
 
 		return kerns
 
@@ -142,38 +144,38 @@ class BlockJacobi(BaseCommon):
 			gneles[etp].append(neles)
 
 		# Evaluate the Jacobians
-		for etype, nupts in sorted(geupts):
-			for eles in range(0, max(gneles[etype]), self.jac_bsize):
-				for col in range(self.system.ncolours[etype]):
-					for npt in range(nupts):
-						for v in range(nvars):		
-							self._add(0, raux, 1, rcurr)
-							self._addid([rcurr, raux], 
-										eles, self.jac_bsize,
-										npt, v, col, h, etype)
+		# for etype, nupts in sorted(geupts):
+		# 	for eles in range(0, max(gneles[etype]), self.jac_bsize):
+		# 		for col in range(self.system.ncolours[etype]):
+		# 			for npt in range(nupts):
+		# 				for v in range(nvars):		
+		# 					self._add(0, raux, 1, rcurr)
+		# 					self._addid([rcurr, raux], 
+		# 								eles, self.jac_bsize,
+		# 								npt, v, col, h, etype)
 
-							rhs(tc, raux, raux)
-							self._add(-a, raux, a, rcurr_rhs)
-							self._init_jac(etype, [raux, rcurr], 
-											eles, npt, v, col, 1, h)
+		# 					rhs(tc, raux, raux)
+		# 					self._add(-a, raux, a, rcurr_rhs)
+		# 					self._init_jac(etype, [raux, rcurr], 
+		# 									eles, npt, v, col, 1, h)
 
-				if etype in self.system.ele_types:
-					eix = self.system.ele_types.index(etype)
-					neles = self.system.ele_shapes[eix][-1]
+		# 		if etype in self.system.ele_types:
+		# 			eix = self.system.ele_types.index(etype)
+		# 			neles = self.system.ele_shapes[eix][-1]
 
-					kerns = [self.backend.kernel('getf3', *[jac[eix], jacinv[eix], P[eix]],
-								                  kmeans=self.clustering)]
+		# 			kerns = [self.backend.kernel('getf3', *[jac[eix], jacinv[eix], P[eix]],
+		# 						                  kmeans=self.clustering)]
 
-					self._bind_kerns(kerns, eles, self.jac_bsize, neles)
-					self.backend.run_kernels(kerns)
+		# 			self._bind_kerns(kerns, eles, self.jac_bsize, neles)
+		# 			self.backend.run_kernels(kerns)
 
-					if self.clustering:
-						jac_fpdtype = self.jac_fpdtype
-						eix = self.system.ele_types.index(etype)
-						jacinv_cpu = self.jacinv[eix].get().astype(np.dtype(jac_fpdtype))
-						if eles < neles:
-							six = min(neles - eles, self.jac_bsize)
-							self._get_kmeans(eles, etype, jacinv_cpu[:six])
+		# 			if self.clustering:
+		# 				jac_fpdtype = self.jac_fpdtype
+		# 				eix = self.system.ele_types.index(etype)
+		# 				jacinv_cpu = self.jacinv[eix].get().astype(np.dtype(jac_fpdtype))
+		# 				if eles < neles:
+		# 					six = min(neles - eles, self.jac_bsize)
+		# 					self._get_kmeans(eles, etype, jacinv_cpu[:six])
 		if self.clustering:
 			self._set_jac_kmeans()
 		self.backend.wait()
@@ -209,20 +211,20 @@ class BlockJacobi(BaseCommon):
 
 		for i, jack in enumerate(self.jacinv_tmp):
 			etp = self.system.ele_types[i]
-			np.save(f'./npy/jac_{etp}_{rank}', np.vstack(jack))
-			jackb = backend.matrix(np.vstack(jack).shape, 
-						  		   np.vstack(jack), dtype=self.jac_fpdtype)
+			# np.save(f'./npy/jac_{etp}_{rank}', np.vstack(jack))
+			# jackb = backend.matrix(np.vstack(jack).shape, 
+			# 			  		   np.vstack(jack), dtype=self.jac_fpdtype)
 
-			# jack = np.load(f'./npy/jac_{etp}_{rank}.npy')
-			# jackb = backend.matrix(jack.shape, 
-			# 			  		   jack, dtype=self.jac_fpdtype)
+			jack = np.load(f'./npy/jac_{etp}_{rank}.npy')
+			jackb = backend.matrix(jack.shape, 
+						  		   jack, dtype=self.jac_fpdtype)
 
-			ci = np.array(self.cluster_neles[i])[None]
-			ei = np.array(self.emap[i])[None]
-			stix = np.cumsum(ci) - ci
-			# ci = np.load(f'./npy/ci_{etp}_{rank}.npy')
-			# stix = np.load(f'./npy/stix_{etp}_{rank}.npy')
-			# ei = np.load(f'./npy/ei_{etp}_{rank}.npy')
+			# ci = np.array(self.cluster_neles[i])[None]
+			# ei = np.array(self.emap[i])[None]
+			# stix = np.cumsum(ci) - ci
+			ci = np.load(f'./npy/ci_{etp}_{rank}.npy')
+			stix = np.load(f'./npy/stix_{etp}_{rank}.npy')
+			ei = np.load(f'./npy/ei_{etp}_{rank}.npy')
 			self.cluster_neles[i] = backend.matrix(ci.shape, 
 										  		ci,dtype=backend.ixdtype)
 			
@@ -232,9 +234,9 @@ class BlockJacobi(BaseCommon):
 			self.jacinv.append(jackb)
 			self.emap[i] = backend.matrix(ei.shape, ei, dtype=backend.ixdtype)
 
-			np.save(f'./npy/ci_{etp}_{rank}', ci)
-			np.save(f'./npy/stix_{etp}_{rank}', stix)
-			np.save(f'./npy/ei_{etp}_{rank}', ei)
+			# np.save(f'./npy/ci_{etp}_{rank}', ci)
+			# np.save(f'./npy/stix_{etp}_{rank}', stix)
+			# np.save(f'./npy/ei_{etp}_{rank}', ei)
 
 		del self.jacinv_tmp
 

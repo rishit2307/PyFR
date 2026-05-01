@@ -6,7 +6,8 @@ from pyfr.backends.cuda.provider import (CUDAKernel, CUDAKernelProvider,
 from pyfr.mpiutil import get_comm_rank_root
 
 class CUDABlasExtKernels(CUDAKernelProvider):
-    def axnpby(self, *arr, subdims=None):
+    def axnpby(self, *arr, subdims=None, inscales, in_idx,
+               outscales):
         if any(arr[0].traits != x.traits for x in arr[1:]):
             raise ValueError('Incompatible matrix types')
 
@@ -17,8 +18,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Render the kernel template
         src = self.backend.lookup.get_template('axnpby').render(
-            subdims=subdims or range(ncola), ncola=ncola, nv=nv
-        )
+            subdims=subdims or range(ncola), ncola=ncola, nv=nv,
+            inscales=inscales, outscales=outscales, in_idx=in_idx)
 
         # Build the kernel
         kern = self._build_kernel('axnpby', src,
@@ -322,10 +323,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
 
         return ReshuffClust(mats=arr)
-
-
     
-    def jacmul_clust(self, *arr):
+    def jacmul_clust(self, *arr, inscales, outscales):
 
         nclust = arr[2].traits[1]
         ncol = np.prod(arr[0].ioshape[:-1])
@@ -356,7 +355,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         src = self.backend.lookup.get_template('jacmulclustv9').render(
         ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
         bm=bm, bn=bn, bk=bk, ldim=ncol**2, jac_fpdtype=jac_fpdtype, K=K, 
-        **tplargs)
+        inscales=inscales, outscales=outscales, **tplargs)
 
         with open("jacmul.cu", 'w') as f:
             print(src, file=f)
@@ -376,7 +375,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return JacMulClustKernel(mats=arr)
 
-    def jacmul(self, *arr):
+    def jacmul(self, *arr, inscales, outscales):
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[0].ioshape[1:]
@@ -394,7 +393,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # Render the kernel template
         src = self.backend.lookup.get_template('jacmul').render(
              ncola=ncola, jac_fpdtype=jac_fpdtype, blkx=blkx, 
-             blky=blky, blksz=blksz, ndof=nrow*ncola)
+             blky=blky, blksz=blksz, ndof=nrow*ncola, 
+             inscales=inscales, outscales=outscales)
 
         # Build the kernel
         kern = self._build_kernel('jacmul', src,

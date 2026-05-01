@@ -29,7 +29,7 @@ class BaseImplicitController(BaseImplicitIntegrator):
 		self._invalidate_caches()
 
 		if rank == root:
-			print(f'time is {self.tcurr}, dt is {dt}, err is {err}', flush=True)
+			print(f'time is {self.tcurr}, dt is {dt}, adapt err is {err}', flush=True)
 
 		# Run any plugins
 		self._run_plugins()
@@ -46,7 +46,7 @@ class BaseImplicitController(BaseImplicitIntegrator):
 			print('Time step rejected')
 
 		if rank == root:
-			print(f'time is {self.tcurr}, dt is {dt}, err is {err}', flush=True)
+			print(f'time is {self.tcurr}, dt is {dt}, adapt err is {err}', flush=True)
 
 		self.newtonsolver._idxcurr = rold
 
@@ -63,20 +63,65 @@ class ImplicitNoneController(BaseImplicitController):
 	def controller_needs_errest(self):
 		return False
 
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		sect = 'solver-time-integrator'
+		f = self.cfg.getfloat
+		# self._newton_div_fac = f(sect, 'newton-div-fac', 0.5)
+		# self._growth = f(sect, 'newton-growth', 1.1)
+		# self.dtmax = self._dt
+		# f = self.cfg.getfloat
+		self._errprev = 1.0
+
+		# PI control values
+		self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
+		self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.42)
+
+		# Estimate of previous error
+		self._errprev = 1.0
+
+		# Step size adjustment factors
+		self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
+		self._maxfac = self.cfg.getfloat(sect, 'max-fact', 1.5)
+		self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.5)
+
+		# Get max time step
+		self.dtmax = self.cfg.getfloat(sect, 'dt-max', 1e3)
+
 	def advance_to(self, t):
 		if t < self.tcurr:
 			raise ValueError('Advance time is in the past')
-		
+
 		while self.tcurr < t:
+
+			# Constants
+			maxf = self._maxfac
+			minf = self._minfac
+			saff = self._saffac
+
+			expa = self._alpha / 2
+			expb = self._beta / 2
+
 			# Decide on the time step
 			dt = max(min(t - self.tcurr, self._dt), self.dtmin)
 
 			# Take the physical step
-			rcurr, rold, rerr = self.step(self.tcurr, dt)
-			
+			rcurr, rold, rerr, nerr = self.step(self.tcurr, dt)
 
-			# We are not adaptive, so accept every step
-			self._accept_step(dt)
+			# Determine time step adjustment factor
+			fac = nerr**-expa * self._errprev**expb
+			fac = min(maxf, max(minf, saff*fac))
+
+			# Compute the size of the next step
+			self._dt = fac*dt
+
+			# Decide if to accept or reject the step
+			if nerr < 1.0:
+				self._errprev = nerr
+				self._accept_step(dt, nerr)
+			else:
+				self._reject_step(dt, rold, nerr)
 
 class ImplicitSoderlindController(BaseImplicitController):
 	controller_name = 'soderlind'

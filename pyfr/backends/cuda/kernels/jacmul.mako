@@ -12,21 +12,24 @@ typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
     #define cast(x) x
 #endif
 
-__global__ void
+__global__  __launch_bounds__(${blkx}*${blky}) void
 jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         fpdtype_t *__restrict__ r0, fpdtype_t *__restrict__ r1,
         jac_fpdtype_t *__restrict__ jac)
 
 {
+    % if inscales:
+        const fpdtype_t _in[] = ${pyfr.carray(inscales)};
+        const fpdtype_t _out[] = ${pyfr.carray(outscales)};
+    % endif
+
+
     ixdtype_t tid = threadIdx.x + blockIdx.x*blockDim.x;
     ixdtype_t tidy = threadIdx.y;
     ixdtype_t jidx;
     ixdtype_t uid, vid, nv;
     ixdtype_t idx, sidx;
     fpdtype_t r1temp = 0.0;
-
-    // Fixed-size array
-    fpdtype_t acc[${ndof // blky + ndof % blky}] = {0.0};
 
     ixdtype_t nl;
 
@@ -53,7 +56,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
 
                     idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                     sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
-                    sA[sidx] = r0[idx];
+                    sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
                 % endfor
 
             % else:
@@ -64,8 +67,8 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
 
                         idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                         sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
-                        sA[sidx] = r0[idx];
-                    
+                        sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
+
                     % else:
                         uid = (tidy + ${j}) / ${ncola};
                         vid = (tidy + ${j}) % ${ncola};
@@ -73,9 +76,9 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                         idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                         sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
 
-                        if (tidy + ${j} < ${ndof})
-                            sA[sidx] = r0[idx];
-                    
+                        if (tidy + ${j} < ${ndof}){
+                            sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
+                        }      
                     % endif
                 % endfor
             % endif
@@ -85,7 +88,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         for (ixdtype_t j=0; j < ${ndof}; j+=blockDim.y){
             r1temp = 0.0;
             if (tidy + j < ${ndof} && tid < ncolb){
-                
+
                 #pragma unroll 20
                 for (ixdtype_t k=${i}; k < nl; ++k){
 
@@ -100,7 +103,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                 vid = (tidy + j) % ${ncola};
 
                 idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
-                r1[idx] += r1temp;
+                r1[idx] += ${'_out[vid]*' if inscales else ''}r1temp;
             }
         }
         __syncthreads();

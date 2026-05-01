@@ -12,7 +12,7 @@ class BaseNonLinearSolver(BaseCommon):
 		self.backend = backend
 
 		sect = 'solver-time-integrator'
-		niters = cfg.getint(sect, 'gmres-niters', 10)
+		self.gmres_maxiters = cfg.getint(sect, 'gmres-niters', 10)
 		self.ntol = cfg.getfloat(sect, 'ntol', 0.01)
 		self._crdown = cfg.getfloat(sect, 'crdown', 0.3)
 
@@ -25,8 +25,19 @@ class BaseNonLinearSolver(BaseCommon):
 		# Max iters
 		self._max_newtoniters = cfg.getint(sect, 'newton-niters')
 
+		# Total budget
+		self._budget = self._max_newtoniters*self.gmres_maxiters
+
+		# Linesearch parameters
+		self._ls = cfg.getbool(sect, 'linesearch', False)
+		if self._ls:
+			self._ls_maxiter = cfg.getint(sect, 'linesearch-max-iter',
+											5)
+			self._ls_fact = cfg.getfloat(sect, 'linesearch-fact', 0.5)
+			self._ls_alpha = cfg.getfloat(sect, 'linesearch-c1', 1e-4)
+
 		self.register = Register(stage_nregs, stepper_nregs,
-						         niters, self.solver_nregs, cfg)
+						         self.gmres_maxiters, self.solver_nregs, cfg)
 		nregs = self.register.nregs
 
 		# Construct the relevant system
@@ -38,6 +49,9 @@ class BaseNonLinearSolver(BaseCommon):
 
 		self._idxcurr = self.register._stepper_regidx[0]
 
+		# Get global ndofs
+		self._gndofs = self._get_gndofs()
+
 	@property
 	def _idxprev(self):
 		rprev = set(self.register._stepper_regidx[:2]) - {self._idxcurr}
@@ -46,6 +60,10 @@ class BaseNonLinearSolver(BaseCommon):
 class NewtonSolver(BaseNonLinearSolver):
 	solver_name = 'newton'
 	solver_nregs = 1
+
+	def _rms_norm(self, reg):
+		norm = self._eval_norm(reg)
+		return norm / np.sqrt(self._gndofs)
 
 	def init_step(self, t):
 		rhs = self.system.rhs
@@ -94,24 +112,75 @@ class NewtonSolver(BaseNonLinearSolver):
 
 		return err if not np.isnan(err) else 100
 
-	def _update_rhs(self, tc, acoeffs, currstg):
-		comm, rank, root = get_comm_rank_root()
-		rhs = self.system.rhs
-		gndofs = self._get_gndofs()
-		rcurr, rprev = self._idxcurr, self._idxprev
+	def _residual(self, tc, acoeffs, currstg, *regs):
 
+		# Get registers
+		rcurr, rout = regs
+		rprev = self._idxprev
 		rcurr_rhs = self.register._stage_regidx[currstg]
-		rdu0 = self.register._gmres_regidx[0]
 
-		rhs(tc, rcurr, rcurr_rhs)
+		# Eval RHS
+		self.system.rhs(tc, rcurr, rcurr_rhs)
 
+		# Eval Residual
 		consts = [0, *acoeffs, 1, -1]
-		regidxs = [rdu0] + self.register._stage_regidx[:currstg+1]
+		regidxs = [rout] + self.register._stage_regidx[:currstg+1]
+
 		regidxs += [rprev, rcurr]
 
 		self._addv(consts, regidxs)
 
-		return self._eval_norm(rdu0)/np.sqrt(gndofs)
+	
+	def _linesearch(self, tc, nnorm_init, acoeffs, currstg,
+				    rcurr, rdu):
+		alpha = self._ls_alpha
+		sold, snew = 1, 1
+		comm, rank, root = get_comm_rank_root()
+
+		def f(s):
+			# Get aux registers
+			rduaux = self.register._aux_regidx
+
+			# Eval rhs
+			self._add(0, rduaux, 1, rcurr, s, rdu)
+			self._residual(tc, acoeffs, currstg, rduaux, rduaux)
+
+			return 0.5*self._rms_norm(rduaux)**2
+
+		# Get function vals
+		f0, df0 = 0.5*nnorm_init**2, -nnorm_init**2
+		fs = f(snew)
+
+		# Return if we have a good stepsize
+		if not math.isnan(fs) and fs < f0 + alpha*snew*df0:
+			return snew
+
+		# Evaluate stepsize
+		sold = snew
+		snew = -df0 / (2*(fs - f0 - df0))
+		fs = f(snew)
+		if rank == root:
+			print(f'snew is {snew} L 165', flush=True)
+
+		while fs > f0 + alpha*snew*df0:
+			fc, fp = f(snew), f(sold)
+
+			# Create the cubic and its derivative
+			roots = [fc, fp, f0, df0]
+			coeffs = np.poly(roots)
+			dcoeffs = np.polyder(coeffs)
+
+			# Find minima
+			stemp = np.amax(np.roots(dcoeffs))
+
+			sold = snew
+			snew = sold * max(min(stemp/sold, 0.5), 0.1)
+
+			fs = f(snew)
+		
+			if rank == root:
+				print(f'snew is {snew} L 184', flush=True)
+		return snew
 
 	def _init_stage(self, acoeffs, currstg):
 		rcurr, rprev = self._idxcurr, self._idxprev
@@ -123,44 +192,54 @@ class NewtonSolver(BaseNonLinearSolver):
 	def solve(self, tc, acoeffs, currstg, nsteps):
 		comm, rank, root = get_comm_rank_root()
 		rcurr, rprev = self._idxcurr, self._idxprev
+		gmres_solver = self.gmres_solver
+
+		gmres_niters = np.inf
 
 		# Begin nonlinear iteration count
 		newton_iter = 0
-		# Set the initial guess
-		# self._init_stage(acoeffs, currstg)
 
-		# Set the RHS
-		nnorm = self._update_rhs(tc, acoeffs, currstg)
-		nnorm_init = nnorm
+		# Get registers
+		rcurr = self._idxcurr
+		rdu0 = self.register._gmres_regidx[0]
+
+		# Evaluate residual
+		self._residual(tc, acoeffs, currstg, 
+				       rcurr, rdu0)
+
+		nnorm_init = self._rms_norm(rdu0)
+		nnorm = nnorm_init
 
 		while nnorm / nnorm_init > self.ntol:
 
+			# Step size
+			alpha = 1
+
 			# Linear Solve
-			rdu = self.gmres_solver.solve(tc, acoeffs[-1], currstg,
-								 			rcurr)
+			rdu, gmres_niters = gmres_solver.solve(tc, acoeffs[-1], currstg,
+								 			       rcurr)
 
-			# Add correction to current solution
-			self._add(1, rcurr, 1, rdu)
+			if self._ls:
+				alpha = self._linesearch(tc, nnorm, acoeffs, 
+							             currstg, rcurr, rdu)
 
-			# Store RHS
-			nnorm = self._update_rhs(tc, acoeffs, currstg)
+			self._add(1, rcurr, alpha, rdu)
+			self._residual(tc, acoeffs, currstg, rcurr, rdu0)
+
+			nnorm = self._rms_norm(rdu0)
 			newton_iter	+= 1
 
-			# Return if maxniters exceeded
-			if newton_iter > self._max_newtoniters-1:
-
-				# Reevaluate the jacobian if niters > maxniters
-				self.gmres_solver._eval_jac(tc, acoeffs[-1], currstg, 
-											              rcurr)
-
-				if self.gmres_solver.clustering:
-					self._cluster_jac = False
+		res = (nnorm/nnorm_init) / self.ntol
+		niters = gmres_niters*newton_iter
+		err = niters / self._budget if math.isfinite(res) else 100
+		# ndiv = math.isnan(nnorm / nnorm_init)
 
 		if rank == root:
 			print(f'stage is {currstg}', flush=True)
-			print(f'nnorm is {nnorm /nnorm_init}, newton is {newton_iter}', flush=True)
+			print(f'nnorm is {nnorm / nnorm_init}, newton is {newton_iter}', flush=True)
 
-		return rcurr, rprev, nnorm
+		return rcurr, rprev, err
+
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):
 		self.stage_nregs = stage_nregs
