@@ -48,7 +48,7 @@ __syncthreads();
 for (ixdtype_t k=zero; k < nb; k+=nby){
     upt = (tidcol + c) / ${ncola};
     vpt = (tidcol + c) % ${ncola};
-    idx = (tidrow + k + r) *${ldimj} + upt*${ldim2} + SOA_IX(eid[blockIdx.x], vpt, ${ncola});
+    idx = (tidrow + k + r) *${ldimj} + upt*${ldim2} + SOA_IX(blockIdx.x + stidx, vpt, ${ncola});
     if (tidcol + c < nrow && tidrow + k + r < nrow){
             mat[idx] = S[(tidrow + k)*nb + tidcol];
     }
@@ -60,7 +60,7 @@ __syncthreads();
 
 <%pyfr:macro name='write_jacinv_kmeans' params='r, c, S, mat'>
 for (ixdtype_t k=zero; k < nb; k+=nby){
-    idx = eid[blockIdx.x]*ldim + (tidrow + k + r)*nrow + (tidcol + c);
+    idx = blockIdx.x*ldim + (tidrow + k + r)*nrow + (tidcol + c);
     if (tidcol + c < nrow && tidrow + k + r < nrow)
         mat[idx] = S[(tidrow + k)*nb + tidcol];
 }
@@ -74,7 +74,7 @@ for (ixdtype_t i=zero; i < nb; i+=nby){
     upt = (tidcol + c) / ${ncola};
     vpt = (tidcol + c) % ${ncola};
 
-    idx = (tidrow + i + r) *${ldimj} + upt*${ldim2} + SOA_IX(eid[blockIdx.x], vpt, ${ncola});
+    idx = (tidrow + i + r) *${ldimj} + upt*${ldim2} + SOA_IX(blockIdx.x +stidx, vpt, ${ncola});
 
 
     if (tidcol + c < nrow && tidrow + i + r < nrow){
@@ -89,7 +89,7 @@ __syncthreads();
 
 <%pyfr:macro name='read_jacinv_kmeans' params='r, c, S, mat'>
 for (ixdtype_t i=zero; i < nb; i+=nby){
-    idx = eid[blockIdx.x]*ldim + (tidrow + i + r)*nrow + (tidcol + c);
+    idx = blockIdx.x*ldim + (tidrow + i + r)*nrow + (tidcol + c);
    
 
     if (tidcol + c < nrow && tidrow + i + r < nrow)

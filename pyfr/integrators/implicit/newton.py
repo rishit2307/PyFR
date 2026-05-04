@@ -7,7 +7,7 @@ from pyfr.mpiutil import get_comm_rank_root, mpi
 
 class BaseNonLinearSolver(BaseCommon):
 	def __init__(self, backend, systemcls, rallocs, mesh, initsoln, cfg, 
-				 stage_nregs, stepper_nregs, tstart, dt):
+				 nstages, stepper_nregs, tstart, dt):
 
 		self.backend = backend
 
@@ -28,6 +28,9 @@ class BaseNonLinearSolver(BaseCommon):
 		# Total budget
 		self._budget = self._max_newtoniters*self.gmres_maxiters
 
+		# Total stages
+		self.nstages = nstages
+
 		# Linesearch parameters
 		self._ls = cfg.getbool(sect, 'linesearch', False)
 		if self._ls:
@@ -36,7 +39,7 @@ class BaseNonLinearSolver(BaseCommon):
 			self._ls_fact = cfg.getfloat(sect, 'linesearch-fact', 0.5)
 			self._ls_alpha = cfg.getfloat(sect, 'linesearch-c1', 1e-4)
 
-		self.register = Register(stage_nregs, stepper_nregs,
+		self.register = Register(nstages, stepper_nregs,
 						         self.gmres_maxiters, self.solver_nregs, cfg)
 		nregs = self.register.nregs
 
@@ -65,12 +68,17 @@ class NewtonSolver(BaseNonLinearSolver):
 		norm = self._eval_norm(reg)
 		return norm / np.sqrt(self._gndofs)
 
-	def init_step(self, t):
+	def init_step(self, t, nsteps=0, nrjctchain=0):
 		rhs = self.system.rhs
 		rcurr, rprev = self._idxcurr, self._idxprev
 		rprev_rhs = self.register._stage_regidx[0]
+		rcurr_rhs = self.register._stage_regidx[-1]
 
-		rhs(t, rprev, rprev_rhs)
+		if nsteps > 0 and nrjctchain == 0:
+			kerns = self._get_copy_kerns(rprev_rhs, rcurr_rhs)
+			self.backend.run_kernels(kerns)
+		else:
+			rhs(t, rprev, rprev_rhs)
 
 	def obtain_solution(self, bcoeffs):
 		rcurr, rprev = self._idxcurr, self._idxprev
@@ -85,32 +93,18 @@ class NewtonSolver(BaseNonLinearSolver):
 		rcurr, rprev = self._idxcurr, self._idxprev
 		self._add(0, rprev, 1, rcurr)
 
-	def _errest(self, rcurr, rerr):
-		comm, rank, root = get_comm_rank_root()
+	def _prev_stage_accum(self, acoeffs, currstg):
 
-		# Get a set of kernels to estimate the integration error
-		ekerns = self._get_reduction_kerns(rcurr, rerr, method='errest_imp',
-										   norm=self._norm)
+		raux = self.register._stageaccum_regidx
+		rprev = self._idxprev
 
-		# Bind the dynamic arguments
-		for kern in ekerns:
-			kern.bind(self._atol, self._rtol)
+		regidxs = [raux] + self.register._stage_regidx[:currstg]
+		regidxs += [rprev]
+		consts = [0, *acoeffs[:-1], 1]
 
-		# Run the kernels
-		self.backend.run_kernels(ekerns, wait=True)
+		self._addv(consts, regidxs)
 
-		# Pseudo L2 norm
-		if self._norm == 'l2':
-			# Reduce locally (element types + field variables)
-			err = np.array([sum(v for k in ekerns for v in k.retval)])
-
-			# Reduce globally (MPI ranks)
-			comm.Allreduce(mpi.IN_PLACE, err, op=mpi.SUM)
-
-			# Normalise
-			err = np.sqrt(float(err) / self._get_gndofs())
-
-		return err if not np.isnan(err) else 100
+		return raux
 
 	def _residual(self, tc, acoeffs, currstg, *regs):
 
@@ -118,19 +112,18 @@ class NewtonSolver(BaseNonLinearSolver):
 		rcurr, rout = regs
 		rprev = self._idxprev
 		rcurr_rhs = self.register._stage_regidx[currstg]
+		rstg = self.register._stageaccum_regidx
 
 		# Eval RHS
 		self.system.rhs(tc, rcurr, rcurr_rhs)
 
 		# Eval Residual
-		consts = [0, *acoeffs, 1, -1]
-		regidxs = [rout] + self.register._stage_regidx[:currstg+1]
-
-		regidxs += [rprev, rcurr]
+		consts = [0, acoeffs[-1], 1, -1]
+		regidxs = [rout, rcurr_rhs]
+		regidxs += [rstg, rcurr]
 
 		self._addv(consts, regidxs)
 
-	
 	def _linesearch(self, tc, nnorm_init, acoeffs, currstg,
 				    rcurr, rdu):
 		alpha = self._ls_alpha
@@ -189,19 +182,21 @@ class NewtonSolver(BaseNonLinearSolver):
 		regidxs=  [rcurr, rprev] + self.register._stage_regidx[:currstg]
 		self._addv(consts, regidxs)
 
-	def solve(self, tc, acoeffs, currstg, nsteps):
+	def solve(self, tc, acoeffs, currstg):
 		comm, rank, root = get_comm_rank_root()
 		rcurr, rprev = self._idxcurr, self._idxprev
 		gmres_solver = self.gmres_solver
 
-		gmres_niters = np.inf
-
 		# Begin nonlinear iteration count
 		newton_iter = 0
+		gmres_niters = 0
 
 		# Get registers
 		rcurr = self._idxcurr
 		rdu0 = self.register._gmres_regidx[0]
+
+		# Accumulate previous stages
+		self._prev_stage_accum(acoeffs, currstg)
 
 		# Evaluate residual
 		self._residual(tc, acoeffs, currstg, 
@@ -216,7 +211,7 @@ class NewtonSolver(BaseNonLinearSolver):
 			alpha = 1
 
 			# Linear Solve
-			rdu, gmres_niters = gmres_solver.solve(tc, acoeffs[-1], currstg,
+			rdu, iters = gmres_solver.solve(tc, acoeffs[-1], currstg,
 								 			       rcurr)
 
 			if self._ls:
@@ -228,11 +223,10 @@ class NewtonSolver(BaseNonLinearSolver):
 
 			nnorm = self._rms_norm(rdu0)
 			newton_iter	+= 1
+			gmres_niters += iters
 
 		res = (nnorm/nnorm_init) / self.ntol
-		niters = gmres_niters*newton_iter
-		err = niters / self._budget if math.isfinite(res) else 100
-		# ndiv = math.isnan(nnorm / nnorm_init)
+		err = gmres_niters / self._budget if math.isfinite(res) else res
 
 		if rank == root:
 			print(f'stage is {currstg}', flush=True)
@@ -250,12 +244,11 @@ class Register:
 		self.prec =  cfg.getbool(sect, 'precondition', False)
 
 		self.aux_nregs = 1
-		self.jacobi_nregs = 3
 		self.niters = niters
 		self.gmres_nregs = self.niters + 1
 		self.nregs = (self.solver_nregs + self.stage_nregs + 
 					  self.stepper_nregs + self.gmres_nregs
-					  + self.aux_nregs + self.jacobi_nregs)
+					  + self.aux_nregs)
 		
 		if self.prec:
 			self.nregs += self.gmres_nregs
@@ -277,7 +270,7 @@ class Register:
 		return self._regidx[ix : ix + self.stage_nregs]
 
 	@property
-	def _duold_regidx(self):
+	def _stageaccum_regidx(self):
 		return (self.stepper_nregs + self.stage_nregs 
 		  		+ self.gmres_nregs)
 
@@ -288,14 +281,7 @@ class Register:
 	@property
 	def _aux_regidx(self):
 		return (self.stepper_nregs + self.stage_nregs
-		  		+ self.gmres_nregs + self.solver_nregs
-				+ self.jacobi_nregs)
-
-	@property
-	def _jacobi_regidx(self):
-		ix =  (self.stepper_nregs + self.stage_nregs
 		  		+ self.gmres_nregs + self.solver_nregs)
-		return self._regidx[ix : ix + self.jacobi_nregs]
 
 	@property
 	def _prec_regidx(self):

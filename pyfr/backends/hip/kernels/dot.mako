@@ -3,46 +3,63 @@
 
 __global__ __launch_bounds__(${blocksz}) void
 dot(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
-    fpdtype_t *__restrict__ reduced,
-    fpdtype_t *__restrict__ r1, fpdtype_t *__restrict__ r2)
-
+    fpdtype_t* __restrict__ reduced,
+    const fpdtype_t *__restrict__ r0,
+    ${', '.join(f'const fpdtype_t* __restrict__ r{i}'
+                   for i in range(1, nv))})
 
 {
     int tid = threadIdx.x;
     ixdtype_t i = ixdtype_t(blockIdx.x)*blockDim.x + tid;
 
-    __shared__ fpdtype_t sdata[32];
-    fpdtype_t r, acc = 0;
+    __shared__ fpdtype_t sdata[${nv-1}][32];
+    fpdtype_t acc[${nv-1}] = {0.0};
+    fpdtype_t r = 0;
 
     if (i < ncolb)
     {
         for (ixdtype_t j = 0; j < nrow; j++)
         {
             ixdtype_t idx = j*ldim + SOA_IX(i, blockIdx.y, gridDim.y);
-            r = r1[idx]*r2[idx];
-            acc += r;
+            r = r0[idx];
+            % for i in range(1, nv):
+                acc[${i-1}] += r*${f'r{i}[idx]'};
+            % endfor
         }
     }
 
-     // Reduce within each warp
-    for (int off = warpSize / 2; off > 0; off >>= 1)
-        acc += __shfl_down(acc, off);
-
+    // Reduce within each warp
+    for (int off = warpSize / 2; off > 0; off >>= 1){
+        % for i in range(1, nv):
+            acc[${i-1}] += __shfl_down(acc[${i-1}], off);
+        % endfor
+    }
     // Have the first thread in each warp write out to shared memory
-    if (tid % warpSize == 0)
-        sdata[tid / warpSize] = acc;
+    if (tid % warpSize == 0){
+        % for i in range(1, nv):
+            sdata[${i-1}][tid / warpSize] = acc[${i-1}];
+        % endfor
+        }
 
     __syncthreads();
 
     // Have the first warp perform the final reduction
     if (tid / warpSize == 0)
     {
-        acc = (tid < blockDim.x / warpSize) ? sdata[tid] : 0;
+        % for i in range(1, nv):
+            acc[${i-1}] = (tid < blockDim.x / warpSize) ? sdata[${i-1}][tid] : 0;
+        % endfor
 
-        for (int off = warpSize / 2; off > 0; off >>= 1)
-            acc += __shfl_down(acc, off);
+        for (int off = warpSize / 2; off > 0; off >>= 1){
+            % for i in range(1, nv):
+                acc[${i-1}] += __shfl_down(acc[${i-1}], off);
+            % endfor
+        }
         
-        if (tid == 0)
-            reduced[ixdtype_t(blockIdx.y)*gridDim.x + blockIdx.x] = acc;
+        if (tid == 0){
+            % for i in range(1, nv):
+                reduced[ixdtype_t(blockIdx.y)*gridDim.x*${nv-1} + blockIdx.x*${nv-1} + ${i-1}] = acc[${i-1}];
+            % endfor
+        }
     }
 }

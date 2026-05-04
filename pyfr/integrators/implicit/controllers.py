@@ -1,3 +1,4 @@
+import math
 import numpy as np
 
 from pyfr.integrators.implicit.base import BaseImplicitIntegrator
@@ -16,7 +17,6 @@ class BaseImplicitController(BaseImplicitIntegrator):
 		# Fire off any event handlers if not restarting
 		if not self.isrestart:
 			self._run_plugins()
-
 
 	def _accept_step(self, dt, err=None):
 		comm, rank, root = get_comm_rank_root()
@@ -57,6 +57,42 @@ class BaseImplicitController(BaseImplicitIntegrator):
 
 class ImplicitNoneController(BaseImplicitController):
 	controller_name = 'none'
+	controller_has_variable_dt = True
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		sect = 'solver-time-integrator'
+		f = self.cfg.getfloat
+		self._newton_div_fac = f(sect, 'newton-div-fac', 0.4)
+		self._growth_fac = f(sect, 'newton-growth-fac', 1.05)
+		self.dtmax = f(sect, 'dt')
+
+	@property
+	def controller_needs_errest(self):
+		return False
+
+	def advance_to(self, t):
+		if t < self.tcurr:
+			raise ValueError('Advance time is in the past')
+
+		while self.tcurr < t:
+			dt = max(min(t - self.tcurr, self._dt), self.dtmin)
+
+			# Take the physical step
+			rcurr, rold, rerr, nerr = self.step(self.tcurr, dt)
+
+			# Check for newton nans
+			if not math.isnan(nerr):
+				self._accept_step(dt, nerr)
+				self._dt = min(self._growth_fac*self._dt, self.dtmax)
+
+			else:
+				self._reject_step(dt, rold, nerr)
+				self._dt *= self._newton_div_fac
+
+class ImplicitNewtonController(BaseImplicitController):
+	controller_name = 'niters'
 	controller_has_variable_dt = False
 
 	@property
@@ -67,24 +103,18 @@ class ImplicitNoneController(BaseImplicitController):
 		super().__init__(*args, **kwargs)
 
 		sect = 'solver-time-integrator'
-		f = self.cfg.getfloat
-		# self._newton_div_fac = f(sect, 'newton-div-fac', 0.5)
-		# self._growth = f(sect, 'newton-growth', 1.1)
-		# self.dtmax = self._dt
-		# f = self.cfg.getfloat
-		self._errprev = 1.0
 
 		# PI control values
-		self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.58)
-		self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.42)
+		self._alpha = self.cfg.getfloat(sect, 'pi-alpha', 0.7)
+		self._beta = self.cfg.getfloat(sect, 'pi-beta', 0.4)
 
 		# Estimate of previous error
 		self._errprev = 1.0
 
 		# Step size adjustment factors
 		self._saffac = self.cfg.getfloat(sect, 'safety-fact', 0.8)
-		self._maxfac = self.cfg.getfloat(sect, 'max-fact', 1.5)
-		self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.5)
+		self._maxfac = self.cfg.getfloat(sect, 'max-fact', 2.5)
+		self._minfac = self.cfg.getfloat(sect, 'min-fact', 0.1)
 
 		# Get max time step
 		self.dtmax = self.cfg.getfloat(sect, 'dt-max', 1e3)
@@ -108,6 +138,8 @@ class ImplicitNoneController(BaseImplicitController):
 
 			# Take the physical step
 			rcurr, rold, rerr, nerr = self.step(self.tcurr, dt)
+			nerr = 100 if not math.isfinite(nerr) else nerr
+			self._errprev = nerr if self.nsteps == 0 else self._errprev
 
 			# Determine time step adjustment factor
 			fac = nerr**-expa * self._errprev**expb

@@ -32,5 +32,3 @@ sidx = tidcolsubB*${bn//K} + tidrowsubB;
 % endfor
 
 </%pyfr:macro>
-
-

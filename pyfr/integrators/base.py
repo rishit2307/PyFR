@@ -222,9 +222,9 @@ class BaseCommon:
 
 		return kerns
 
-	def _eval_dot(self, rs, scaling=False):
+	def _eval_dot(self, rs):
 		comm, rank, root = get_comm_rank_root()
-		kerns = self._get_dot_kerns(*rs, scaling=scaling)
+		kerns = self._get_dot_kerns(*rs)
 
 		self.backend.run_kernels(kerns, wait=True)
 		result = sum([k.retval for k in kerns])
@@ -244,14 +244,13 @@ class BaseCommon:
 		return kerns
 	
 	@memoize
-	def _get_dot_kerns(self, *rs, scaling=False):
+	def _get_dot_kerns(self, *rs):
 
 		kerns = []
 		for em in self.system.ele_banks:
-			regs = [rs[0], em[rs[1]]] if scaling else [em[r] for r in rs]
+			regs = [em[r] for r in rs]
 
-			kerns.append(self.backend.kernel('dot', *regs,
-									         scaling=scaling))
+			kerns.append(self.backend.kernel('dot', *regs))
 
 		return kerns
 
@@ -265,7 +264,14 @@ class BaseCommon:
 				*[em[r] for r in rs] + [eid])]
 
 		return kerns
+	
+	@memoize
+	def _get_copy_kerns(self, rdst, rsrc):
 
+		kerns = [self.backend.kernel('copy', em[rdst], em[rsrc])
+		         for em in self.system.ele_banks]
+		
+		return kerns
 
 	@memoize
 	def _get_jacmul_kernels(self, jac, *rs):

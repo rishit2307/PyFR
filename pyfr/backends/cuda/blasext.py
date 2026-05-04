@@ -130,7 +130,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return ReductionKernel(mats=regs)
 
-    def dot(self, *rs, scaling=False):
+    def dot(self, *rs):
         cuda = self.backend.cuda
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = rs[1].traits[1:]
@@ -151,8 +151,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         tplargs = dict(blocksz=block[0])
 
         # Get the kernel template
-        src = self.backend.lookup.get_template('dot').render(scaling=scaling,
-                                                             nv = nv,
+        src = self.backend.lookup.get_template('dot').render(nv = nv,
                                                              **tplargs)
         regs = list(rs)
         argt = [ixdtype]*3 + [np.uintp]*(nv+1)
@@ -171,7 +170,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
                 return reduced
 
-            def bind(self, *facs):
+            def bind(self):
                 pass
 
             def run(self, stream):

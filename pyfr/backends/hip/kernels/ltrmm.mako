@@ -11,8 +11,6 @@ for (ixdtype_t i=zero; i < nb; i+=nby){
     for (ixdtype_t j=zero; j< tidrow; j++)
         Q[(tidrow + i)*nb + tidcol] += L[(tidrow+i)*nb + i + j]*P[(j+i)*nb + tidcol];
 
-    
-    
     for (ixdtype_t j=nby+i; j< nb; j += nby){
         for (ixdtype_t k=zero; k < nby; k++){
             idx1 = (tidrow + j)*nb + k + i;
@@ -31,7 +29,6 @@ for (ixdtype_t i=zero; i < nb; i+=nby){
 for (ixdtype_t i=zero; i < nb; i+=nby){
      Q[(tidrow + i)*nb + tidcol] = P[(tidrow+i)*nb + tidcol];
 }
-   
 
 __syncthreads();
 
@@ -42,7 +39,7 @@ for (ixdtype_t i=zero; i < nb; i+=nby){
             idx1 = (tidrow + j)*nb + k + i;
             if (tidcol < k + i)
                 Q[(tidrow + j)*nb + tidcol] += L[(k+i)*nb + tidcol]*P[idx1];
-            
+
         }
     }
 }

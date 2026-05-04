@@ -39,7 +39,7 @@ class WriterPlugin(PostactionMixin, RegionMixin, BaseSolnPlugin):
             self.tout_last -= self.dt_out
 
     def __call__(self, intg, override=False):
-        if intg.tcurr - self.tout_last < self.dt_out - self.tol and not override and intg.ntblowup:
+        if intg.tcurr - self.tout_last < self.dt_out - self.tol and not override:
             return
 
         comm, rank, root = get_comm_rank_root()

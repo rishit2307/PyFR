@@ -1,5 +1,5 @@
 import numpy as np
-
+import time
 from pyfr.integrators.base import BaseCommon
 from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
@@ -67,7 +67,6 @@ class GMRESSolver(BaseCommon):
 			self._scales = np.sqrt(gndofs)*convars
 			self._invscales = tuple(1/self._scales)
 			self._scales=  tuple(self._scales)
-			print(self._invscales, self._scales)
 
 		# Allocate Storage for GMRES 
 		self._e1 = np.empty((self.niters+1))
@@ -98,29 +97,15 @@ class GMRESSolver(BaseCommon):
 		currstg = self.currstg
 		dtype = self.fpdtype
 		rcurr = self._rcurr
-		comm, rank, root = get_comm_rank_root()
 
 		rcurr_rhs = reg._stage_regidx[currstg]
-
-		xabs = self._eval_norm(rdu)
-
-		if xabs > 1e-4:
-			eps = np.sqrt(1 + self.rcurr_norm)*epsmc/xabs
-		else:
-			eps = np.sqrt(1 + self.rcurr_norm)*epsmc
-		# eps = epsmc
-		# utyp = self.utyp
-		# dottyp = self._eval_dot([utyp, rdu], scaling=True)
-		# dotcurr = abs(self._eval_dot([rcurr, rdu]))
-
-		# rdunrm = self._eval_norm(rdu)**2
-		# eps = max(dottyp, dotcurr)*np.sign(dotcurr)*epsmc/rdunrm
+		eps = np.sqrt(1 + self.rcurr_norm)*epsmc
 
 		fac = dtype(a/eps)
 
 		_scales, _invscales = self._scales, self._invscales
 
-		add(0.0, rmv, 1.0, rcurr, eps, rdu, 
+		add(0, rmv, 1, rcurr, eps, rdu, 
 	        inscales=_scales, in_idx=(2,))
 
 		rhs(tc, rmv, rmv)
@@ -133,39 +118,34 @@ class GMRESSolver(BaseCommon):
 		if self.prec == None:
 			return rin
 
-		r0, r1, r2 = self.register._jacobi_regidx
-		kerns = self.mul_jac(rin, r0, inscales=self._scales, 
+		rout = self.register._prec_regidx[self.iter]
+		kerns = self.mul_jac(rin, rout, inscales=self._scales, 
 					         outscales=self._invscales)
 		self.backend.run_kernels(kerns)
 
-		return r0
+		return rout
 
 	def _arnoldi(self):
-		comm, rank, root = get_comm_rank_root()
-
 		rdu = self.register._gmres_regidx[self.iter]
 		rmv = self.register._aux_regidx
 		rkp1 = self.register._gmres_regidx[self.iter+1]
-		rprec = self.register._prec_regidx[self.iter]
 		H = self._H
 
 		r0 = self._jacobi_prec(rdu)
-		if self.prec:
-			self._add(0, rprec, 1, r0)
 		self._eval_mat_vec(r0, rmv)
 
 		rji = self.register._gmres_regidx
 
-		for j in range(self.iter+1):
+		# for j in range(self.iter+1):
 
-			H[j:j+1, self.iter] = h = self._eval_dot([rmv, rji[j]])
-			self._addv([1, -h], [rmv, rji[j]])
+		# 	H[j:j+1, self.iter] = h = self._eval_dot([rmv, rji[j]])
+		# 	self._addv([1, -h], [rmv, rji[j]])
 
-		# dotregs = [rmv] + [rji[j] for j in range(self.iter+1)]
-		# H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)
+		dotregs = [rmv] + [rji[j] for j in range(self.iter+1)]
+		H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)
 
-		# self._addv([1] + list(-h), [rmv] + 
-		# 	                  [rji[j] for j in range(self.iter+1)])
+		self._addv([1] + list(-h), [rmv] + 
+			       [rji[j] for j in range(self.iter+1)])
 
 		qnorm = self._eval_norm(rmv)
 		self._add(0, rkp1, 1/qnorm, rmv)
@@ -201,13 +181,12 @@ class GMRESSolver(BaseCommon):
 				if rank == root:
 					print(f'jacobian precision updated', flush=True)
 
-
-		rdu, rduold = reg._gmres_regidx[self.iter], reg._duold_regidx
+		rdu  = reg._gmres_regidx[self.iter]
 		rmv = reg._aux_regidx
-		# self._eval_mat_vec(rduold, rmv)
-		# self._add(1.0, rdu, -1.0, rmv)
+
+
 		self._add(0, rmv, 1, rdu, 
-			      inscales=self._invscales, in_idx=(1,))
+				inscales=self._invscales, in_idx=(1,))
 
 		# Right or Left Preconditioning
 		rnorm = self._eval_norm(rmv)
@@ -232,12 +211,12 @@ class GMRESSolver(BaseCommon):
 
 			if err < self.ltol:
 				if rank == root:
-					print(f'GMRES converged in {k} iterations, error is {err}')
+					print(f'GMRES converged in {k} iterations, error is {err}', flush=True)
 				break
 
 		if k == self.niters-1 and err > self.ltol:
 			if rank == root:
-				print(f'GMRES did not converge in {self.niters} iterations, error is {err}')
+				print(f'GMRES did not converge in {self.niters} iterations, error is {err}', flush=True)
 
 		# Solve the least squares system
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
@@ -248,7 +227,6 @@ class GMRESSolver(BaseCommon):
 		regidxs = [rdu] + [r for r in rp]
 
 		self._addv(consts, regidxs, outscales=self._scales)
-		# self._add(1.0, rdu, 1.0, rduold)
 
 		return rdu, self.iter
 
@@ -265,7 +243,7 @@ class GMRESSolver(BaseCommon):
 		H[k+1, k] = 0
 
 	def giv(self, v1, v2):
-		tt = np.sqrt(v1**2 + v2**2)
+		tt = np.hypot(v1, v2)
 		cs = v1/tt
 		sn = v2/tt
 

@@ -22,20 +22,17 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 
 	def step(self, t, dt):
 		newtonsolver = self.newtonsolver
-		comm, rank, root = get_comm_rank_root()
 		stage_regidx = newtonsolver.register._stage_regidx
 		newtonsolver = self.newtonsolver
 
 		newtonsolver.store_current_solution()
-		newtonsolver.init_step(t)
+		newtonsolver.init_step(t, nsteps=self.nsteps,
+						       nrjctchain=self.nrjctchain)
 
-		start = 1 if self.exp_first_stage else 0
+		for i, (acoeffs, ccoeff) in enumerate(zip(self.a, self.c), start=1):
 
-		for i, (acoeffs, ccoeff) in enumerate(zip(self.a, self.c), start=start):
-
-			acn = [acoeff*dt for acoeff in acoeffs]
-			rcurr, rold, nerr = newtonsolver.solve(t+ccoeff*dt, acn, i,
-							                             self.nacptsteps)
+			ac = [acoeff*dt for acoeff in acoeffs]
+			rcurr, rold, nerr = newtonsolver.solve(t+ccoeff*dt, ac, i)
 			# if diverge:
 			# 	self.ntblowup = False
 			# 	for plugin in self.plugins:
@@ -54,13 +51,20 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 			regidxs = [rerr] + stage_regidx[:len(self.bhat) + 1]
 			self._addv(consts, regidxs)
 
-		if not self.fsal:
-			bcoeffs = [bt*dt for bt in self.b]
-			newtonsolver.obtain_solution(bcoeffs)
-
 		regerr = rerr if self.stepper_has_errest else None
 
 		return rcurr, rold, regerr, nerr
+
+class TrapeziumStepper(BaseESDIRKStepper):
+	stepper_name = 'trapezium'
+	stepper_order = 2
+	nstages = 2
+	fsal = True
+	exp_first_stage = True
+
+	a = [[1/2, 1/2]]
+	c = [1]
+
 
 class ESDIRK32Stepper(BaseESDIRKStepper):
 	stepper_name = 'esdirk2'
@@ -79,17 +83,6 @@ class ESDIRK32Stepper(BaseESDIRKStepper):
 	c = [2*gamma, 1]
 
 	bhat = [beta, beta, delta]
-
-
-class TrapeziumStepper(BaseESDIRKStepper):
-	stepper_name = 'trapezium'
-	stepper_order = 2
-	nstages = 2
-	fsal = True
-	exp_first_stage = True
-
-	a = [[1/2, 1/2]]
-	c = [1]
 
 
 class ESDIRK3Stepper(BaseESDIRKStepper):
@@ -129,20 +122,3 @@ class ESDIRK4Stepper(BaseESDIRKStepper):
 	bhat = [4586570599/29645900160, 0, 178811875/945068544,
 			814220225/1159782912, -3700637/11593932, 
 			61727/225920]
-
-class SDIRK33Stepper(BaseESDIRKStepper):
-	stepper_name = 'sdirk33'
-	nstages = 3
-	exp_first_stage = False
-	fsal = True
-
-	_at = math.atan(0.5**1.5) / 3
-	_al = (3**0.5*math.sin(_at) - math.cos(_at)) / 2**0.5 + 1
-
-	a = [
-		[_al],
-		[0.5*(1 - _al), _al],
-		[(4 - 1.5*_al)*_al - 0.25, (1.5*_al - 5)*_al + 1.25, _al]
-	]
-
-	c = [sum(acoeff) for acoeff in a]

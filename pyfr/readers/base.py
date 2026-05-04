@@ -105,35 +105,6 @@ class NodalMeshAssembler:
         nodes = np.sort(foeles[:, fnmap]).reshape(len(con), -1)
 
         return con, nodes
-    
-    def color_mesh(self, con):
-        
-        l, r = zip(*con)
-
-        nbele = defaultdict(list)
-        elec = dict()
-
-        etp, lele, *info = zip(*l)
-        etp, rele, *info = zip(*r)
-
-        neles = len(set(lele).union(set(rele)))
-
-        for el, er in zip(l, r):
-            nbele[el[1]].append(er[1])
-
-        for er, el in zip(r, l):
-            nbele[er[1]].append(el[1])
-
-        g1 = [[] for i in range(neles)]
-
-        for k in nbele.keys():
-            for j in nbele[k]:
-                if not j in g1[k]:
-                    g1 = addEdge(g1, k, j)
-
-        celes = greedyColoring(g1, neles)
-
-        return celes
 
     def _extract_faces(self, foeles):
         fofaces = defaultdict(list)
