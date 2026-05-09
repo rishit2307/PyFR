@@ -7,12 +7,19 @@
 __global__ void
 getf3(ixdtype_t nrow, ixdtype_t ldim, 
       fpdtype_t *__restrict__ jac, fpdtype_t *__restrict__ jacinv,  
-      ixdtype_t *__restrict__ P, ixdtype_t stidx, ixdtype_t bsize, 
-      ixdtype_t neles)
+      ixdtype_t *__restrict__ P, ixdtype_t *__restrict__ eid, 
+      ixdtype_t stidx, ixdtype_t neles, ixdtype_t bsize)
+
 
 
 {
-    if (blockIdx.x < bsize && (blockIdx.x + stidx) < neles){
+    ixdtype_t celes;
+    if (blockIdx.x < ${ecount}){
+        celes = eid[blockIdx.x];
+    }
+
+    if (blockIdx.x < ${ecount}){
+        if (celes >= stidx && celes < min(stidx + bsize, neles)){
     ixdtype_t idx, idx1, idx0, idx2;
     const ixdtype_t nb = 32;
     const ixdtype_t nby = ${blksz}/nb;
@@ -40,19 +47,16 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
     ixdtype_t tidcol = threadIdx.x % nb;
     fpdtype_t temp;
     fpdtype_t tempinv;
-    ixdtype_t srow;
-    ixdtype_t drow;
-    ixdtype_t rloc;
 
 
     for (ixdtype_t i=zero; i < nrow; i+=nby){
         for (ixdtype_t j=i+1; j < nrow; j+=nb){
             % if kmeans:
-                idx = blockIdx.x*ldim + (tidrow + i)*nrow + (tidcol + j);
+                idx = (celes - stidx)*ldim + (tidrow + i)*nrow + (tidcol + j);
             % else:
                 upt = (tidcol + j) / ${ncola};
                 vpt = (tidcol + j) % ${ncola};
-                idx = (tidrow + i)*${ldimj} + upt*${ldim2} + SOA_IX(blockIdx.x + stidx, vpt, ${ncola});
+                idx = (tidrow + i)*${ldimj} + upt*${ldim2} + SOA_IX(celes, vpt, ${ncola});
             % endif
 
             if (tidrow + i < nrow && tidcol + j < nrow){
@@ -257,14 +261,14 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
         __syncthreads();
         for (ixdtype_t j=min(ix, i); j < nrow; j+=blockDim.x){
             % if kmeans:
-                idx = blockIdx.x*ldim + (tid + j)*nrow + i;
-                idx1 = blockIdx.x*ldim + (tid + j)*nrow + ix;
+                idx = (celes - stidx)*ldim + (tid + j)*nrow + i;
+                idx1 = (celes - stidx)*ldim + (tid + j)*nrow + ix;
 
             % else:
                 upt = i / ${ncola};
                 vpt = i % ${ncola};
-                idx = (tid+j)*${ldimj} + upt*${ldim2} + SOA_IX(blockIdx.x + stidx, vpt, ${ncola});
-                idx1 = (tid+j)*${ldimj} + (ix / ${ncola})*${ldim2} + SOA_IX(blockIdx.x + stidx, ix % ${ncola}, ${ncola});
+                idx = (tid+j)*${ldimj} + upt*${ldim2} + SOA_IX(celes, vpt, ${ncola});
+                idx1 = (tid+j)*${ldimj} + (ix / ${ncola})*${ldim2} + SOA_IX(celes, ix % ${ncola}, ${ncola});
             % endif
             if (tid + j < nrow){
                 tempinv = jacinv[idx];
@@ -291,11 +295,11 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
                 ${pyfr.expand('gemm', 'sC', 'sD', 'sE')};
                 for (ixdtype_t l=zero; l < min(nb, i); l+=nby){
                     % if kmeans:
-                        idx = blockIdx.x*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
+                        idx = (celes - stidx)*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
                     % else:
                         upt = (tidcol + k) / ${ncola};
                         vpt = (tidcol + k) % ${ncola};
-                        idx = (tidrow + l + max(i-nb, zero))*${ldimj} + upt*${ldim2} + SOA_IX(blockIdx.x + stidx, vpt, ${ncola});
+                        idx = (tidrow + l + max(i-nb, zero))*${ldimj} + upt*${ldim2} + SOA_IX(celes, vpt, ${ncola});
                     % endif
                     if (tidrow + l + max(i-nb, zero) < i && tidcol + k < nrow){
                         jacinv[idx] -= sE[(tidrow + l)*nb + tidcol];
@@ -316,17 +320,18 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
 
             for (ixdtype_t k=zero; k < min(nb, i); k+=nby){
                 % if kmeans:
-                    idx = blockIdx.x*ldim + (tidrow + k + max(i-nb, zero))*nrow + (tidcol + j);
+                    idx = (celes - stidx)*ldim + (tidrow + k + max(i-nb, zero))*nrow + (tidcol + j);
                 % else:
                     upt = (tidcol + j) / ${ncola};
                     vpt = (tidcol + j) % ${ncola};
-                    idx = (tidrow + k + max(i-nb, zero))*${ldimj} + upt*${ldim2} + SOA_IX(blockIdx.x + stidx, vpt, ${ncola});
+                    idx = (tidrow + k + max(i-nb, zero))*${ldimj} + upt*${ldim2} + SOA_IX(celes, vpt, ${ncola});
                 % endif
                 if (tidcol + j < nrow && tidrow + k + max(i-nb, zero) < i)
                     jacinv[idx] = sE[(tidrow + k)*nb + tidcol];
             }
             __syncthreads();
         }
+    }
     }
     }
 }

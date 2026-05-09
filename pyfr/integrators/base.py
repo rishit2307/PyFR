@@ -3,9 +3,8 @@ import itertools as it
 import re
 import sys
 import time
-import nvtx
+
 import numpy as np
-np.set_printoptions(precision=16, suppress=False)
 
 from pyfr.inifile import Inifile
 from pyfr.mpiutil import get_comm_rank_root, mpi
@@ -283,16 +282,16 @@ class BaseCommon:
 
 	def _addid(self, rs, stid, bsz, npt, vi, col, h, etype):
 
-		if etype not in self.system.ele_types:
+		celes = self.system.celes
+		if (etype, col) not in celes.keys():
 			return
-		eix= self.system.ele_types.index(etype)
-		neles = self.system.ele_shapes[eix][-1]
-		eid = self.system.celes[etype]
+		eid = celes[etype, col]
+
 		addidx = self._get_addidx_kerns(eid, etype, *rs)
 
 		for k in addidx:
-			k.bind(npt, vi, col, stid, bsz, neles, h)
-		
+			k.bind(npt, vi, col, stid, bsz, h)
+
 		self.backend.run_kernels(addidx)
 
 	def _eval_norm(self, rs):
@@ -324,6 +323,5 @@ class BaseCommon:
 	def _add(self, *args, subdims=None, inscales=(), in_idx=(), outscales=()):
 		self._addv(args[::2], args[1::2], subdims=subdims, 
 			       inscales=inscales, in_idx=in_idx, outscales=outscales)
-
 
 

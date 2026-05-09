@@ -183,21 +183,23 @@ class CUDABlasExtKernels(CUDAKernelProvider):
     def addidx(self, *arr, subdims=None):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[0].ioshape[1:]
+        ecount = arr[-1].ioshape[-1]
 
         block = (128, 1, 1)
-        grid = get_grid_for_block(block, ncolb)
+        grid = get_grid_for_block(block, ecount)
 
         ixdtype = self.backend.ixdtype
         fpdtype = self.backend.fpdtype
 
         # Render the kernel template
         src = self.backend.lookup.get_template('addidx').render(
-            ncola=ncola, subdims=subdims or range(ncola))
+            ncola=ncola, subdims=subdims or range(ncola), 
+            ecount=ecount)
 
         # Build the kernel
         kern = self._build_kernel('addidx', src,
-                                  [ixdtype]*2 + [np.uintp]*3 + [ixdtype]*6
-                                  + [fpdtype])
+                                  [ixdtype]*2 + [np.uintp]*3
+                                  + [ixdtype]*5 + [fpdtype])
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -214,15 +216,15 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
     def jacinit(self, *arr):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
-        ncola = arr[0].ioshape[1]
-        ncolb = arr[2].ioshape[0]
+        ncola, ncolb = arr[0].ioshape[1:]
+        ecount = arr[-1].ioshape[-1]
         ldimj = np.prod(arr[0].ioshape[:2])
 
         # nrowj, ncolj, ldimj, fpdtypej = arr[1].traits[1:]
         # ldimj = arr[2].ioshape[0]
 
         block = (128, 1, 1)
-        grid = get_grid_for_block(block, ncolb, ldimj)
+        grid = get_grid_for_block(block, ecount, ldimj)
         ldimj  = ldimj**2
 
 
@@ -231,12 +233,12 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         # Render the kernel template
         src = self.backend.lookup.get_template('jacinit').render(
-            ncola=ncola)
+            ncola=ncola, ecount=ecount)
 
         # Build the kernel
         kern = self._build_kernel('jacinit', src,
                [ixdtype]*4 +[np.uintp]*4 + 
-               [ixdtype]*6 + [fpdtype]*2)
+               [ixdtype]*5 + [fpdtype]*2)
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -337,8 +339,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         eleclust = np.amax(arr[-2].get())
 
         block = (256, 1, 1)
-        K = 4
-        bm, bn = 320, 8
+        K = 16
+        bm, bn = 224, 64
         bk = 32
 
         grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
@@ -421,8 +423,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         nrow = math.isqrt(ldim)
         # neles, ncol, ldim, fpdytype = arr[0].traits[1:]
         # nrow = ldim // ncol
-        gridsz=  arr[0].ioshape[0]
-            
+        ecount =  arr[-1].ioshape[-1]
+
         ncola = arr[1].ioshape[0] // arr[1].ioshape[1]
         ldim2 = arr[1].traits[2]
         ldimj = arr[1].traits[2]*arr[1].ioshape[1]
@@ -430,21 +432,20 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # Determine the grid/block
         block = (512, 1, 1)
 
-        grid = (gridsz, 1, 1)
+        grid = (ecount, 1, 1)
         tplargs = dict()
         tplargs['_macros'] = {}
-
-        
 
         # Render the kernel template
         src = self.backend.lookup.get_template('getf3').render(
               nrow=nrow, blksz=block[0],ldim2=ldim2, ldimj=ldimj,
               ncola=ncola, kmeans=kmeans, jac_fpdtype=jac_fpdtype,
+              ecount=ecount, 
               **tplargs
         )
         # Build the kernel
         kern = self._build_kernel('getf3', src,
-                                [ixdtype]*2 + [np.uintp]*3
+                                [ixdtype]*2 + [np.uintp]*4
                                 + [ixdtype]*3)
 
         # Set the parameters
@@ -453,7 +454,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         class GetF3Kernel(CUDAKernel):
             def bind(self, *consts):
-                params.set_args(*consts, start=5)
+                params.set_args(*consts, start=6)
 
             def run(self, stream):
                 kern.exec_async(stream, params)

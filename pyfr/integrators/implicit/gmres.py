@@ -26,6 +26,8 @@ class GMRESSolver(BaseCommon):
 		self._dt = dt
 
 		self.prec = cfg.getbool(sect, 'precondition', False)
+		self.do_prec = False
+
 		if self.prec:
 			self.jacobi_solver = BlockJacobi(system, backend, register, cfg ,self.epsmc)
 
@@ -41,6 +43,7 @@ class GMRESSolver(BaseCommon):
 				self._prec_updated = True
 			self.mul_jac = self.jacobi_solver.mul_jac
 			
+			self.jac_dt = 0
 
 		else:
 			self.prec = None
@@ -115,8 +118,6 @@ class GMRESSolver(BaseCommon):
 			outscales=_invscales)
 
 	def _jacobi_prec(self, rin):
-		if self.prec == None:
-			return rin
 
 		rout = self.register._prec_regidx[self.iter]
 		kerns = self.mul_jac(rin, rout, inscales=self._scales, 
@@ -131,8 +132,8 @@ class GMRESSolver(BaseCommon):
 		rkp1 = self.register._gmres_regidx[self.iter+1]
 		H = self._H
 
-		r0 = self._jacobi_prec(rdu)
-		self._eval_mat_vec(r0, rmv)
+		rin = self._jacobi_prec(rdu) if self.do_prec else rdu
+		self._eval_mat_vec(rin, rmv)
 
 		rji = self.register._gmres_regidx
 
@@ -152,7 +153,8 @@ class GMRESSolver(BaseCommon):
 
 		H[self.iter+1, self.iter] = qnorm
 
-	def solve(self, tc, acoeff, currstg, rcurr):
+	def solve(self, tc, acoeff, currstg, rcurr, dt, 
+		      eval_jac=True):
 		self._init_solver(tc, acoeff, currstg, rcurr)
 		H = self._H
 		reg = self.register
@@ -161,7 +163,7 @@ class GMRESSolver(BaseCommon):
 		comm, rank, root = get_comm_rank_root()
 
 		# Evaluate the Jacobians
-		if self.prec and not self.jac_evaluated:
+		if self.prec and not self.jac_evaluated and eval_jac:
 			self.jacobi_solver._eval_jac(tc, acoeff, currstg, rcurr)
 
 			self.jac_evaluated = True
@@ -181,9 +183,14 @@ class GMRESSolver(BaseCommon):
 				if rank == root:
 					print(f'jacobian precision updated', flush=True)
 
+			self.jac_dt = dt
+
 		rdu  = reg._gmres_regidx[self.iter]
 		rmv = reg._aux_regidx
 
+		# Decide whether to precondition or not
+		self.do_prec = (self.prec and abs(dt - self.jac_dt) < 0.5*self.jac_dt
+				        and self.jac_evaluated)
 
 		self._add(0, rmv, 1, rdu, 
 				inscales=self._invscales, in_idx=(1,))
@@ -222,13 +229,15 @@ class GMRESSolver(BaseCommon):
 		y =  np.linalg.solve(H[:k+1, :k+1], beta[:k+1])
 		rdu = reg._gmres_regidx[self.iter]
 
+		rprec = reg._prec_regidx if self.do_prec else reg._gmres_regidx
+		rp = rprec[:self.iter+1]
+
 		consts = [0]+list(y)
-		rp = self.register._prec_regidx[:self.iter+1]
 		regidxs = [rdu] + [r for r in rp]
 
 		self._addv(consts, regidxs, outscales=self._scales)
 
-		return rdu, self.iter
+		return rdu, self.iter, self.do_prec
 
 	def _giv_rot(self, k):
 		H, cs, sn = self._H, self._cs, self._sn

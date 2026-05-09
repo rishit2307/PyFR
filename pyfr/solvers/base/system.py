@@ -60,7 +60,9 @@ class BaseSystem:
         self.ndims = eles[0].ndims
         self.nvars = eles[0].nvars
 
-        self.celes,  self.ncolours = self._load_colours(rallocs, mesh)
+
+        colour_info = self._load_colours(rallocs, mesh)
+        self.celes, self.ncolours, self.ecount = colour_info
 
         # Load the interfaces
         self._int_inters = self._load_int_inters(rallocs, mesh, elemap)
@@ -135,24 +137,46 @@ class BaseSystem:
         return eles, elemap
 
     def _load_colours(self, rallocs, mesh):
-        celes, ncols = {}, {}
-        backend = self.backend
+        celes = {}
+        ncols, ec = {}, {}
+        be = self.backend
         comm, rank, root = get_comm_rank_root()
         getypes = set(comm.allreduce(self.ele_types, op=mpi.SUM))
+
+        # Iterate over global element types
         for etype in sorted(getypes):
             if etype in self.ele_types:
                 col = mesh[f'col_{etype}_p{rallocs.prank}']
+
+                # Get counts
+                counts = np.bincount(col)
+                idxs = np.argsort(col, kind='stable')
+                csum = np.cumsum(counts)
+
+                # Get mapping from colour to ele counts
+                groups = np.split(idxs, csum[:-1])
+                ec[etype] = max(len(group) for group in groups)
+
+                # Set colours for backend
+                for i, group in enumerate(groups):
+                    if not group.size == 0:
+                        varr = group[None]
+                        celes[etype, i] = be.matrix(varr.shape, 
+                                                    varr, 
+                                                    dtype=be.ixdtype)
+
+                # Get max colour and element count per colour
                 ncols[etype] = np.amax(col) + 1
-                celes[etype] = backend.matrix(col[None].shape, col[None],
-                                              dtype=backend.ixdtype)
 
             else:
                 ncols[etype] = 0
-            
+
+            # Get global max colour
             ncols[etype] = comm.allreduce(ncols[etype], op=mpi.MAX)
+
         print(f'rank iss {rank}, ncols is {ncols}', flush=True)
 
-        return celes, ncols
+        return celes, ncols, ec
 
     def _load_int_inters(self, rallocs, mesh, elemap):
         key = f'con_p{rallocs.prank}'

@@ -134,10 +134,12 @@ class ImplicitNewtonController(BaseImplicitController):
 			expb = self._beta / 2
 
 			# Decide on the time step
-			dt = max(min(t - self.tcurr, self._dt), self.dtmin)
+			dt = max(min(t - self.tcurr, self._dt, self.dtmax), self.dtmin)
 
 			# Take the physical step
 			rcurr, rold, rerr, nerr = self.step(self.tcurr, dt)
+
+			# Decide the error factor
 			nerr = 100 if not math.isfinite(nerr) else nerr
 			self._errprev = nerr if self.nsteps == 0 else self._errprev
 

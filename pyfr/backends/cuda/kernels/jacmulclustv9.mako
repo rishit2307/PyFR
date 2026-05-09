@@ -42,7 +42,7 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
 
         jac_fpdtype_t regM[${bm*K//blkx}] = {0.0};
         fpdtype_t regN[${bn//K}] = {0.0};
-        fpdtype_t regMtmp[${bm*K//blkx}] = {0.0};
+        ## fpdtype_t regMtmp[${bm*K//blkx}] = {0.0};
 
         jac_fpdtype_t regAtmp[${bm*bk//blkx}]= {0.0};
         fpdtype_t regBtmp[${bn*bk//blkx}]= {0.0};

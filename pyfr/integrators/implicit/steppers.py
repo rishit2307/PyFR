@@ -26,13 +26,13 @@ class BaseESDIRKStepper(BaseImplicitStepper):
 		newtonsolver = self.newtonsolver
 
 		newtonsolver.store_current_solution()
-		newtonsolver.init_step(t, nsteps=self.nsteps,
-						       nrjctchain=self.nrjctchain)
+		newtonsolver.init_step(t)
 
 		for i, (acoeffs, ccoeff) in enumerate(zip(self.a, self.c), start=1):
 
 			ac = [acoeff*dt for acoeff in acoeffs]
-			rcurr, rold, nerr = newtonsolver.solve(t+ccoeff*dt, ac, i)
+			rcurr, rold, nerr = newtonsolver.solve(t+ccoeff*dt, ac, i, dt, 
+										           self.nsteps)
 			# if diverge:
 			# 	self.ntblowup = False
 			# 	for plugin in self.plugins:

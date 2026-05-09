@@ -35,9 +35,9 @@ for (int l=0; l < ${bk}; l++){
         regN[${m}] = sB[l*${(bn+2)} + tidcol*${bn//K} + ${m}];
     % endfor
 
-    % for m in range(0, bm*K//blkx):
-        regMtmp[${m}] = fpdtype_t(cast(regM[${m}]));
-    % endfor
+    ## % for m in range(0, bm*K//blkx):
+    ##     regMtmp[${m}] = fpdtype_t(cast(regM[${m}]));
+    ## % endfor
 
     
 
@@ -46,7 +46,7 @@ for (int l=0; l < ${bk}; l++){
             ## assert(${m*bn//K +n } < 10 && "ERROR L46 ocmpute");
             ## assert(${m} < ${bm*K//blkx} && "ERROR L 47 compute");
             ## assert(${n} < ${bn//K} && "ERROR L48 compute");
-            res[${m*bn//K + n}] += regMtmp[${m}]*regN[${n}];
+            res[${m*bn//K + n}] += fpdtype_t(cast(regM[${m}]))*regN[${n}];
         % endfor
     % endfor
 }

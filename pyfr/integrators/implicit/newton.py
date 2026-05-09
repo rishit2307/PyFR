@@ -68,17 +68,12 @@ class NewtonSolver(BaseNonLinearSolver):
 		norm = self._eval_norm(reg)
 		return norm / np.sqrt(self._gndofs)
 
-	def init_step(self, t, nsteps=0, nrjctchain=0):
+	def init_step(self, t):
 		rhs = self.system.rhs
 		rcurr, rprev = self._idxcurr, self._idxprev
 		rprev_rhs = self.register._stage_regidx[0]
-		rcurr_rhs = self.register._stage_regidx[-1]
 
-		if nsteps > 0 and nrjctchain == 0:
-			kerns = self._get_copy_kerns(rprev_rhs, rcurr_rhs)
-			self.backend.run_kernels(kerns)
-		else:
-			rhs(t, rprev, rprev_rhs)
+		rhs(t, rprev, rprev_rhs)
 
 	def obtain_solution(self, bcoeffs):
 		rcurr, rprev = self._idxcurr, self._idxprev
@@ -182,25 +177,15 @@ class NewtonSolver(BaseNonLinearSolver):
 		regidxs=  [rcurr, rprev] + self.register._stage_regidx[:currstg]
 		self._addv(consts, regidxs)
 
-	def solve(self, tc, acoeffs, currstg):
+	def _newton_iterate(self, tc, acoeffs, currstg, dt, 
+					    rcurr, rdu0, eval_jac=True):
+
 		comm, rank, root = get_comm_rank_root()
-		rcurr, rprev = self._idxcurr, self._idxprev
 		gmres_solver = self.gmres_solver
 
-		# Begin nonlinear iteration count
+		# Number of newton iters
 		newton_iter = 0
 		gmres_niters = 0
-
-		# Get registers
-		rcurr = self._idxcurr
-		rdu0 = self.register._gmres_regidx[0]
-
-		# Accumulate previous stages
-		self._prev_stage_accum(acoeffs, currstg)
-
-		# Evaluate residual
-		self._residual(tc, acoeffs, currstg, 
-				       rcurr, rdu0)
 
 		nnorm_init = self._rms_norm(rdu0)
 		nnorm = nnorm_init
@@ -211,8 +196,8 @@ class NewtonSolver(BaseNonLinearSolver):
 			alpha = 1
 
 			# Linear Solve
-			rdu, iters = gmres_solver.solve(tc, acoeffs[-1], currstg,
-								 			       rcurr)
+			rdu, iters, do_prec = gmres_solver.solve(tc, acoeffs[-1], currstg,
+								 			         rcurr, dt, eval_jac=eval_jac)
 
 			if self._ls:
 				alpha = self._linesearch(tc, nnorm, acoeffs, 
@@ -225,14 +210,52 @@ class NewtonSolver(BaseNonLinearSolver):
 			newton_iter	+= 1
 			gmres_niters += iters
 
-		res = (nnorm/nnorm_init) / self.ntol
-		err = gmres_niters / self._budget if math.isfinite(res) else res
-
 		if rank == root:
 			print(f'stage is {currstg}', flush=True)
 			print(f'nnorm is {nnorm / nnorm_init}, newton is {newton_iter}', flush=True)
 
-		return rcurr, rprev, err
+
+		return gmres_niters, do_prec, nnorm / nnorm_init
+
+	def solve(self, tc, acoeffs, currstg, dt, nsteps):
+
+		_newton_iterate = self._newton_iterate
+		comm, rank, root = get_comm_rank_root()
+
+		# Begin gmres iteration count
+		gmres_niters = 0
+
+		# Get registers
+		rcurr, rprev = self._idxcurr, self._idxprev
+		rdu0 = self.register._gmres_regidx[0]
+
+		# Accumulate previous stages
+		self._prev_stage_accum(acoeffs, currstg)
+
+		# Evaluate residual
+		self._residual(tc, acoeffs, currstg, 
+				       rcurr, rdu0)
+
+		# Solve Newton-GMRES without preconditioner
+		if nsteps == 0:
+			woiters, _, _ = _newton_iterate(tc, acoeffs, currstg, dt, 
+						                    rcurr, rdu0, eval_jac=False)
+			self._add(0, rcurr, 1, rprev)
+			self._residual(tc, acoeffs, currstg, rcurr, rdu0)
+
+		# Solve with preconditioner
+		gmres_niters, do_prec, res = _newton_iterate(tc, acoeffs, currstg, dt, 
+											         rcurr, rdu0)
+
+		if nsteps == 0:
+			self.precond_weight = gmres_niters / woiters
+
+		# Get error
+		err = gmres_niters/self._budget
+		err = err*self.precond_weight if not do_prec else err
+		err = err if math.isfinite(res) else res
+		
+		return rcurr, self._idxprev, err
 
 class Register:
 	def __init__(self, stage_nregs, stepper_nregs, niters, solver_nregs, cfg):
