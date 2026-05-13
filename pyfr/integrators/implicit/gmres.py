@@ -7,7 +7,7 @@ from pyfr.integrators.registers import DynamicVectorRegister
 
 class GMRESMixin(BaseKrylovSolver):
     krylov_name = 'gmres'
-    _krylov = DynamicVectorRegister(rhs=False)
+    _krylov = DynamicVectorRegister(rhs=False, extent='krylov')
 
     def __init__(self, backend, systemcls, mesh, initsoln, cfg):
         sect = 'solver-time-integrator'

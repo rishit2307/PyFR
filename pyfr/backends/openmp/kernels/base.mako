@@ -1,6 +1,7 @@
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
 
 #include <omp.h>
+#include <stdalign.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <tgmath.h>
@@ -14,11 +15,29 @@
 // Typedefs
 typedef ${pyfr.npdtype_to_ctype(fpdtype)} fpdtype_t;
 typedef ${pyfr.npdtype_to_ctype(ixdtype)} ixdtype_t;
+typedef _Float16 half;
 
 // Atomic helpers
 #define atomic_min_fpdtype(addr, val) _Pragma("omp atomic compare") if ((val) < *(addr)) { *(addr) = (val); }
 #define atomic_max_fpdtype(addr, val) _Pragma("omp atomic compare") if ((val) > *(addr)) { *(addr) = (val); }
-#define atomic_sum_fpdtype(addr, val) _Pragma("omp atomic") *(addr) += (val)
+
+
+// Thread/block helpers (no-op for OpenMP)
+#define PYFR_THREAD_ID 0
+#define PYFR_BLOCK_ID 0
+#define PYFR_BLOCK_ID_Y 0
+#define PYFR_SYNC_THREADS()
+#define PYFR_SHARED
+#define PYFR_GMEM
+#define PYFR_LMEM
+
+// Tiled layout indexing for block-diagonal matrices
+#define TILED_IX(e, r, c, block_sz, tile_sz) \
+    ((e) * (block_sz) * (block_sz) + \
+     ((r) / (tile_sz)) * ((block_sz) / (tile_sz)) * (tile_sz) * (tile_sz) + \
+     ((c) / (tile_sz)) * (tile_sz) * (tile_sz) + \
+     ((r) % (tile_sz)) * (tile_sz) + \
+     ((c) % (tile_sz)))
 
 // FP-precise block support
 #define PYFR_FP_PRECISE_BEGIN

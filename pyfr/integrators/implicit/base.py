@@ -34,6 +34,9 @@ class BaseImplicitIntegrator(BaseIntegrator):
         # Commit the system
         self.system.commit()
 
+        # Hook for subclasses which require committed storage
+        self._post_commit()
+
         # Index of the register number containing the solution
         self.idxcurr = 0
 
@@ -41,6 +44,9 @@ class BaseImplicitIntegrator(BaseIntegrator):
         self.gndofs = self._get_gndofs()
 
     def _pre_commit(self):
+        pass
+
+    def _post_commit(self):
         pass
 
     @_common_plugin_prop('_curr_soln')

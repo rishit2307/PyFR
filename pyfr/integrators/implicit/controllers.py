@@ -7,11 +7,107 @@ from pyfr.integrators.implicit.newton import NewtonDivergenceError
 from pyfr.nputil import LogGPOptimiser
 
 
+class PrecondDriftMonitor:
+    # Windows to average when establishing a baseline
+    _baseline_windows = 2
+
+    # Minimum improvement ratio to consider a refresh successful
+    _refresh_improvement = 0.9
+
+    # Consecutive failed refreshes before disabling
+    _max_refresh_failures = 3
+
+    # (min gdt mismatch, drift threshold, consecutive windows)
+    _drift_tiers = [(0.3, 1.5, 1), (0.1, 1.5, 2), (-1, 2.0, 3)]
+
+    def __init__(self):
+        self.reset()
+        self._refresh_failures = 0
+        self._refresh_disabled = False
+        self._prev_baseline = None
+
+    def reset(self):
+        self._baseline = None
+        self._baseline_buf = []
+        self._drift_count = 0
+        self._krylov_total = 0
+        self._newton_total = 0
+
+    def record(self, nkrylov, niters):
+        self._krylov_total += nkrylov
+        self._newton_total += niters
+
+    def check(self, dt, gamma, gdt_built, invalidate_fn):
+        # No iteration data accumulated this window
+        if self._newton_total == 0:
+            return
+
+        # Mean Krylov iterations per Newton step for this window
+        mean_k = self._krylov_total / self._newton_total
+        self._krylov_total = self._newton_total = 0
+
+        # Establish a baseline before checking for drift
+        if self._baseline is None:
+            self._update_baseline(mean_k)
+        else:
+            self._detect_drift(mean_k, dt, gamma, gdt_built, invalidate_fn)
+
+    def _update_baseline(self, mean_k):
+        # Accumulate windows until we have enough to average
+        self._baseline_buf.append(mean_k)
+        if len(self._baseline_buf) < self._baseline_windows:
+            return
+
+        # Set the baseline from the accumulated windows
+        self._baseline = np.mean(self._baseline_buf)
+        self._baseline_buf = []
+
+        # If this baseline follows a refresh, check if it helped
+        if self._prev_baseline is not None:
+            if self._baseline < self._refresh_improvement*self._prev_baseline:
+                self._refresh_failures = 0
+            else:
+                self._refresh_failures += 1
+                if self._refresh_failures >= self._max_refresh_failures:
+                    self._refresh_disabled = True
+            self._prev_baseline = None
+
+    def _detect_drift(self, mean_k, dt, gamma, gdt_built, invalidate_fn):
+        # Gamma*dt mismatch relative to the dt at last build
+        gdt_mismatch = abs(np.log10(gamma*dt / gdt_built))
+
+        # Tiered response: larger mismatch => act sooner
+        thresh, nwindows = next(
+            (t, n) for lo, t, n in self._drift_tiers if gdt_mismatch > lo
+        )
+
+        # Count consecutive windows with Krylov drift above the threshold
+        if mean_k / self._baseline > thresh:
+            self._drift_count += 1
+        else:
+            self._drift_count = 0
+
+        # Trigger a rebuild once the drift persists long enough
+        if self._drift_count >= nwindows and not self._refresh_disabled:
+            self._prev_baseline = self._baseline
+            invalidate_fn()
+            self.reset()
+
+
 class ThroughputLimitMixin:
+    # GP optimiser sliding window size
     _tput_gp_wsize = 20
+
+    # dt adjustment factor bounds
     _tput_fac_lo, _tput_fac_hi = 0.6, 1.67
+
+    # Throughput fraction below settled to count as degraded
     _tput_degrade_thresh = 0.7
+
+    # Consecutive degraded windows before re-exploring
     _tput_degrade_windows = 3
+
+    # Grace windows after settling to establish throughput baseline
     _tput_grace_windows = 2
 
     def _init_tput_limit(self, initsoln):
@@ -33,6 +129,7 @@ class ThroughputLimitMixin:
         self._krylov_was_settled = False
         self._explore_targets = []
         self._expand_cooldown = 0
+        self._pc_monitor = PrecondDriftMonitor()
 
     def _reset_tput(self, dt):
         lo = max(dt / 10**1.5, self.dtmin)
@@ -63,14 +160,17 @@ class ThroughputLimitMixin:
             self._expand_cooldown -= 1
             return
 
+        # Current GP search bounds with a margin to detect edge hits
         gp = self._dt_gp
         lo, hi = gp.x_lo, gp.x_hi
-        rng = hi - lo
-        margin = rng / 50
+        margin = (hi - lo) / 50
+
+        # Expansion step and absolute dt limits
         step = np.log(self._growth_fact**2)
         lo_lim, hi_lim = np.log(self.dtmin), np.log(self.dtmax)
         best_log = np.log(best_dt)
 
+        # Expand the search range if the optimum is at the edge
         if best_log >= hi - margin and hi < hi_lim:
             gp.x_hi = min(hi + step, hi_lim)
             self._expand_cooldown = 5
@@ -93,18 +193,37 @@ class ThroughputLimitMixin:
             self._krylov_was_settled = True
             self._reset_tput(dt)
 
-        i = self._steps_in_window
-        self._wtime_window[i] = wtime
-        self._fac_buffer[i] = fac
-        self._steps_in_window += 1
+        # Accumulate iteration data from stages at the settled tolerance
+        best_tol = self._tol_controller.best_tol
+        for s in self._stage_stats:
+            if abs(np.log10(s.ktol / best_tol)) <= 0.15:
+                self._pc_monitor.record(s.nkrylov, s.niters)
+
+        # Check if the preconditioner was rebuilt during this step
+        step_had_build = any(s.precond_built for s in self._stage_stats)
+
+        # Exclude build steps from the throughput window so the rebuild
+        # cost does not pollute the throughput GP model
+        if step_had_build:
+            if self._steps_in_window < self.dt_update_interval:
+                return min(1.0, fac)
+        else:
+            i = self._steps_in_window
+            self._wtime_window[i] = wtime
+            self._fac_buffer[i] = fac
+            self._steps_in_window += 1
 
         if self._steps_in_window < self.dt_update_interval:
             return min(1.0, fac)
 
-        # Window complete; compute statistics
-        med_tput = dt / np.mean(self._wtime_window)
-        med_fac = np.exp(np.median(np.log(self._fac_buffer)))
+        n = self._steps_in_window
+        med_tput = dt / np.mean(self._wtime_window[:n])
+        med_fac = np.exp(np.median(np.log(self._fac_buffer[:n])))
         self._steps_in_window = 0
+
+        if self._preconditioner.active:
+            self._pc_monitor.check(dt, self._gamma, self._precond_gdt_built,
+                                   self._invalidate_precond)
 
         return self._update_tput(dt, med_tput, med_fac)
 
@@ -326,14 +445,18 @@ class ImplicitThroughputController(ThroughputLimitMixin,
                 self._nfailures = 0
                 self._accept_step(dt, idxcurr, wtime)
             except NewtonDivergenceError:
+                # Force a preconditioner rebuild
+                self._invalidate_precond()
                 self._nfailures += 1
 
+                # Bail if we have exceeded the failure limit
                 if self._nfailures > self._max_failures:
                     raise NewtonDivergenceError(
                         f'Failed {self._nfailures} times consecutively at '
                         f'dt={dt:.2e}'
                     )
 
+                # Reduce dt and retry
                 dt = self._failure_fact*dt
                 if dt < self.dtmin:
                     raise RuntimeError(f'dt={dt:.2e} below minimum '

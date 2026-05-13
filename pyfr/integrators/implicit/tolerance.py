@@ -16,6 +16,12 @@ class BaseToleranceController:
     name = None
     max_retries = 0
     settled = True
+    probing = False
+    _best_tol = None
+
+    @property
+    def best_tol(self):
+        return self._best_tol
 
     def update(self, wall_time, gamma_dt, success):
         pass
@@ -32,7 +38,7 @@ class NullToleranceController(BaseToleranceController):
 
     def __init__(self, cfg, serialiser, initsoln):
         sect = 'solver-time-integrator'
-        self._tol = cfg.getfloat(sect, 'krylov-rtol', 1e-2)
+        self._best_tol = self._tol = cfg.getfloat(sect, 'krylov-rtol', 1e-2)
 
     def select_tolerance(self):
         return self._tol
@@ -50,6 +56,10 @@ class BaseProbeController(BaseToleranceController):
         self._probe_remaining = 0
         self._probe_costs = []
         self._probe_tol = None
+
+    @property
+    def probing(self):
+        return self._probe_remaining > 0
 
     def _abort_probe(self):
         self._probe_remaining = 0

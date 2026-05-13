@@ -309,8 +309,16 @@ Krylov Solver Options
     ``none`` | ``block-jacobi``
 
     where ``block-jacobi`` is an element-wise block Jacobi
-    preconditioner. For many problems, ``none`` is sufficient
-    when using a modest ``krylov-rtol``.
+    preconditioner.
+
+#. ``krylov-precond-precision`` --- preconditioner working precision
+
+    ``double`` | ``single`` | ``half`` (default: backend precision)
+
+    Controls the precision used for storing and applying the
+    block-Jacobi preconditioner.  Lower precision reduces memory
+    and can improve throughput at the cost of preconditioner quality.
+    Automatically clamped to the backend precision if set higher.
 
 #. ``krylov-tol-controller`` --- Krylov tolerance controller
 

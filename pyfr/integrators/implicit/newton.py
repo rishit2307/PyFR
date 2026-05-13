@@ -4,11 +4,12 @@ import time
 
 from pyfr.integrators.implicit.krylov import BaseKrylovSolver
 from pyfr.integrators.registers import DynamicScalarRegister, ScalarRegister
-from pyfr.mpiutil import get_comm_rank_root
+from pyfr.mpiutil import get_comm_rank_root, mpi, scal_coll
 
 
 StageStats = namedtuple('StageStats',
-                        'stage niters nkrylov nprecond resid0 resid ktol')
+                        'stage niters nkrylov nprecond resid0 resid ktol '
+                        'precond_gdt_ratio precond_built')
 
 
 class NewtonDivergenceError(Exception):
@@ -18,7 +19,7 @@ class NewtonDivergenceError(Exception):
 class NewtonSolver(BaseKrylovSolver):
     _newton_resid = ScalarRegister(rhs=False)
     _jfnk_temp = ScalarRegister()
-    _newton_delta = DynamicScalarRegister(rhs=False)
+    _newton_delta = DynamicScalarRegister(rhs=False, extent='krylov')
 
     def __init__(self, backend, systemcls, mesh, initsoln, cfg):
         sect = 'solver-time-integrator'
@@ -112,8 +113,13 @@ class NewtonSolver(BaseKrylovSolver):
 
         # Helper function to compute the matrix-vector product
         def matvec(v, result):
-            self._jfnk_matvec(t, u_reg, f_reg, gamma_dt, self._krylov_eps, v,
-                              result)
+            eps = self._krylov_eps
+
+            # When preconditioning ||v|| != 1 and so must normalise eps
+            if self._preconditioner.active:
+                eps /= self._norm2(v)
+
+            self._jfnk_matvec(t, u_reg, f_reg, gamma_dt, eps, v, result)
 
         # Pick an initial starting guess
         initial_guess_fn(u_reg)
@@ -174,10 +180,10 @@ class NewtonSolver(BaseKrylovSolver):
 
     def _newton_stage_solve(self, t, u_reg, f_reg, residual_fn,
                             initial_guess_fn, gamma_dt):
-        comm, rank, root = get_comm_rank_root()
+        comm, _, _ = get_comm_rank_root()
 
         # Scaled preconditioner: M̃⁻¹ = S⁻¹ M⁻¹ S
-        if self._precond != 'none':
+        if self._preconditioner.active:
             def precond(in_reg, out_reg):
                 self._apply_precond(in_reg, out_reg, in_scale=self._scales,
                                     out_scale=self._inv_scales)
@@ -187,27 +193,34 @@ class NewtonSolver(BaseKrylovSolver):
         # Choose a suitable finite difference perturbation
         self._compute_krylov_eps(u_reg)
 
+        # Check if the preconditioner was built before the stage
+        pc_built_before_stage = self._precond_computed
+
         for i in range(self._tol_controller.max_retries + 1):
-            # Determine and broadcast the optimal Krylov tolerance
-            if rank == root:
-                krylov_tol = self._tol_controller.select_tolerance()
-                t_start = time.perf_counter()
-            else:
-                krylov_tol = None
+            pc_built_before_retry = self._precond_computed
 
-            self._krylov_rtol = comm.bcast(krylov_tol, root=root)
+            # Select a Krylov tolerance
+            self._krylov_rtol = self._tol_controller.select_tolerance()
 
+            # Iterate
+            t = time.perf_counter()
             *stats, rnorm, tol = self._newton_iterate(
                 t, u_reg, f_reg, gamma_dt, residual_fn, initial_guess_fn,
                 precond
             )
+            dt = time.perf_counter() - t
+            wtime = scal_coll(comm.Allreduce, dt, op=mpi.MAX)
 
-            # Have the root rank update the tolerance controller
-            if rank == root:
-                wall_time = time.perf_counter() - t_start
-                self._tol_controller.update(wall_time, gamma_dt, rnorm < tol)
+            built_this_retry = (not pc_built_before_retry and
+                                self._precond_computed)
+            if not built_this_retry:
+                self._tol_controller.update(wtime, gamma_dt, rnorm < tol)
 
             if rnorm < tol or i == self._tol_controller.max_retries:
                 break
 
-        return (*stats, rnorm, krylov_tol)
+        precond_built = not pc_built_before_stage and self._precond_computed
+        gdt_built = self._precond_gdt_built
+        gdt_ratio = gamma_dt / gdt_built if gdt_built > 0 else 1.0
+
+        return (*stats, rnorm, self._krylov_rtol, gdt_ratio, precond_built)

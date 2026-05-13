@@ -202,6 +202,7 @@ def iter_struct(arr, n=1000, axis=0):
 _ctype_map = {
     np.int32: 'int', np.uint32: 'unsigned int',
     np.int64: 'int64_t', np.uint64: 'uint64_t',
+    np.float16: 'half',
     np.float32: 'float', np.float64: 'double'
 }
 
