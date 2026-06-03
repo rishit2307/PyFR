@@ -14,6 +14,7 @@ typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
 
 __global__  __launch_bounds__(${blkx}*${blky}) void
 jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
+        ixdtype_t ldimj,
         fpdtype_t *__restrict__ r0, fpdtype_t *__restrict__ r1,
         jac_fpdtype_t *__restrict__ jac)
 
@@ -39,7 +40,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         uid = (tidy + ${i}) / ${ncola};
         vid = (tidy + ${i}) % ${ncola};
 
-        idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+        idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
         if (tid < ncolb && tidy + ${i} < ${ndof})
             r1[idx] = 0.0;
     
@@ -54,18 +55,17 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                     uid = (tidy + ${j}) / ${ncola};
                     vid = (tidy + ${j}) % ${ncola};
 
-                    idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+                    idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
                     sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
                     sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
                 % endfor
-
             % else:
                 % for j in range(i, ndof, blky):
                     % if j < ndof - blky:
                         uid = (tidy + ${j}) / ${ncola};
                         vid = (tidy + ${j}) % ${ncola};
 
-                        idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+                        idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
                         sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
                         sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
 
@@ -73,7 +73,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                         uid = (tidy + ${j}) / ${ncola};
                         vid = (tidy + ${j}) % ${ncola};
 
-                        idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+                        idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
                         sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
 
                         if (tidy + ${j} < ${ndof}){
@@ -94,7 +94,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
 
                     uid = k / ${ncola};
                     vid = k % ${ncola};
-                    jidx = (tidy + j)*ldim*nrow + uid*ldim + SOA_IX(tid, vid, ${ncola});
+                    jidx = (tidy + j)*ldimj*nrow + uid*ldimj + SOA_IX(tid, vid, ${ncola});
                     sidx = (k-${i})*blockDim.x + threadIdx.x;
                     r1temp += sA[sidx] * cast(jac[jidx]);
 
@@ -102,7 +102,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                 uid = (tidy + j) / ${ncola};
                 vid = (tidy + j) % ${ncola};
 
-                idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
+                idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
                 r1[idx] += ${'_out[vid]*' if inscales else ''}r1temp;
             }
         }

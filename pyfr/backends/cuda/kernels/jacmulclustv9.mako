@@ -16,13 +16,14 @@ typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
 #endif
 
 __global__  __launch_bounds__(${blkx}) void
-jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
-        jac_fpdtype_t *__restrict__ jac,
-        ixdtype_t *__restrict__ elemap, 
-        ixdtype_t *__restrict__ cluster_neles, 
-        ixdtype_t *__restrict__ stidxb)
+jacmulclustv9(const fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
+        const jac_fpdtype_t *__restrict__ jac,
+        const ixdtype_t *__restrict__ elemap, 
+        const ixdtype_t *__restrict__ cluster_neles, 
+        const ixdtype_t *__restrict__ stidxb)
 
-{   const ixdtype_t neles = cluster_neles[blockIdx.x];
+{   
+    const ixdtype_t neles = cluster_neles[blockIdx.x];
     if (blockIdx.z <= neles / ${bn}){
         constexpr ixdtype_t nby = ${blkx}/${bk};
 
@@ -51,7 +52,6 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
         fpdtype_t res[${bm*K//blkx * bn//K}] = {0.0};
 
         ixdtype_t stidx = 0;
-
         stidx = stidxb[blockIdx.x];
 
         ixdtype_t tidrowA = threadIdx.x / ${bk};
@@ -65,15 +65,6 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
 
         ixdtype_t tidrowsubB = tidcolB / ${K};
         ixdtype_t tidcolsubB = tidcolB % ${K};
-
-        ## ixdtype_t regemap = elemap[stidx + blockIdx.z*${bn} + tidcolB];
-        ## ixdtype_t regemap2[${bn//K}];
-
-        ## % for i in range(0, bn, K):
-            ## assert(stidx + blockIdx.z*${bn} + tidcol + ${i} < 20594 && "ERROR l66");
-            ## assert(${i//K} < ${bn//K} && "ERROR l67");
-            ## regemap2[${i//K}] = elemap[stidx + blockIdx.z*${bn} + tidcol + ${i}];
-        ## % endfor
 
         for (ixdtype_t k=0; k < ${bm*bn//blkx}; k++){
             res[k] = 0.0;
@@ -99,9 +90,9 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
         idx0 = stidx + blockIdx.z*${bn} + tidcolB;
         sidx = tidcolsubB*${bn//K} + tidrowsubB + tidrowB*${bn+2};
         % for l in range(0, bk, blkx//bn):
-            upt = (tidrowB + ${l}) / ${ncola};
-            vpt = (tidrowB + ${l}) % ${ncola};
-            idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt , ${ncola});
+            
+            idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l})*${ncolb};
+            ## idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt , ${ncola});
             if (tidcolB + blockIdx.z*${bn} < neles && tidrowB + ${l} < ${ncol}){
                 sB[${l*(bn+2)} + sidx] = ${'_in[vpt]*' if inscales else ''}r0[idx1];
             }
@@ -133,13 +124,12 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
                     }
                 % endfor
             }
-
             if (blockIdx.z < neles / ${bn}){
-
                 % for l in range(0, bk, blkx//bn):
-                    upt = (tidrowB  + ${l} + k) / ${ncola};
-                    vpt = (tidrowB + ${l} + k) - upt*${ncola};
-                    idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
+                    ## upt = (tidrowB  + ${l} + k) / ${ncola};
+                    ## vpt = (tidrowB + ${l} + k) - upt*${ncola};
+                    ## idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
+                    idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l} + k)*${ncolb};
                     ## assert(idx1 < ${ldim2}*320 && "Error L127");
                     ## assert(${l*bn//blkx} < 1 && "ERROR L128");
                     regBtmp[${l*bn//blkx}] = ${'_in[vpt]*' if inscales else ''}r0[idx1];
@@ -147,9 +137,10 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
             }
             else {
                 % for l in range(0, bk, blkx//bn):
-                    upt = (tidrowB  + ${l} + k) / ${ncola};
-                    vpt = (tidrowB + ${l} + k) - upt*${ncola};
-                    idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
+                    ## upt = (tidrowB  + ${l} + k) / ${ncola};
+                    ## vpt = (tidrowB + ${l} + k) - upt*${ncola};
+                    ## idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
+                    idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l} + k)*${ncolb};
                     if (tidcolB + blockIdx.z*${bn} < neles){
                         ## assert(idx1 < ${ldim2}*320 && "Error L136");
                         ## assert(${l*bn//blkx} < 1 && "ERROR L137");
@@ -183,9 +174,10 @@ jacmulclustv9(fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
 
             idx0 = stidx + blockIdx.z*${bn} + tidcolB;
             % for l in range(0, bk, blkx//bn):
-                upt = (tidrowB  + ${l} + k) / ${ncola};
-                vpt = (tidrowB  + ${l} + k) % ${ncola};
-                idx1 =  upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
+                ## upt = (tidrowB  + ${l} + k) / ${ncola};
+                ## vpt = (tidrowB  + ${l} + k) % ${ncola};
+                ## idx1 =  upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
+                idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l} + k)*${ncolb};
                 if (tidrowB + k + ${l}< ${ncol} && tidcolB + blockIdx.z*${bn}< neles){
                     ## assert(${l*bn//blkx} < 1 && "ERROR L 167");
                     ## assert(idx1 < ${ldim2}*320 && "Error L168");

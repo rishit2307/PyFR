@@ -126,6 +126,8 @@ class CUDAWrappers(LibWrapper):
     FUNC_ATTR_MAX_DYNAMIC_SHARED_SIZE_BYTES = 8
     FUNC_ATTR_PREFERRED_SHARED_MEMORY_CARVEOUT = 9
     MEMORYTYPE_UNIFIED = 4
+    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK = 42
+    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN = 97
 
     # Functions
     _functions = [
@@ -481,6 +483,33 @@ class CUDA:
         lib.cuDeviceGetAttribute(minor, lib.COMPUTE_CAPABILITY_MINOR, dev)
 
         return major.value, minor.value
+    
+    def max_shared_mem(self, opt_in=True):
+
+        if not hasattr(self, 'dev'):
+            raise RuntimeError('Device must be set before querying attributes')
+
+        dev, lib = self.dev, self.lib
+        shared_mem = c_int()
+
+        if opt_in:
+            # Query the max dynamic opt-in limit
+            lib.cuDeviceGetAttribute(shared_mem, 
+                                     lib.CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                                     dev)
+
+            # Fallback check
+            if shared_mem.value == 0:
+                lib.cuDeviceGetAttribute(shared_mem, 
+                                         lib.CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, 
+                                         dev)
+        else:
+            # Query baseline 48KB hardware 
+            lib.cuDeviceGetAttribute(shared_mem, 
+                                     lib.CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, 
+                                     dev)
+
+        return shared_mem.value
 
     def mem_alloc(self, nbytes):
         return CUDADevAlloc(self, nbytes)

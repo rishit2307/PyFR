@@ -4,7 +4,7 @@ import numpy as np
 
 from pyfr.backends.cuda.provider import CUDAKernel, CUDAKernelProvider
 from pyfr.ctypesutil import LibWrapper
-
+import math
 
 # Possible CUBLAS exception types
 class CUBLASError(Exception): pass
@@ -61,9 +61,9 @@ class CUBLASWrappers(LibWrapper):
         c_int, POINTER(c_float)),
         (c_int, 'cublasDdot_v2', c_void_p, c_int, c_void_p, c_int, c_void_p, 
         c_int, POINTER(c_double)),
-        (c_int, 'cublasDgemmBatched_v2', c_void_p, c_int, c_int, c_int, c_int, c_int,
-         POINTER(c_float), POINTER(c_void_p), c_int, POINTER(c_void_p), c_int,
-         POINTER(c_float), POINTER(c_void_p), c_int, c_int)
+        (c_int, 'cublasDgemmBatched', c_void_p, c_int, c_int, c_int, c_int, c_int,
+         POINTER(c_double), c_void_p, c_int, c_void_p, c_int,
+         POINTER(c_double), c_void_p, c_int, c_int)
     ]
 
     def _transname(self, name):
@@ -242,3 +242,34 @@ class CUDACUBLASKernels(CUDAKernelProvider):
                            beta_ct, out, 128, 50)
 
         return MulKernel(mats=[a, b, out])
+
+    def bmul(self, a, b, out, alpha=1.0, beta=0.0):
+        cuda = self.backend.cuda
+        w, h = self.lib, self.handle
+        cublasgemm = w.cublasDgemmBatc
+        alpha_ct, beta_ct = c_double(alpha), c_double(beta)
+        sz = np.dtype(a.traits[-1]).itemsize
+        batchsize = a.ioshape[0]
+        m = math.isqrt(a.ioshape[-1])
+        k = m
+        n = b.ioshape[-1] // m
+        bdptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        adptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        cdptr = cuda.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+
+        bhptr = np.ascontiguousarray([b.data + i*sz*b.leaddim for i in range(batchsize)], dtype=np.uintp)
+        ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
+        chptr = np.ascontiguousarray([out.data + i*sz*out.leaddim for i in range(batchsize)], dtype=np.uintp)
+
+        cuda.memcpy(bdptr, bhptr, bdptr.nbytes)
+        cuda.memcpy(adptr, ahptr, adptr.nbytes)
+        cuda.memcpy(cdptr, chptr, cdptr.nbytes)
+
+        def getbmul(stream):
+            w.cublasSetStream(h, stream)
+            cublasgemm(h, w.OP_N, w.OP_N, m, n, k, alpha_ct,adptr, m, bdptr, k, beta_ct, cdptr, k, batchsize)
+        class BmulKernel(CUDAKernel):
+            def run(self, stream):
+                getbmul(stream)
+
+        return BmulKernel(mats=[a, b, out, adptr, bdptr, cdptr])

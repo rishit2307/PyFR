@@ -3,6 +3,7 @@ import time
 from pyfr.integrators.base import BaseCommon
 from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
+from pyfr.util import memoize
 
 class GMRESSolver(BaseCommon):
 	def __init__(self, backend, system, cfg, register, dt):
@@ -47,6 +48,7 @@ class GMRESSolver(BaseCommon):
 
 		else:
 			self.prec = None
+			self.clustering = False
 
 		# Get system variables
 		gndofs = self._get_gndofs()
@@ -87,6 +89,7 @@ class GMRESSolver(BaseCommon):
 		self._sn.fill(0)
 		self._cs.fill(0)
 		self._H.fill(0)
+		self.rdunorm = []
 
 		self.rcurr_norm = self._eval_norm(rcurr)
 		self.tc, self.a = tc, a
@@ -103,38 +106,46 @@ class GMRESSolver(BaseCommon):
 
 		rcurr_rhs = reg._stage_regidx[currstg]
 		eps = np.sqrt(1 + self.rcurr_norm)*epsmc
+		rnorm = self.rdunorm[-1]
 
 		fac = dtype(a/eps)
 
 		_scales, _invscales = self._scales, self._invscales
-
-		add(0, rmv, 1, rcurr, eps, rdu, 
+		add(0, rmv, 1, rcurr, eps/rnorm, rdu, 
 	        inscales=_scales, in_idx=(2,))
 
 		rhs(tc, rmv, rmv)
 
-		add(-fac, rmv, fac, rcurr_rhs, 1, rdu,
+		add(-fac, rmv, fac, rcurr_rhs, 1/rnorm, rdu,
 	        inscales=_scales, in_idx=(2,), 
 			outscales=_invscales)
 
-	def _jacobi_prec(self, rin):
+	def _precondition(self, rdu):
 
+		if not self.do_prec:
+			return rdu
+
+		jacs = self.jacobi_solver
 		rout = self.register._prec_regidx[self.iter]
-		kerns = self.mul_jac(rin, rout, inscales=self._scales, 
-					         outscales=self._invscales)
-		self.backend.run_kernels(kerns)
+		rmv = self.register._aux_regidx
 
+		if self.clustering:
+			kerns = jacs.mul_jac_kmeans(rdu, rout,
+							   			rc=rmv,
+										inscales=self._scales,
+										outscales=self._invscales)
+
+		else:
+			kerns = jacs.mul_jac(rdu, rout, 
+								 inscales=self._scales, 
+						         outscales=self._invscales)
+
+		self.backend.run_kernels(kerns)
 		return rout
 
-	def _arnoldi(self):
-		rdu = self.register._gmres_regidx[self.iter]
-		rmv = self.register._aux_regidx
+	def _arnoldi(self, rin):
 		rkp1 = self.register._gmres_regidx[self.iter+1]
 		H = self._H
-
-		rin = self._jacobi_prec(rdu) if self.do_prec else rdu
-		self._eval_mat_vec(rin, rmv)
-
 		rji = self.register._gmres_regidx
 
 		# for j in range(self.iter+1):
@@ -142,16 +153,19 @@ class GMRESSolver(BaseCommon):
 		# 	H[j:j+1, self.iter] = h = self._eval_dot([rmv, rji[j]])
 		# 	self._addv([1, -h], [rmv, rji[j]])
 
-		dotregs = [rmv] + [rji[j] for j in range(self.iter+1)]
-		H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)
+		dotregs = [rin] + [rji[j] for j in range(self.iter+1)]
+		rnorm = self.rdunorm
+		H[:self.iter+1, self.iter] = h = self._eval_dot(dotregs)/rnorm
 
-		self._addv([1] + list(-h), [rmv] + 
-			       [rji[j] for j in range(self.iter+1)])
+		self._addv([0, 1] + list(-h/rnorm), [rkp1, rin] 
+			        + [rji[j] for j in range(self.iter+1)])
 
-		qnorm = self._eval_norm(rmv)
-		self._add(0, rkp1, 1/qnorm, rmv)
+		qnorm = self._eval_norm(rkp1)
+		self.rdunorm.append(qnorm)
 
 		H[self.iter+1, self.iter] = qnorm
+
+		return rkp1
 
 	def solve(self, tc, acoeff, currstg, rcurr, dt, 
 		      eval_jac=True):
@@ -173,7 +187,6 @@ class GMRESSolver(BaseCommon):
 			if not self._cluster_jac:
 
 				self._cluster_jac = True
-				self.mul_jac = self.jacobi_solver.mul_jac_kmeans
 				print(f'rank is {rank}, kmeans done')
 				self._prec_updated = True
 
@@ -192,22 +205,27 @@ class GMRESSolver(BaseCommon):
 		self.do_prec = (self.prec and abs(dt - self.jac_dt) < 0.5*self.jac_dt
 				        and self.jac_evaluated)
 
-		self._add(0, rmv, 1, rdu, 
+		if self._invscales:
+			self._add(0, rdu, 1, rdu, 
 				inscales=self._invscales, in_idx=(1,))
-
-		# Right or Left Preconditioning
-		rnorm = self._eval_norm(rmv)
-
-		self._add(0, rdu, 1/rnorm, rmv)
+			
+		rnorm = self._eval_norm(rdu)
 
 		beta = rnorm*self._e1
+		self.rdunorm.append(rnorm)
 
 		for k in range(self.niters):
 			self.iter = k
-			
+
+			# Precondition
+			rout = self._precondition(rdu)
+
+			# JFNK mat vec
+			self._eval_mat_vec(rout, rmv)
+
 			# Arnoldi
-			self._arnoldi()
-			
+			rdu = self._arnoldi(rmv)
+
 			# Givens Rotation
 			self._giv_rot(k)
 
@@ -232,12 +250,12 @@ class GMRESSolver(BaseCommon):
 		rprec = reg._prec_regidx if self.do_prec else reg._gmres_regidx
 		rp = rprec[:self.iter+1]
 
-		consts = [0]+list(y)
+		consts = [0]+list(y / self.rdunorm[:-1])
 		regidxs = [rdu] + [r for r in rp]
 
 		self._addv(consts, regidxs, outscales=self._scales)
 
-		return rdu, self.iter, self.do_prec
+		return rdu, self.iter+1, self.do_prec
 
 	def _giv_rot(self, k):
 		H, cs, sn = self._H, self._cs, self._sn

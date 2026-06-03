@@ -6,7 +6,7 @@ import numpy as np
 from pyfr.backends.hip.provider import HIPKernel, HIPKernelProvider
 from pyfr.ctypesutil import LibWrapper
 
-
+import math
 # Possible RocBLAS exception types
 class RocBLASError(Exception): pass
 class RocBLASInvalidHandle(RocBLASError): pass
@@ -65,7 +65,10 @@ class RocBLASWrappers(LibWrapper):
         (c_int, 'rocblas_sdot', c_void_p, c_int, c_void_p, c_int, c_void_p,
          c_int, POINTER(c_float)),
         (c_int, 'rocblas_ddot', c_void_p, c_int, c_void_p, c_int, c_void_p,
-         c_int, POINTER(c_double))
+         c_int, POINTER(c_double)),
+         (c_int, 'rocblas_dgemm_batched', c_void_p, c_int, c_int, c_int, c_int, c_int,
+         POINTER(c_double), c_void_p, c_int, c_void_p, c_int,
+         POINTER(c_double), c_void_p, c_int, c_int)
     ]
 
 
@@ -174,3 +177,34 @@ class HIPRocBLASKernels(HIPKernelProvider):
                 gemm(stream)
 
         return MulKernel(mats=[a, b, out], dt=dt)
+    
+    def bmul(self, a, b, out, alpha=1.0, beta=0.0):
+        hip = self.backend.hip
+        w, h = self._wrappers, self._handle
+        hipgemm = w.rocblas_dgemm_batched
+        alpha_ct, beta_ct = c_double(alpha), c_double(beta)
+        sz = np.dtype(a.traits[-1]).itemsize
+        batchsize = a.ioshape[0]
+        m = math.isqrt(a.ioshape[-1])
+        k = m
+        n = b.ioshape[-1] // m
+        bdptr = hip.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        adptr = hip.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+        cdptr = hip.mem_alloc(batchsize*np.dtype(np.uintp).itemsize)
+
+        bhptr = np.ascontiguousarray([b.data + i*sz*b.leaddim for i in range(batchsize)], dtype=np.uintp)
+        ahptr = np.ascontiguousarray([a.data + i*sz*a.leaddim for i in range(batchsize)], dtype=np.uintp)
+        chptr = np.ascontiguousarray([out.data + i*sz*out.leaddim for i in range(batchsize)], dtype=np.uintp)
+
+        hip.memcpy(bdptr, bhptr, bdptr.nbytes)
+        hip.memcpy(adptr, ahptr, adptr.nbytes)
+        hip.memcpy(cdptr, chptr, cdptr.nbytes)
+
+        def getbmul(stream):
+            w.rocblas_set_stream(h, stream)
+            hipgemm(h, w.OPERATION_NONE, w.OPERATION_NONE, m, n, k, alpha_ct,adptr, m, bdptr, k, beta_ct, cdptr, k, batchsize)
+        class BmulKernel(HIPKernel):
+            def run(self, stream):
+                getbmul(stream)
+
+        return BmulKernel(mats=[a, b, out, adptr, bdptr, cdptr])

@@ -272,14 +272,6 @@ class BaseCommon:
 		
 		return kerns
 
-	@memoize
-	def _get_jacmul_kernels(self, jac, *rs):
-
-		kerns = [self.backend.kernel('jacmul', *[em[r] for r in rs] + [jac])
-		         for em in self.system.ele_banks]
-
-		return kerns
-
 	def _addid(self, rs, stid, bsz, npt, vi, col, h, etype):
 
 		celes = self.system.celes

@@ -324,39 +324,55 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
 
         return ReshuffClust(mats=arr)
-    
+
     def jacmul_clust(self, *arr, inscales, outscales):
 
         nclust = arr[2].traits[1]
-        ncol = np.prod(arr[0].ioshape[:-1])
-        neles = arr[0].ioshape[-1]
-        nrow, ncola, ncolb = arr[0].ioshape
-        nrow, ldim2 = arr[0].traits[1:3]
+        ncol = np.prod(arr[1].ioshape[:-1])
+        nrow, ncola, ncolb = arr[1].ioshape
+        nrow, ldim2 = arr[1].traits[1:3]
+
+        # ncol = math.isqrt(arr[2].ioshape[-1])
+        # ncola=5
+        # ncolb=arr[1].ioshape[-1]
+        # ldim2=100
 
         jac_fpdtype = arr[2].traits[-1]
 
         # eleclust = neles // nclust
         eleclust = np.amax(arr[-2].get())
 
-        block = (256, 1, 1)
+        block = (128, 1, 1)
         K = 16
-        bm, bn = 224, 64
-        bk = 32
+        bm, bn = 128, 64
+        bk = 16
+        # print(block, bm, bn)
+
+        # bnsz16 = eleclust // 16
+        # bnsz4 = eleclust // 4
+        # if bnsz4 == 0:
+        #     bn = 2
+        
+        # elif bnsz16 == 0:
+        #     bn = 16
+
+        # elif bnsz16 == 1:
+        #     bn = 32
+
+        # else:
+        #     bn = 64
 
         grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
+        # grid = (-(-ncol//bm), -(-eleclust//bn), nclust)
 
         tplargs = dict()
         tplargs['_macros'] = {}
-        # grid = (nclust, 1, 1)
-        # src = self.backend.lookup.get_template('jacmulclustv6').render(
-        # ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
-        # bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
-        # wm=32, wn=64, wmiter=2, wniter=2, tm=4, tn=4)
+
 
         src = self.backend.lookup.get_template('jacmulclustv9').render(
-        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], tot_neles=neles, 
+        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], ncolb=ncolb,
         bm=bm, bn=bn, bk=bk, ldim=ncol**2, jac_fpdtype=jac_fpdtype, K=K, 
-        inscales=inscales, outscales=outscales, **tplargs)
+        inscales=inscales, outscales=outscales, eleclust=eleclust,**tplargs)
 
         with open("jacmul.cu", 'w') as f:
             print(src, file=f)
@@ -376,10 +392,12 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return JacMulClustKernel(mats=arr)
 
-    def jacmul(self, *arr, inscales, outscales):
+    def jacmul(self, *arr, inscales, outscales, 
+               stidx=0):
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
-        ncola, ncolb = arr[0].ioshape[1:]
+        ncola, ncolb = arr[-1].ioshape[2:]
+        ldimj = arr[-1].traits[-2]
         comm, rank, root = get_comm_rank_root()
         jac_fpdtype = arr[-1].traits[-1]
 
@@ -395,15 +413,15 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         src = self.backend.lookup.get_template('jacmul').render(
              ncola=ncola, jac_fpdtype=jac_fpdtype, blkx=blkx, 
              blky=blky, blksz=blksz, ndof=nrow*ncola, 
-             inscales=inscales, outscales=outscales)
+             inscales=inscales, outscales=outscales, stidx=stidx)
 
         # Build the kernel
         kern = self._build_kernel('jacmul', src,
-                                [ixdtype]*3 + [np.uintp]*3)
+                                [ixdtype]*4 + [np.uintp]*3)
 
         # Set the parameters
         params = kern.make_params(grid, block)
-        params.set_args(nrow, ncolb, ldim, *arr)
+        params.set_args(nrow, ncolb, ldim, ldimj, *arr)
 
         class JacMulKernel(CUDAKernel):
             def bind(self, *consts):
@@ -460,3 +478,145 @@ class CUDABlasExtKernels(CUDAKernelProvider):
                 kern.exec_async(stream, params)
 
         return GetF3Kernel(mats=arr)
+
+    def shuffle(self, *arr):
+        nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
+        ncola = arr[0].ioshape[1]
+        ncolb = arr[-1].ioshape[-1]
+        ldimout = arr[1].ioshape[-1]
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('shuffle').render(
+            ncola=ncola, ncolb=ncolb, nrow=nrow, ldim=ldim, 
+            ldimout=ldimout)
+
+        # Build the kernel
+        kern = self._build_kernel('shuffle', src,
+                                  [np.uintp]*3)
+
+        # Determine the grid/block
+        block = (256, 1, 1)
+        grid = get_grid_for_block(block, ncolb, nrow*ncola)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(*arr)
+
+        class ShuffleKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return ShuffleKernel(mats=arr)
+
+    def kmeans(self, *arr):
+        ixdtype = self.backend.ixdtype
+        nsamp, nfeat = arr[0].ioshape
+        nclust = arr[1].ioshape[0]
+
+
+        
+        # Determine the grid/block
+        block = (512, 1, 1)
+
+        grid = (nsamp, 1, 1)
+        tplargs = dict()
+        tplargs['_macros'] = {}
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('kmeans').render(
+              **tplargs
+        )
+        # Build the kernel
+        kern = self._build_kernel('kmeans', src,
+                                [ixdtype]*2 + [np.uintp]*4
+                                + [ixdtype]*3)
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(*arr)
+
+        class KmeansKernel(CUDAKernel):
+            def bind(self, *consts):
+                params.set_args(*consts, start=6)
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return KmeansKernel(mats=arr)
+    
+    def sumfactor(self, *arr):
+        nupts_in, nvars, neles = arr[0].ioshape
+        nupts_out = arr[-1].ioshape[0]
+
+        nupt1d_out, nupt1d_in= arr[1].ioshape
+        lag1dsz = nupt1d_out*nupt1d_in
+
+        block = (512, 1, 1)
+        print(block)
+        # grid = get_grid_for_block(block, neles, nvars)
+        nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
+        nrow2, ncol2, ldim2, fpdtype = arr[-1].traits[1:]
+
+        wsz = arr[0].itemsize
+        s1sz = wsz*(nupts_out + nupt1d_out*nupt1d_in
+                    + nupt1d_out*nupt1d_out*nupt1d_in)
+
+        s2sz = lag1dsz*wsz
+        maxshared = self.backend.cuda.max_shared_mem()
+        clsblk = 16 if fpdtype==np.float64 else 32
+        eblkls = [4, 8, 16, 32]
+
+
+        eblk = (maxshared - s2sz) // s1sz
+
+        ix = np.searchsorted(eblkls, eblk) - 1
+
+        # tidrix = np.searchsorted(eblkls, nupt1d_out)+1
+        # tidcix = np.searchsorted(eblkls, nupt1d_in)+1
+
+        # tidr = eblkls[tidrix]
+        # tidc = eblkls[tidcix]
+
+
+        eblk = eblkls[ix]
+        print(f'eblk is {eblk}')
+
+        grid = (-(-neles // eblk), nvars, 1)
+
+        tplargs = dict()
+        tplargs['_macros'] = {}
+
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('sumfactorv2').render(
+              nrowin=nupts_in, ncolb=neles, ncola=nvars,
+              ldim=ldim, eblk=eblk, nrowout=nupts_out,
+              lagsz=lag1dsz, n1din=nupt1d_in, n1dout=nupt1d_out,
+              blkx=block[0], ldim2=ldim2, nby=max(block[0]//eblk,nupt1d_in**2),
+              **tplargs
+        )
+
+        with open("factor.cu", 'w') as f:
+            print(src, file=f)
+        # Build the kernel
+        kern = self._build_kernel('sumfactor', src, [np.uintp]*3
+                                 )
+    
+
+
+        # Set the parameters
+        params = kern.make_params(grid, block)
+        params.set_args(*arr)
+
+        class SumfactorKernel(CUDAKernel):
+            def bind(self, *consts):
+                pass
+
+            def run(self, stream):
+                kern.exec_async(stream, params)
+
+        return SumfactorKernel(mats=arr)
+
