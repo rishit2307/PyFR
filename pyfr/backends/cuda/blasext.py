@@ -199,7 +199,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # Build the kernel
         kern = self._build_kernel('addidx', src,
                                   [ixdtype]*2 + [np.uintp]*3
-                                  + [ixdtype]*5 + [fpdtype])
+                                  + [ixdtype]*3 + [fpdtype])
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -238,7 +238,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # Build the kernel
         kern = self._build_kernel('jacinit', src,
                [ixdtype]*4 +[np.uintp]*4 + 
-               [ixdtype]*5 + [fpdtype]*2)
+               [ixdtype]*3 + [fpdtype]*2)
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -392,8 +392,8 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return JacMulClustKernel(mats=arr)
 
-    def jacmul(self, *arr, inscales, outscales, 
-               stidx=0):
+    def jacmul(self, *arr, inscales, outscales
+               ):
         ixdtype = self.backend.ixdtype
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
         ncola, ncolb = arr[-1].ioshape[2:]
@@ -413,7 +413,7 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         src = self.backend.lookup.get_template('jacmul').render(
              ncola=ncola, jac_fpdtype=jac_fpdtype, blkx=blkx, 
              blky=blky, blksz=blksz, ndof=nrow*ncola, 
-             inscales=inscales, outscales=outscales, stidx=stidx)
+             inscales=inscales, outscales=outscales)
 
         # Build the kernel
         kern = self._build_kernel('jacmul', src,
@@ -435,7 +435,6 @@ class CUDABlasExtKernels(CUDAKernelProvider):
     def getf3(self, *arr, kmeans=False):
         ixdtype = self.backend.ixdtype
         jac_fpdtype = arr[1].traits[-1]
-
 
         ldim = arr[0].ioshape[1]
         nrow = math.isqrt(ldim)
@@ -464,16 +463,13 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         # Build the kernel
         kern = self._build_kernel('getf3', src,
                                 [ixdtype]*2 + [np.uintp]*4
-                                + [ixdtype]*3)
+                                )
 
         # Set the parameters
         params = kern.make_params(grid, block)
         params.set_args(nrow, ldim, *arr)
 
         class GetF3Kernel(CUDAKernel):
-            def bind(self, *consts):
-                params.set_args(*consts, start=6)
-
             def run(self, stream):
                 kern.exec_async(stream, params)
 

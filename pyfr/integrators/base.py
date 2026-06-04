@@ -272,7 +272,7 @@ class BaseCommon:
 		
 		return kerns
 
-	def _addid(self, rs, stid, bsz, npt, vi, col, h, etype):
+	def _addid(self, rs, npt, vi, col, h, etype):
 
 		celes = self.system.celes
 		if (etype, col) not in celes.keys():
@@ -282,7 +282,7 @@ class BaseCommon:
 		addidx = self._get_addidx_kerns(eid, etype, *rs)
 
 		for k in addidx:
-			k.bind(npt, vi, col, stid, bsz, h)
+			k.bind(npt, vi, col, h)
 
 		self.backend.run_kernels(addidx)
 

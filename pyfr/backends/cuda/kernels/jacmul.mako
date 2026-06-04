@@ -40,7 +40,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
         uid = (tidy + ${i}) / ${ncola};
         vid = (tidy + ${i}) % ${ncola};
 
-        idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
+        idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
         if (tid < ncolb && tidy + ${i} < ${ndof})
             r1[idx] = 0.0;
     
@@ -55,7 +55,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                     uid = (tidy + ${j}) / ${ncola};
                     vid = (tidy + ${j}) % ${ncola};
 
-                    idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
+                    idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                     sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
                     sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
                 % endfor
@@ -65,7 +65,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                         uid = (tidy + ${j}) / ${ncola};
                         vid = (tidy + ${j}) % ${ncola};
 
-                        idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
+                        idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                         sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
                         sA[sidx] = ${'_in[vid]*' if inscales else ''}r0[idx];
 
@@ -73,7 +73,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                         uid = (tidy + ${j}) / ${ncola};
                         vid = (tidy + ${j}) % ${ncola};
 
-                        idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
+                        idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                         sidx = tidy*blockDim.x + threadIdx.x + (${j}-${i})*blockDim.x;
 
                         if (tidy + ${j} < ${ndof}){
@@ -102,7 +102,7 @@ jacmul(ixdtype_t nrow, ixdtype_t ncolb, ixdtype_t ldim,
                 uid = (tidy + j) / ${ncola};
                 vid = (tidy + j) % ${ncola};
 
-                idx = uid*ldim + SOA_IX(tid + ${stidx}, vid, ${ncola});
+                idx = uid*ldim + SOA_IX(tid, vid, ${ncola});
                 r1[idx] += ${'_out[vid]*' if inscales else ''}r1temp;
             }
         }

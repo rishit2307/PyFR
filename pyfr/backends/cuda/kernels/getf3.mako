@@ -7,19 +7,17 @@
 __global__ void
 getf3(ixdtype_t nrow, ixdtype_t ldim, 
       fpdtype_t *__restrict__ jac, fpdtype_t *__restrict__ jacinv,  
-      ixdtype_t *__restrict__ P, ixdtype_t *__restrict__ eid, 
-      ixdtype_t stidx, ixdtype_t neles, ixdtype_t bsize)
+      ixdtype_t *__restrict__ P, ixdtype_t *__restrict__ eid)
 
 
 
 {
-    ixdtype_t celes;
-    if (blockIdx.x < ${ecount}){
-        celes = eid[blockIdx.x];
-    }
 
     if (blockIdx.x < ${ecount}){
-        if (celes >= stidx && celes < min(stidx + bsize, neles)){
+
+    ixdtype_t celes;
+    celes = eid[blockIdx.x];
+
     ixdtype_t idx, idx1, idx0, idx2;
     const ixdtype_t nb = 32;
     const ixdtype_t nby = ${blksz}/nb;
@@ -52,7 +50,7 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
     for (ixdtype_t i=zero; i < nrow; i+=nby){
         for (ixdtype_t j=i+1; j < nrow; j+=nb){
             % if kmeans:
-                idx = (celes - stidx)*ldim + (tidrow + i)*nrow + (tidcol + j);
+                idx = (celes)*ldim + (tidrow + i)*nrow + (tidcol + j);
             % else:
                 upt = (tidcol + j) / ${ncola};
                 vpt = (tidcol + j) % ${ncola};
@@ -261,8 +259,8 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
         __syncthreads();
         for (ixdtype_t j=min(ix, i); j < nrow; j+=blockDim.x){
             % if kmeans:
-                idx = (celes - stidx)*ldim + (tid + j)*nrow + i;
-                idx1 = (celes - stidx)*ldim + (tid + j)*nrow + ix;
+                idx = (celes)*ldim + (tid + j)*nrow + i;
+                idx1 = (celes)*ldim + (tid + j)*nrow + ix;
 
             % else:
                 upt = i / ${ncola};
@@ -295,7 +293,7 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
                 ${pyfr.expand('gemm', 'sC', 'sD', 'sE')};
                 for (ixdtype_t l=zero; l < min(nb, i); l+=nby){
                     % if kmeans:
-                        idx = (celes - stidx)*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
+                        idx = (celes)*ldim + (tidrow + l + max(i-nb, zero))*nrow + tidcol + k;
                     % else:
                         upt = (tidcol + k) / ${ncola};
                         vpt = (tidcol + k) % ${ncola};
@@ -320,7 +318,7 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
 
             for (ixdtype_t k=zero; k < min(nb, i); k+=nby){
                 % if kmeans:
-                    idx = (celes - stidx)*ldim + (tidrow + k + max(i-nb, zero))*nrow + (tidcol + j);
+                    idx = (celes)*ldim + (tidrow + k + max(i-nb, zero))*nrow + (tidcol + j);
                 % else:
                     upt = (tidcol + j) / ${ncola};
                     vpt = (tidcol + j) % ${ncola};
@@ -331,7 +329,6 @@ getf3(ixdtype_t nrow, ixdtype_t ldim,
             }
             __syncthreads();
         }
-    }
     }
     }
 }

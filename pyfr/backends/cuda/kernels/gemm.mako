@@ -60,7 +60,7 @@ __syncthreads();
 
 <%pyfr:macro name='write_jacinv_kmeans' params='r, c, S, mat'>
 for (ixdtype_t k=zero; k < nb; k+=nby){
-    idx = (celes - stidx)*ldim + (tidrow + k + r)*nrow + (tidcol + c);
+    idx = (celes)*ldim + (tidrow + k + r)*nrow + (tidcol + c);
     if (tidcol + c < nrow && tidrow + k + r < nrow)
         mat[idx] = S[(tidrow + k)*nb + tidcol];
 }
@@ -89,7 +89,7 @@ __syncthreads();
 
 <%pyfr:macro name='read_jacinv_kmeans' params='r, c, S, mat'>
 for (ixdtype_t i=zero; i < nb; i+=nby){
-    idx = (celes - stidx)*ldim + (tidrow + i + r)*nrow + (tidcol + c);
+    idx = (celes)*ldim + (tidrow + i + r)*nrow + (tidcol + c);
    
 
     if (tidcol + c < nrow && tidrow + i + r < nrow)
