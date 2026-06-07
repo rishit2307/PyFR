@@ -1,7 +1,5 @@
 <%inherit file='base'/>
 <%namespace module='pyfr.backends.base.makoutil' name='pyfr'/>
-<%include file='pyfr.backends.cuda.kernels.compute'/>
-<%include file='pyfr.backends.cuda.kernels.sharedwrite'/>
 
 typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
 
@@ -17,201 +15,272 @@ typedef ${pyfr.npdtype_to_ctype(jac_fpdtype)} jac_fpdtype_t;
 
 __global__  __launch_bounds__(${blkx}) void
 jacmulclustv9(const fpdtype_t* __restrict__ r0, fpdtype_t *__restrict__ r1,
-        const jac_fpdtype_t *__restrict__ jac,
-        const ixdtype_t *__restrict__ elemap, 
-        const ixdtype_t *__restrict__ cluster_neles, 
-        const ixdtype_t *__restrict__ stidxb)
+            const jac_fpdtype_t *__restrict__ jac,
+            const ixdtype_t *__restrict__ elemap, 
+            const ixdtype_t *__restrict__ cluster_neles, 
+            const ixdtype_t *__restrict__ cluster_neles_pad,
+            const ixdtype_t *__restrict__ stidx,
+            const ixdtype_t *__restrict__ stidx_pad)
 
 {   
-    const ixdtype_t neles = cluster_neles[blockIdx.x];
-    if (blockIdx.z <= neles / ${bn}){
-        constexpr ixdtype_t nby = ${blkx}/${bk};
+    int blockz = blockIdx.z + ${compclust};
+    const ixdtype_t neles = cluster_neles[blockz];
 
-        ixdtype_t idx0, idx1;
-        ixdtype_t sidx;
-        ixdtype_t upt, vpt;
-        ixdtype_t upt2, vpt2;
-        ixdtype_t row, col;
+    ixdtype_t idx0, idx1;
+    int sidx;
 
-        % if inscales:
-            const fpdtype_t _in[] = ${pyfr.carray(inscales)};
-            const fpdtype_t _out[] = ${pyfr.carray(outscales)};
-        % endif
+    int rowA, colA;
+    int row, col, batch;
+    int upt, upt2, vpt, vpt2;
 
-        __shared__ jac_fpdtype_t sA[${(bm+2)*bk}];
-        __shared__ fpdtype_t sB[${(bn+2)*bk}];
+    __shared__ jac_fpdtype_t sA[${(bm+2)*bk}];
+    __shared__ fpdtype_t sB[${(K*(bn//K + 2))*bk}];
 
-        jac_fpdtype_t regM[${bm*K//blkx}] = {0.0};
-        fpdtype_t regN[${bn//K}] = {0.0};
-        ## fpdtype_t regMtmp[${bm*K//blkx}] = {0.0};
+    jac_fpdtype_t regM[${bm*K//blkx}] = {0.0};
+    fpdtype_t regN[${bn//K}] = {0.0};
 
-        jac_fpdtype_t regAtmp[${bm*bk//blkx}]= {0.0};
-        fpdtype_t regBtmp[${bn*bk//blkx}]= {0.0};
+    jac_fpdtype_t regAtmp[${bm*bk//blkx}]= {0.0};
+    fpdtype_t regBtmp[${bn*bk//blkx}]= {0.0};
 
-        // Accumulation register
-        fpdtype_t res[${bm*K//blkx * bn//K}] = {0.0};
+    // Accumulation register
+    fpdtype_t res[${bm*K//blkx * bn//K}] = {0.0};
 
-        ixdtype_t stidx = 0;
-        stidx = stidxb[blockIdx.x];
+    const ixdtype_t stix = stidx[blockz];
+    const ixdtype_t stix_pad = stidx_pad[blockz];
 
-        ixdtype_t tidrowA = threadIdx.x / ${bk};
-        ixdtype_t tidcolA = threadIdx.x % ${bk};
+    int curr=0;
+    int prev = 0;
 
-        ixdtype_t tidrow = threadIdx.x / ${K};
-        ixdtype_t tidcol = threadIdx.x % ${K};
+    ixdtype_t tidrowA = threadIdx.x / ${bk};
+    ixdtype_t tidcolA = threadIdx.x % ${bk};
 
-        ixdtype_t tidcolB = threadIdx.x % ${bn};
-        ixdtype_t tidrowB = threadIdx.x / ${bn};
+    ixdtype_t tidrow = threadIdx.x / ${K};
+    ixdtype_t tidcol = threadIdx.x % ${K};
 
-        ixdtype_t tidrowsubB = tidcolB / ${K};
-        ixdtype_t tidcolsubB = tidcolB % ${K};
+    rowA = (blockIdx.x*${bm} + tidrowA);
+    colA = tidcolA;
+    batch = blockz*${ldim};
 
-        for (ixdtype_t k=0; k < ${bm*bn//blkx}; k++){
-            res[k] = 0.0;
+    sidx = tidcolA*${bm+2} + tidrowA *${bm*K//blkx};
+    idx0 = batch + rowA*${ncol} + colA;
+
+    for (int l=0; l < ${bm}; l+= ${blkx//bk}){
+        idx1 = idx0 + l*${ncol};
+        if (rowA + l < ${ncol} && colA < ${ncol})
+            sA[sidx + (l % ${blkx//K}) * ${bm*K//blkx} + (l*${K})/${blkx}] = jac[idx1];
+    }
+
+    sidx = tidcol*${bn//K+2} + tidrow*${K*(bn//K + 2)};
+    for (int l=0; l <${bn}; l+=${K}){
+        for (int m=0; m < ${bk}; m+=${blkx//K}){
+            idx1 =  stix_pad + blockIdx.y*${bn} + tidcol + l + (tidrow + m)*${ncolb};
+            if (tidrow + m < ${ncol} && tidcol + l + blockIdx.y*${bn} < ${eleclust}){
+                sB[(tidcol)*${bn//K+2} + (tidrow+m)*${K*(bn//K+ 2)} + l / ${K}] = r0[idx1];
+            }
         }
+    }
 
-        % for l in range(0, bk, blkx//bn):
-            ## assert((tidrowB + ${l})*${bn + 2} + tidcolB < ${bn+2}*${bk} && "ERROR L74");
-            sB[(tidrowB + ${l})*${bn + 2} + tidcolB] = 0.0;
-        % endfor
-        __syncthreads();
+    __syncthreads();
 
-        idx0 = blockIdx.x*${ldim} + (blockIdx.y*${bm} + tidrowA)*${ncol} + tidcolA;
-        sidx = tidcolA*${bm+2} + tidrowA *${bm*K//blkx};
-        % for l in range(0,  bm, blkx//bk):
-            idx1 =idx0 + ${l*ncol};
-            if (blockIdx.y*${bm} + tidrowA + ${l} < ${ncol} && tidcolA < ${ncol}){
-                ## assert(idx1 < ${ldim}*gridDim.x && "ERROR L83");
-                ## assert(sidx+ ${l%(blkx//K)*(bm*K//blkx)} + ${l*K//blkx} < ${(bm+2)*bk} && "ERROR L84");
-                sA[sidx + ${(l%(blkx//K))*(bm*K//blkx)} + ${l*K//blkx}] = jac[idx1];
-            }
-        % endfor
-
-        idx0 = stidx + blockIdx.z*${bn} + tidcolB;
-        sidx = tidcolsubB*${bn//K} + tidrowsubB + tidrowB*${bn+2};
-        % for l in range(0, bk, blkx//bn):
-            
-            idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l})*${ncolb};
-            ## idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt , ${ncola});
-            if (tidcolB + blockIdx.z*${bn} < neles && tidrowB + ${l} < ${ncol}){
-                sB[${l*(bn+2)} + sidx] = ${'_in[vpt]*' if inscales else ''}r0[idx1];
-            }
-        % endfor
-        __syncthreads();
+    if (blockIdx.x < ${ncol // bm}){
 
         for (int k=${bk}; k < ${-(ncol % -bk) + ncol - bk}; k+=${bk}){
-            % for l in range(bn*bk//blkx):
-                regBtmp[${l}] = 0.0;
-            % endfor
 
-            if (blockIdx.y < ${ncol // bm}){
-                idx0 = blockIdx.x*${ldim} + (blockIdx.y*${bm} + tidrowA)*${ncol} + tidcolA + k;
-                % for l in range(0, bm, blkx//bk):
-                    idx1 = idx0 + ${l*ncol};
-                    ## assert(idx1 < ${ldim}*gridDim.x && "ERRIR L 108");
-                    ## assert(${l*bk//blkx} < 40 && "ERROR L109");
-                    regAtmp[${l*bk//blkx}] = jac[idx1];
-                % endfor
-            }
-            else{
-                idx0 = blockIdx.x*${ldim} + (blockIdx.y*${bm} + tidrowA)*${ncol} + tidcolA + k;
-                % for l in range(0, bm, blkx//bk):
-                    idx1 = idx0 + ${l*ncol};
-                    if (blockIdx.y*${bm} + tidrowA + ${l} < ${ncol}){
-                        ## assert(idx1 < ${ldim}*gridDim.x && "ERRIR L 116");
-                        ## assert(${l*bk//blkx} < 40 && "ERROR L117");
-                        regAtmp[${l*bk//blkx}] = jac[idx1];
-                    }
-                % endfor
-            }
-            if (blockIdx.z < neles / ${bn}){
-                % for l in range(0, bk, blkx//bn):
-                    ## upt = (tidrowB  + ${l} + k) / ${ncola};
-                    ## vpt = (tidrowB + ${l} + k) - upt*${ncola};
-                    ## idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
-                    idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l} + k)*${ncolb};
-                    ## assert(idx1 < ${ldim2}*320 && "Error L127");
-                    ## assert(${l*bn//blkx} < 1 && "ERROR L128");
-                    regBtmp[${l*bn//blkx}] = ${'_in[vpt]*' if inscales else ''}r0[idx1];
-                % endfor
-            }
-            else {
-                % for l in range(0, bk, blkx//bn):
-                    ## upt = (tidrowB  + ${l} + k) / ${ncola};
-                    ## vpt = (tidrowB + ${l} + k) - upt*${ncola};
-                    ## idx1 = upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
-                    idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l} + k)*${ncolb};
-                    if (tidcolB + blockIdx.z*${bn} < neles){
-                        ## assert(idx1 < ${ldim2}*320 && "Error L136");
-                        ## assert(${l*bn//blkx} < 1 && "ERROR L137");
-                        regBtmp[${l*bn//blkx}] = ${'_in[vpt]*' if inscales else ''}r0[idx1];
-                    }
-                % endfor
+            for (int l=0; l < ${bn*bk//blkx}; l++){
+                regBtmp[l] = 0.0;
             }
 
-            ${pyfr.expand('compute', '')}
+            idx0 = batch + rowA*${ncol} + colA + k;
+            for (int l=0; l < ${bm}; l+=${blkx//bk}){
+                idx1 = idx0 + l*${ncol};
+                regAtmp[(l*${bk})/ ${blkx}] = jac[idx1];
+            }
+
+            for (int l=0; l < ${bn}; l+=${K}){
+                for (int m=0; m < ${bk}; m+=${blkx//K}){
+                    idx1 = stix_pad + blockIdx.y*${bn} + tidcol + l + (tidrow + m + k)*${ncolb};
+                    regBtmp[(l/${K})*${bk*K//blkx} + (m*${K})/${blkx}] = r0[idx1];
+                }
+            }
+
+            for (int l=0; l < ${bk}; l++){
+                for (int m=0; m < ${bm*K//blkx}; m++){
+                    regM[m] = sA[l*${(bm+2)} + tidrow*${bm*K//blkx} + m];
+                }
+
+                for (int n=0; n < ${bn//K}; n++){
+                    regN[n] = sB[l*${K*(bn//K + 2)} + tidcol*${bn//K + 2} + n];
+                }
+
+                % for m in range(bm*bk//blkx):
+                    % for n in range(bn//K):
+                        res[${m*bn//K + n}] += fpdtype_t(cast(regM[${m}]))*regN[${n}];
+                    % endfor
+                % endfor
+            }
             __syncthreads();
+            curr ^=1;
 
-            ${pyfr.expand('sharedwrite','')}
+            sidx = tidcolA*${bm+2} + tidrowA*${bm*K//blkx};
+            for (int l=0; l < ${bm}; l+=${blkx//bk}){
+                sA[sidx + (l % ${blkx//K}) * ${bm*K//blkx} + (l*${K})/${blkx}] = regAtmp[(l*${bk})/${blkx}];
+            }
+            sidx = tidcol*${bn//K+2} + tidrow*${K*(bn//K + 2)};
+            for (int l=0; l < ${bn}; l+=${K}){
+                for (int m=0; m < ${bk}; m+=${blkx//K}){
+                    if (tidrow + m < ${ncol} && tidcol + l + blockIdx.y*${bn} < ${eleclust}){
+                        sB[(tidcol)*${bn//K+2} + (tidrow+m)*${K*(bn//K+ 2)} + l / ${K}] = regBtmp[(l/${K})*${bk*K//blkx} + (m*${K})/${blkx}];
+                    }
+                }
+            }
             __syncthreads();
+            prev ^=1;
+        }
+    }
+
+    else{
+
+        for (int k=${bk}; k < ${-(ncol % -bk) + ncol - bk}; k+=${bk}){
+            for (int l=0; l < ${bn*bk//blkx}; l++){
+                regBtmp[l] = 0.0;
+            }
+
+            idx0 = batch + rowA*${ncol} + colA + k;
+            for (int l=0; l < ${bm}; l+=${blkx//bk}){
+                idx1 = idx0 + l*${ncol};
+                if (rowA + l < ${ncol})
+                    regAtmp[(l*${bk})/ ${blkx}] = jac[idx1];
+            }
+
+            for (int l=0; l < ${bn}; l+=${K}){
+                for (int m=0; m < ${bk}; m+=${blkx//K}){
+                    idx1 = stix_pad + blockIdx.y*${bn} + tidcol + l + (tidrow + m + k)*${ncolb};
+                    if (tidcol + l + blockIdx.y*${bn} < ${eleclust})
+                        regBtmp[(l/${K})*${bk*K//blkx} + (m*${K})/${blkx}] = r0[idx1];
+                }
+            }
+
+
+            for (int l=0; l < ${bk}; l++){
+                for (int m=0; m < ${bm*K//blkx}; m++){
+                    regM[m] = sA[l*${(bm+2)} + tidrow*${bm*K//blkx} + m];
+                }
+
+                for (int n=0; n < ${bn//K}; n++){
+                    regN[n] = sB[l*${K*(bn//K + 2)} + tidcol*${bn//K + 2} + n];
+                }
+
+                % for m in range(bm*bk//blkx):
+                    % for n in range(bn//K):
+                        res[${m*bn//K + n}] += fpdtype_t(cast(regM[${m}]))*regN[${n}];
+                    % endfor
+                % endfor
+            }
+            __syncthreads();
+            curr ^=1;
+
+            sidx = tidcolA*${bm+2} + tidrowA*${bm*K//blkx};
+            for (int l=0; l < ${bm}; l+=${blkx//bk}){
+                sA[sidx + (l % ${blkx//K}) * ${bm*K//blkx} + (l*${K})/${blkx}] = regAtmp[(l*${bk})/${blkx}];
+            }
+            sidx = tidcol*${bn//K+2} + tidrow*${K*(bn//K + 2)};
+            for (int l=0; l < ${bn}; l+=${K}){
+                for (int m=0; m < ${bk}; m+=${blkx//K}){
+                    if (tidrow + m < ${ncol} && tidcol + l + blockIdx.y*${bn} < ${eleclust}){
+                        sB[(tidcol)*${bn//K+2} + (tidrow+m)*${K*(bn//K+ 2)} + l / ${K}] = regBtmp[(l/${K})*${bk*K//blkx} + (m*${K})/${blkx}];
+                    }
+                }
+            }
+            __syncthreads();
+            prev^=1;
         }
 
-        for (int k=${-(ncol % -bk) + ncol - bk}; k < ${ncol}; k+=${bk}){
-            % for l in range(0, bn*bk//blkx):
-                ## assert(${l} < 1 && "ERROR L 167");
-                regBtmp[${l}] = 0.0;
-            % endfor
+    }
 
-            idx0 = blockIdx.x*${ldim} + (blockIdx.y*${bm} + tidrowA)*${ncol} + tidcolA + k;
-            % for l in range(0, bm, blkx//bk):
-                idx1 = idx0 + ${l*ncol};
-                if (blockIdx.y*${bm} + tidrowA + ${l} < ${ncol} && tidcolA + k < ${ncol}){
-                    ## assert(${l*bk//blkx} < 40 && "ERROR L 157");
-                    ## assert(idx1 < ${ldim}*gridDim.x && "ERRIR L 158");
-                    regAtmp[${l*bk//blkx}] = jac[idx1];
-                }
-            % endfor
-
-            idx0 = stidx + blockIdx.z*${bn} + tidcolB;
-            % for l in range(0, bk, blkx//bn):
-                ## upt = (tidrowB  + ${l} + k) / ${ncola};
-                ## vpt = (tidrowB  + ${l} + k) % ${ncola};
-                ## idx1 =  upt*${ldim2} + SOA_IX(elemap[stidx + blockIdx.z*${bn} + tidcolB], vpt, ${ncola});
-                idx1 = stidx + blockIdx.z*${bn} + tidcolB + (tidrowB + ${l} + k)*${ncolb};
-                if (tidrowB + k + ${l}< ${ncol} && tidcolB + blockIdx.z*${bn}< neles){
-                    ## assert(${l*bn//blkx} < 1 && "ERROR L 167");
-                    ## assert(idx1 < ${ldim2}*320 && "Error L168");
-                    regBtmp[${l*bn//blkx}] = ${'_in[vpt]*' if inscales else ''}r0[idx1];
-                }
-            % endfor
-
-            ${pyfr.expand('compute','')}
-
-            __syncthreads();
-
-            ${pyfr.expand('sharedwrite','')}
-
-            __syncthreads();
-
+    for (int k=${-(ncol % -bk) + ncol - bk}; k < ${ncol}; k+=${bk}){
+        for (int l=0; l < ${bn*bk//blkx}; l++){
+            regBtmp[l] = 0.0;
         }
-        ${pyfr.expand('compute','')}
 
-        idx0 = stidx + blockIdx.z*${bn} + tidcol;
-        upt2 = (tidrow + blockIdx.y*${bm});
-        vpt2 = (tidrow + blockIdx.y*${bm});
+        // Async loads
+        idx0 = batch + rowA*${ncol} + colA + k;
+        for (int l=0; l < ${bm}; l+=${blkx//bk}){
+            idx1 = idx0 + l*${ncol};
+            if (rowA + l < ${ncol} && colA + k < ${ncol})
+                regAtmp[(l*${bk})/ ${blkx}] = jac[idx1];
+        }
 
-        % for l in range(0, bm, blkx//K):
-            upt = (upt2 + ${l}) / ${ncola};
-            vpt = upt2 + ${l} - upt*${ncola};
-            % for m in range(0, bn, K):
-                idx1 = upt*${ldim2} + SOA_IX(elemap[idx0 + ${m}], vpt, ${ncola});
+        for (int l=0; l < ${bn}; l+=${K}){
+            for (int m=0; m < ${bk}; m+=${blkx//K}){
+                idx1 =  stix_pad + blockIdx.y*${bn} + tidcol + l + (tidrow + m + k)*${ncolb};
+                if (tidcol + l + blockIdx.y*${bn} < ${eleclust} && tidrow + m + k < ${ncol})
+                    regBtmp[(l/${K})*${bk*K//blkx} + (m*${K})/${blkx}] = r0[idx1];
 
-                if (tidcol + ${m} + blockIdx.z*${bn} < neles && tidrow + ${l} + blockIdx.y*${bm} < ${ncol}){
-                    ## assert(idx1 < ${ldim2}*320 && "Error L193");
-                    ## assert(${l*bn//blkx + m//K} < 10 && "ERROR L 194");
-                    r1[idx1] = ${'_out[vpt]*' if inscales else ''}res[${l*bn//blkx + m//K}];
-                }
+            }
+        }
+
+        // Compute
+        for (int l=0; l < ${bk}; l++){
+            for (int m=0; m < ${bm*K//blkx}; m++){
+                regM[m] = sA[l*${(bm+2)} + tidrow*${bm*K//blkx} + m];
+            }
+
+            for (int n=0; n < ${bn//K}; n++){
+                regN[n] = sB[l*${K*(bn//K + 2)} + tidcol*${bn//K + 2} + n];
+            }
+
+            % for m in range(bm*bk//blkx):
+                % for n in range(bn//K):
+                    res[${m*bn//K + n}] += fpdtype_t(cast(regM[${m}]))*regN[${n}];
+                % endfor
             % endfor
-        % endfor
+        }
+        __syncthreads();
+        curr ^=1;
+
+        // Shared Write
+        sidx = tidcolA*${bm+2} + tidrowA*${bm*K//blkx};
+        for (int l=0; l < ${bm}; l+=${blkx//bk}){
+            sA[sidx + (l % ${blkx//K}) * ${bm*K//blkx} + (l*${K})/${blkx}] = regAtmp[(l*${bk})/${blkx}];
+        }
+        sidx = tidcol*${bn//K+2} + tidrow*${K*(bn//K + 2)};
+        for (int l=0; l < ${bn}; l+=${K}){
+            for (int m=0; m < ${bk}; m+=${blkx//K}){
+                if (tidrow + m < ${ncol} && tidcol + l + blockIdx.y*${bn} < ${eleclust}){
+                    sB[(tidcol)*${bn//K+2} + (tidrow+m)*${K*(bn//K+ 2)} + l / ${K}] = regBtmp[(l/${K})*${bk*K//blkx} + (m*${K})/${blkx}];
+                }
+            }
+        }
+        __syncthreads();
+        prev^=1;
+    }
+
+    for (int l=0; l < ${ncol - (-(ncol % -bk) + ncol - bk)}; l++){
+
+        for (int m=0; m < ${bm*K//blkx}; m++){
+            regM[m] = sA[l*${(bm+2)} + tidrow*${bm*K//blkx} + m];
+        }
+
+        for (int n=0; n < ${bn//K}; n++){
+            regN[n] = sB[l*${K*(bn//K + 2)} + tidcol*${bn//K + 2} + n];
+        }
+
+        for (int m=0; m < ${bm*K//blkx}; m++){
+            for (int n=0; n < ${bn//K}; n++){
+                res[(m*${bn//K}) + n] += fpdtype_t(cast(regM[m]))*regN[n];
+            }
+        }
+    }
+
+    idx0 = stix + tidcol + blockIdx.y*${bn};
+    for (int l=0; l < ${bm}; l+=${blkx//K}){
+        for (int m=0; m < ${bn}; m+=${K}){
+            upt = (tidrow + l + blockIdx.x*${bm}) / ${ncola};
+            vpt = (tidrow + l + blockIdx.x*${bm}) % ${ncola};
+            idx1 = upt*${ldim2} + SOA_IX(elemap[idx0 + m], vpt, ${ncola});
+            if (tidcol + m + blockIdx.y*${bn} < neles && tidrow + l + blockIdx.x*${bm} < ${ncol}){
+                r1[idx1] =  ${'_out[vpt]*' if inscales else ''}res[(l*${bn})/${blkx} + m/${K}];
+            }
+        }
     }
 }

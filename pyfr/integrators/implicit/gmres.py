@@ -4,6 +4,7 @@ from pyfr.integrators.base import BaseCommon
 from pyfr.integrators.implicit.jacobi import BlockJacobi
 from pyfr.mpiutil import get_comm_rank_root, mpi
 from pyfr.util import memoize
+from pyfr.backends.cuda.driver import CUDAIllegalAddress
 
 class GMRESSolver(BaseCommon):
 	def __init__(self, backend, system, cfg, register, dt):
@@ -64,7 +65,6 @@ class GMRESSolver(BaseCommon):
 		self._scales, self._invscales = (), ()
 
 		if check:
-
 			pvars = [getv(p) for p in privarmap[ndims]]
 			convars = np.array(pri_to_con(pvars, cfg))
 	
@@ -127,20 +127,15 @@ class GMRESSolver(BaseCommon):
 
 		jacs = self.jacobi_solver
 		rout = self.register._prec_regidx[self.iter]
-		rmv = self.register._aux_regidx
 
-		if self.clustering:
-			kerns = jacs.mul_jac_kmeans(rdu, rout,
-							   			rc=rmv,
-										inscales=self._scales,
-										outscales=self._invscales)
+		prec_kerns = (jacs.mul_jac_kmeans if self.clustering 
+		       		  else jacs.mul_jac)
 
-		else:
-			kerns = jacs.mul_jac(rdu, rout, 
-								 inscales=self._scales, 
-						         outscales=self._invscales)
+		kerns = prec_kerns(rdu, rout, inscales=self._scales,
+					       outscales=self._invscales)
 
 		self.backend.run_kernels(kerns)
+
 		return rout
 
 	def _arnoldi(self, rin):

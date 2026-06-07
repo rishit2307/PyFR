@@ -325,12 +325,14 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         return ReshuffClust(mats=arr)
 
-    def jacmul_clust(self, *arr, inscales, outscales):
+    def jacmul_clust(self, *arr, emap, clust_neles_pad,
+                     clust_neles, stidx, stidx_pad,
+                     inscales, outscales):
 
-        nclust = arr[2].traits[1]
         ncol = np.prod(arr[1].ioshape[:-1])
-        nrow, ncola, ncolb = arr[1].ioshape
+        nrow, ncola = arr[1].ioshape[:-1]
         nrow, ldim2 = arr[1].traits[1:3]
+        ncolb = arr[0].ioshape[-1]
 
         # ncol = math.isqrt(arr[2].ioshape[-1])
         # ncola=5
@@ -339,56 +341,58 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
         jac_fpdtype = arr[2].traits[-1]
 
-        # eleclust = neles // nclust
-        eleclust = np.amax(arr[-2].get())
+        celes = clust_neles_pad.get()
+        cdiff = np.diff(celes)
+        nnzix = np.flatnonzero(cdiff)+1
+        csplit = np.split(celes, nnzix, axis=-1)
 
         block = (128, 1, 1)
-        K = 16
-        bm, bn = 128, 64
+        K, bm = 16, 128
         bk = 16
-        # print(block, bm, bn)
 
-        # bnsz16 = eleclust // 16
-        # bnsz4 = eleclust // 4
-        # if bnsz4 == 0:
-        #     bn = 2
-        
-        # elif bnsz16 == 0:
-        #     bn = 16
-
-        # elif bnsz16 == 1:
-        #     bn = 32
-
-        # else:
-        #     bn = 64
-
-        grid = (nclust, -(-ncol //bm), -(-eleclust//bn))
-        # grid = (-(-ncol//bm), -(-eleclust//bn), nclust)
 
         tplargs = dict()
         tplargs['_macros'] = {}
 
+        kerns, params = [], []
+        compclust = 0
+        tpl = self.backend.lookup.get_template('jacmulclustv9')
 
-        src = self.backend.lookup.get_template('jacmulclustv9').render(
-        ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0], ncolb=ncolb,
-        bm=bm, bn=bn, bk=bk, ldim=ncol**2, jac_fpdtype=jac_fpdtype, K=K, 
-        inscales=inscales, outscales=outscales, eleclust=eleclust,**tplargs)
+        for i, group in enumerate(csplit):
+            val = group.flat[0]
+            bn = min(val, 64)
+            nclust = group.size
 
-        with open("jacmul.cu", 'w') as f:
-            print(src, file=f)
-        # Build the kernel
-        kern = self._build_kernel('jacmulclustv9', src, [np.uintp]*6)
+            grid = (-(-ncol // bm), -(-val //bn), nclust)
+            src = tpl.render(
+                ncol=ncol, ncola=ncola, ldim2=ldim2, blkx=block[0],
+                ncolb=ncolb, bm=bm, bn=bn, bk=bk, ldim=ncol**2, 
+                jac_fpdtype=jac_fpdtype, K=K, inscales=inscales, 
+                outscales=outscales, eleclust=val, compclust=compclust,
+                **tplargs
+            )
+            compclust += nclust
 
-        # Set the parameters 
-        params = kern.make_params(grid, block)
-        params.set_args(*arr)
+            with open(f"jacmul_{i}.cu", 'w') as f:
+                print(src, file=f)
+            # Build the kernel
+            kern = self._build_kernel('jacmulclustv9', src, [np.uintp]*8)
+            kerns.append(kern)
+
+
+            # Set the parameters 
+            param = kern.make_params(grid, block)
+            param.set_args(*arr, emap, clust_neles, 
+                           clust_neles_pad, stidx, stidx_pad)
+            params.append(param)
 
         class JacMulClustKernel(CUDAKernel):
             def bind(self, *consts):
                 pass
 
             def run(self, stream):
-                kern.exec_async(stream, params)
+                for k, p in zip(kerns, params):
+                    k.exec_async(stream, p)
 
         return JacMulClustKernel(mats=arr)
 
@@ -477,22 +481,22 @@ class CUDABlasExtKernels(CUDAKernelProvider):
 
     def shuffle(self, *arr):
         nrow, ncol, ldim, fpdtype = arr[0].traits[1:]
-        ncola = arr[0].ioshape[1]
-        ncolb = arr[-1].ioshape[-1]
+        nrow, nvars, ncolb = arr[0].ioshape
         ldimout = arr[1].ioshape[-1]
-
-        # Render the kernel template
-        src = self.backend.lookup.get_template('shuffle').render(
-            ncola=ncola, ncolb=ncolb, nrow=nrow, ldim=ldim, 
-            ldimout=ldimout)
-
-        # Build the kernel
-        kern = self._build_kernel('shuffle', src,
-                                  [np.uintp]*3)
 
         # Determine the grid/block
         block = (256, 1, 1)
-        grid = get_grid_for_block(block, ncolb, nrow*ncola)
+        grid = get_grid_for_block(block, ncolb, nrow*nvars)
+
+        # Render the kernel template
+        src = self.backend.lookup.get_template('shuffle').render(
+            ncola=nvars,
+            ldimout=ldimout, blkx=block[0], ldim=ldim, 
+            ncolb=ncolb)
+
+        # Build the kernel
+        kern = self._build_kernel('shuffle', src,
+                                  [np.uintp]*6)
 
         # Set the parameters
         params = kern.make_params(grid, block)
@@ -511,8 +515,6 @@ class CUDABlasExtKernels(CUDAKernelProvider):
         ixdtype = self.backend.ixdtype
         nsamp, nfeat = arr[0].ioshape
         nclust = arr[1].ioshape[0]
-
-
         
         # Determine the grid/block
         block = (512, 1, 1)
